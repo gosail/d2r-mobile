@@ -167,7 +167,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled=NO;
     if(@available(iOS 13.4,*)) for(UIPress *p in presses)
-        if(p.type==UIPressTypeKeyboard && p.key) {
+        if(p.key != nil) {
             unsigned usage=(unsigned)p.key.keyCode;
             if(dm_kbmap_action(usage)!=DM_KB_UNBOUND) {
                 dm_kbmap_key_event(usage,1);handled=YES;
@@ -179,7 +179,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled=NO;
     if(@available(iOS 13.4,*)) for(UIPress *p in presses)
-        if(p.type==UIPressTypeKeyboard && p.key) {
+        if(p.key != nil) {
             unsigned usage=(unsigned)p.key.keyCode;
             if(dm_kbmap_action(usage)!=DM_KB_UNBOUND) {dm_kbmap_key_event(usage,0);handled=YES;}
         }

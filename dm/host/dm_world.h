@@ -21,6 +21,7 @@ void dm_world_hover_move(float x, float y); // real pointer only, no button pres
 void dm_world_hover_end(void);
 int dm_world_hover_read(dm_world_hover_view *out); // safe from UIKit/AppKit thread
 uint32_t dm_world_hover_monster_id(void); // native target selector; 0 = none
+void dm_world_hover_native_name(uint32_t unit_id,const char *native_name); // actual game UI MonsterHealth title
 // Mouse-only world actions. Touch never calls either; game thread consumes them.
 unsigned dm_world_click(float nx, float ny);
 void dm_world_walk(float nx, float ny);

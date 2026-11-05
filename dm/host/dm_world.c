@@ -554,6 +554,8 @@ static _Atomic uint32_t g_native_hover_mon_id;
 uint32_t dm_world_hover_monster_id(void) { return atomic_load(&g_native_hover_mon_id); }
 static pthread_mutex_t g_hover_mu = PTHREAD_MUTEX_INITIALIZER;
 static dm_world_hover_view g_hover_view;
+static char g_native_hover_name[160];
+static uint32_t g_native_hover_name_id;
 void dm_world_hover_move(float x, float y) {
     if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) { dm_world_hover_end(); return; }
     uint64_t v = 1ull << 63 | (uint64_t)(uint32_t)(x * 65535 + .5f) << 16 | (uint32_t)(y * 65535 + .5f);
@@ -564,6 +566,27 @@ void dm_world_hover_end(void) {
     atomic_store(&g_native_hover_mon_id, 0);
     pthread_mutex_lock(&g_hover_mu);
     memset(&g_hover_view, 0, sizeof g_hover_view);
+    g_native_hover_name[0]=0;g_native_hover_name_id=0;
+    pthread_mutex_unlock(&g_hover_mu);
+}
+void dm_world_hover_native_name(uint32_t id,const char *name) {
+    if(!id || !name || !*name || atomic_load(&g_native_hover_mon_id)!=id)return;
+    char clean[160]={0};size_t n=0;
+    // Game names can contain the private colour marker (U+E07E plus a
+    // one-byte palette index). Strip only this known colour encoding.
+    for(const unsigned char *p=(const unsigned char *)name;*p && n+4<sizeof clean;) {
+        if(p[0]==0xee && p[1]==0x81 && p[2]==0xbe && p[3]){p+=4;continue;}
+        clean[n++]=(char)*p++;
+    }
+    clean[n]=0;size_t start=0;while(clean[start]==' ')start++;
+    while(n>start && clean[n-1]==' ')clean[--n]=0;
+    if(n<=start)return;
+    pthread_mutex_lock(&g_hover_mu);
+    if(atomic_load(&g_native_hover_mon_id)==id) {
+        g_native_hover_name_id=id;
+        snprintf(g_native_hover_name,sizeof g_native_hover_name,"%s",clean+start);
+        if(g_hover_view.kind==3)strlcpy(g_hover_view.title,g_native_hover_name,sizeof g_hover_view.title);
+    }
     pthread_mutex_unlock(&g_hover_mu);
 }
 int dm_world_hover_read(dm_world_hover_view *out) {
@@ -686,6 +709,9 @@ static void w_hover_step(uint8_t *b) {
         memset(&g_hover_view,0,sizeof g_hover_view);
         atomic_store(&g_native_hover_mon_id,0);
     } else {
+        if(view.kind==3 && native_mon_id && native_mon_id==g_native_hover_name_id &&
+           g_native_hover_name[0])
+            strlcpy(view.title,g_native_hover_name,sizeof view.title);
         g_hover_view=view;
         atomic_store(&g_native_hover_mon_id,native_mon_id);
     }

@@ -466,6 +466,17 @@ static int g_mac_keyboard_mode;
     }
 }
 @end
+// AppKit controls must receive their own pointer events. The normal mouse
+// input monitor consumes game clicks, so exempt the settings editor subviews.
+static BOOL mac_controls_hit(NSView *view,NSEvent *event) {
+    if(!g_mac_keyboard_tab || g_mac_keyboard_tab.hidden)return NO;
+    NSPoint p=[view convertPoint:event.locationInWindow fromView:nil];
+    NSView *hit=[view hitTest:p];
+    for(NSView *it=hit;it;it=it.superview)
+        if(it==g_mac_keyboard_tab || it==g_mac_pad_tab || it==g_mac_keyboard_panel)
+            return YES;
+    return NO;
+}
 static DmMacKeyboardEditor *g_mac_keyboard_editor;
 static void mac_controls_sync(void) {
     if(!g_live || !g_view)return;
@@ -572,6 +583,7 @@ void front_run(void (*guest)(void)) {
             NSEventMaskLeftMouseDown|NSEventMaskLeftMouseDragged|NSEventMaskLeftMouseUp|
             NSEventMaskMouseMoved|NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
             if(e.window!=win)return e;
+            if(mac_controls_hit(v,e))return e;
             if(e.type==NSEventTypeMouseMoved || e.type==NSEventTypeMouseExited) {
                 if(g_live) {
                     int hint=dm_mouse_pointer_hint();
@@ -589,6 +601,7 @@ void front_run(void (*guest)(void)) {
                 NSEventMaskRightMouseDown|NSEventMaskRightMouseDragged|NSEventMaskRightMouseUp
                 handler:^NSEvent *(NSEvent *e) {
                 if(e.window!=win)return e;
+                if(mac_controls_hit(v,e))return e;
                 int phase=e.type==NSEventTypeRightMouseDown?0:e.type==NSEventTypeRightMouseUp?2:1;
                 mac_mouse_physical(v,e,1,phase);return nil;
             }];
@@ -596,6 +609,7 @@ void front_run(void (*guest)(void)) {
                 NSEventMaskOtherMouseDown|NSEventMaskOtherMouseDragged|NSEventMaskOtherMouseUp
                 handler:^NSEvent *(NSEvent *e) {
                 if(e.window!=win||e.buttonNumber!=2)return e;
+                if(mac_controls_hit(v,e))return e;
                 int phase=e.type==NSEventTypeOtherMouseDown?0:e.type==NSEventTypeOtherMouseUp?2:1;
                 mac_mouse_physical(v,e,2,phase);return nil;
             }];

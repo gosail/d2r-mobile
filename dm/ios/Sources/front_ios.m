@@ -281,7 +281,7 @@ static NSString *kbActionLabel(int action) {
         UIButton *row=[UIButton buttonWithType:UIButtonTypeSystem];
         row.frame=CGRectMake(8,y+3,w-16,rowHeight-6);
         row.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
-        row.contentEdgeInsets=UIEdgeInsetsMake(0,12,0,8,0);
+        row.contentEdgeInsets=UIEdgeInsetsMake(0,12,0,8);
         row.backgroundColor=[UIColor colorWithWhite:.20 alpha:.94];
         row.layer.cornerRadius=6; row.titleLabel.font=[UIFont systemFontOfSize:15];
         NSString *title;

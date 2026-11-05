@@ -292,8 +292,14 @@ void front_run(void (*guest)(void)) {
                 // Match iPad/Android: a right click in a free-cursor item
                 // panel goes through the game's native use-item command.
                 // No synthetic touch or fabricated cursor item is created.
-                if (dm_ui_free_cursor()) {
-                    if (e.type == NSEventTypeRightMouseDown) {
+                static BOOL rightItemDown=NO;
+                if (e.type == NSEventTypeRightMouseUp && rightItemDown) {
+                    rightItemDown=NO;
+                    return nil;
+                }
+                if (e.type == NSEventTypeRightMouseDown && dm_ui_free_cursor()) {
+                    rightItemDown=YES;
+                    {
                         NSPoint p=[v convertPoint:e.locationInWindow fromView:nil];
                         NSRect gr=game_rect();
                         double fy=0,fh=1;

@@ -1139,25 +1139,43 @@ def build_present(romfs, outdir):
 # ---------- 选项页：视频页签整页去掉（iPhone 自己能调亮度），其余页签里与触摸产品无关的项藏掉 ----------
 # ---------- Options pages: the whole video tab page is removed (the iPhone can adjust brightness itself), and items in the other tabs unrelated to the touch product are hidden ----------
 def _settings_tabs(text):
-    """页签条去掉第一个（视频）：个数与四个并列数组各去首项；第四项「控制」换成「自定义」。 | Remove the first item (video) from the tab strip: drop the first entry from the count and from each of the four parallel arrays; the fourth item 「控制」(Controls) is replaced with 「自定义」(Custom)."""
+    """Keep Controls between Game Settings and Custom on the shared options bar.
+
+    The original console Controls action (KeyBindingMenu) is preserved so the
+    game's own controller binding data remains authoritative. Custom still
+    opens our borrowed VideoOptionsPanel; no PC .key/.ctl bytes are rewritten.
+    The original 5-tab width is reused: remove Video, append Custom.
+    """
     n = 0
-    def drop_first(m):
-        nonlocal n; items = [x for x in re.split(r',\s*', m.group(2).strip().rstrip(',')) if x.strip()]; n += 1
-        return m.group(1) + ' ' + ', '.join(items[1:]) + ' ' + m.group(3)
-    new = re.sub(r'("(?:inactiveFrames|activeFrames|textStrings)"\s*:\s*\[)([^\]]*)(\])', drop_first, text)
-    new = re.sub(r'("tabMessages"\s*:\s*\[)([^\]]*)(\])', lambda m: m.group(1) + '\n' + ',\n'.join(x for x in [y.strip() for y in m.group(2).split(',')] if x and 'VideoOptionsPanel' not in x) + ',\n' + m.group(3), new)
-    new, k = re.subn(r'"tabCount"\s*:\s*5', '"tabCount": 4', new)
-    # 第四项原是「控制」（KeyBindingMenu，本平台不出现）：改成「自定义」，打开借来的视频页（见 _custom_page）
-    # The fourth item was originally 「控制」(Controls) (KeyBindingMenu, which does not appear on this platform): changed to 「自定义」(Custom), opening the borrowed video page (see _custom_page)
-    if new.count('"@Controls"') != 1 or new.count('SettingsPanelMessage:CheckChanges:KeyBindingMenu') != 1: raise SystemExit('touch_layout：页签条第四项不是原样「控制」，自定义页签没换')
-    # 第三项「游戏设定」：原版英文串 Game Settings 在 266 宽的页签里折成两行、第二行被截成「Se…」（英文版审计）；触屏页签条换成我们表里的串（中文不变、英文 Settings）。手柄版页签条是原版，不动
-    # Third item 「游戏设定」(Settings): the original English string Game Settings wraps to two lines in the 266-wide tab and the second line is truncated to "Se..." (English version audit); the touch tab bar uses the string from our table instead (Chinese unchanged, English Settings). The controller layout tab bar is the original and is left alone
-    if new.count('"@GameSettingsTab"') != 1: raise SystemExit('touch_layout：页签条第三项不是原样「游戏设定」（原版布局变了？）')
+    def replace_list(m):
+        nonlocal n
+        name = re.search(r'"(inactiveFrames|activeFrames|textStrings)"', m.group(1)).group(1)
+        items = [item.strip() for item in m.group(2).strip().rstrip(',').split(',') if item.strip()]
+        if len(items) != 5:
+            raise SystemExit('touch_layout: options %s expected 5 tabs, got %d' % (name, len(items)))
+        extra = {'inactiveFrames':'0', 'activeFrames':'1', 'textStrings':'"@dmTabCustom"'}[name]
+        n += 1
+        return m.group(1) + ' ' + ', '.join(items[1:] + [extra]) + ' ' + m.group(3)
+    new = re.sub(r'("(?:inactiveFrames|activeFrames|textStrings)"\s*:\s*\[)([^\]]*)(\])', replace_list, text)
+    def replace_actions(m):
+        nonlocal n
+        items = [item.strip() for item in m.group(2).strip().rstrip(',').split(',') if item.strip()]
+        if len(items) != 5 or sum('VideoOptionsPanel' in item for item in items) != 1:
+            raise SystemExit('touch_layout: original controls actions not recognised')
+        items = [item for item in items if 'VideoOptionsPanel' not in item]
+        items.append('"SettingsPanelMessage:CheckChanges:VideoOptionsPanel"')
+        n += 1
+        return m.group(1) + '\n' + ',\n'.join(items) + '\n' + m.group(3)
+    new = re.sub(r'("tabMessages"\s*:\s*\[)([^\]]*)(\])', replace_actions, new)
+    if new.count('"tabCount": 5') + new.count('"tabCount":5') != 1:
+        raise SystemExit('touch_layout: expected original 5-tab settings panel')
+    if new.count('"@Controls"') != 1 or new.count('SettingsPanelMessage:CheckChanges:KeyBindingMenu') != 1:
+        raise SystemExit('touch_layout: original Controls tab lost')
+    if new.count('"@dmTabCustom"') != 1 or new.count('SettingsPanelMessage:CheckChanges:VideoOptionsPanel') != 1:
+        raise SystemExit('touch_layout: custom tab wiring wrong')
+    if new.count('"@GameSettingsTab"') != 1: raise SystemExit('touch_layout: Game Settings label changed')
     new = new.replace('"@GameSettingsTab"', '"@dmTabGameSettings"')
-    # 第四项「自定义」同理：原版串 KeyBindingTypeCustom 的西语「Personalizar」在页签里被截成「Persona…」（西语截图），页签用我们表里的短词（页面大标题仍用原版串）
-    # The fourth item "Custom" likewise: the original string KeyBindingTypeCustom in Spanish "Personalizar" is truncated to "Persona…" in the tab (Spanish screenshot), so the tab uses the short word from our table (the page heading still uses the original string)
-    new = new.replace('"@Controls"', '"@dmTabCustom"').replace('SettingsPanelMessage:CheckChanges:KeyBindingMenu', 'SettingsPanelMessage:CheckChanges:VideoOptionsPanel')
-    return new, n + k + 1
+    return new, n + 1
 def _drop_rows(*rows):
     """把选项表里的整行（TableRowWidget "Row <名>"）删掉：表格按剩下的行重排，不留空行。每个名字必须恰好删到一行。 | Delete whole rows (TableRowWidget "Row <name>") from the options table: the table re-lays out the remaining rows and leaves no empty row. Each name must delete exactly one row."""
     def fn(text):

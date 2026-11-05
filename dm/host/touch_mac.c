@@ -5,6 +5,7 @@
 #include "dm_hud.h"
 #include "../ios/Sources/dm_touch_controls.h"
 #include "dm_uiscreen.h"
+#include "dm_world.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,12 +65,16 @@ static struct { int owned, down, repeat; uint32_t last; float x, y; unsigned tap
 void dm_touch_host_live(int op, float nx, float ny) {   // 前端线程：op 0 按下 1 拖动 2 抬起 3 悬停；坐标 = 界面归一化，悬停可在画面外 | Front-end thread: op 0 down, 1 drag, 2 up, 3 hover; coordinates = UI-normalized, hover may be outside the picture
     if (!g_live_on) return;
     if (op == 3) {
+        if (dm_touch_host_world_active() && nx >= 0 && nx <= 1 && ui_y_to_screen(ny) >= 0 && ui_y_to_screen(ny) <= 1)
+            dm_world_hover_move(nx, ui_y_to_screen(ny));
+        else dm_world_hover_end();
         uint64_t p = 1ull << 63;
         if (nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) p |= (uint64_t)(uint32_t)(nx * 65535 + .5f) << 16 | (uint32_t)(ny * 65535 + .5f);
         else p |= 1ull << 62;
         atomic_store(&g_live_hover, p); return;
     }
     atomic_store(&g_live_hover, 0);
+    dm_world_hover_end(); // Mouse press / drag / release cancels stale hover.
     if (!g_live_on) return; unsigned t = atomic_load(&g_live.tail); if (t - atomic_load(&g_live.head) >= 64) return;
     g_live.q[t % 64].op = op; g_live.q[t % 64].nx = nx; g_live.q[t % 64].ny = ny; atomic_store(&g_live.tail, t + 1);
 }

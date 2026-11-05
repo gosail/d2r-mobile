@@ -12,6 +12,7 @@
 #include "dm.h"
 #include "dm_input.h"
 #include "dm_uiscreen.h"
+#include "dm_world.h"
 #include "touch_mac.h"
 #import "../ios/Sources/dm_rift_hud.h"
 void mtl_set_ui_rect_fn(void (*fn)(double *y, double *h));
@@ -219,6 +220,46 @@ void front_run(void (*guest)(void)) {
         [NSRunLoop.mainRunLoop addTimer:riftHUDTimer forMode:NSRunLoopCommonModes];
         [win center];
         g_live = getenv("DM_APP") || getenv("DM_TOUCH_LIVE"); if (g_live) dm_touch_host_live_enable();
+
+        // World hover on macOS shares the hit-test/presentation model with iPad.
+        CATextLayer *hoverName=[CATextLayer layer];
+        hoverName.alignmentMode=kCAAlignmentCenter; hoverName.fontSize=18;
+        hoverName.contentsScale=win.backingScaleFactor;
+        hoverName.foregroundColor=[NSColor colorWithRed:.84 green:.77 blue:.58 alpha:1].CGColor;
+        hoverName.backgroundColor=[NSColor colorWithWhite:0 alpha:.75].CGColor;
+        hoverName.borderColor=[NSColor colorWithRed:.65 green:.54 blue:.33 alpha:.85].CGColor;
+        hoverName.borderWidth=1; hoverName.cornerRadius=4;
+        [v.layer addSublayer:hoverName];
+        CALayer *hoverLoot=[CALayer layer]; hoverLoot.borderWidth=2; hoverLoot.cornerRadius=3;
+        hoverLoot.borderColor=[NSColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
+        [v.layer addSublayer:hoverLoot];
+        NSTimer *hoverTimer=[NSTimer timerWithTimeInterval:1.0/30 repeats:YES block:^(NSTimer *tm) {
+            (void)tm;
+            dm_world_hover_view h={0}; int show=g_live && NSApp.isActive && win.isKeyWindow && dm_touch_host_world_active() && dm_world_hover_read(&h);
+            [CATransaction begin]; [CATransaction setDisableActions:YES];
+            hoverName.hidden=!show || h.kind!=1;
+            hoverLoot.hidden=!show || h.kind!=2;
+            if (show) {
+                NSRect gr=game_rect();
+                if (h.kind==1) {
+                    NSString *s=[NSString stringWithUTF8String:h.title];
+                    if (!s.length) hoverName.hidden=YES;
+                    else {
+                        CGFloat width=fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:18]}].width+22));
+                        CGFloat x=gr.origin.x+h.x*gr.size.width-width/2;
+                        CGFloat y=gr.origin.y+(1-h.y)*gr.size.height+3;
+                        hoverName.string=s;
+                        hoverName.frame=CGRectMake(fmax(0,fmin(v.bounds.size.width-width,x)),y,width,28);
+                    }
+                } else if (h.kind==2) {
+                    hoverLoot.frame=CGRectMake(gr.origin.x+h.x*gr.size.width-3,
+                        gr.origin.y+(1-h.y-h.h)*gr.size.height-2,h.w*gr.size.width+6,h.h*gr.size.height+4);
+                }
+            }
+            [CATransaction commit];
+        }];
+        [NSRunLoop.mainRunLoop addTimer:hoverTimer forMode:NSRunLoopCommonModes];
+
         if (g_live) {
             win.acceptsMouseMovedEvents = YES;
             [v addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:v userInfo:nil]];

@@ -9,6 +9,7 @@
 #include "touch_mac.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
+#include "dm_external_mouse.h"
 #include "hle.h"
 #include "dm.h"
 #include <string.h>
@@ -16,6 +17,39 @@
 #include <stdatomic.h>
 #include <math.h>
 #include <time.h>
+#include <pthread.h>
+#include <stdio.h>
+#include "dm_i18n.h"
+// Player-derived localization keys must never be compiled into the Android APK.
+#if defined(__ANDROID__)
+static const char *dm_hover_name_key(uint32_t cls) {
+    enum { MAX_CLASSES = 4096, KEY_CAP = 129 };
+    static char keys[MAX_CLASSES][KEY_CAP];
+    static int loaded;
+    if (!loaded) {
+        loaded=1; const char *path=getenv("DM_HOVER_NAMES");
+        FILE *f=path ? fopen(path,"r") : NULL;
+        if (f) {
+            char line[256];
+            while (fgets(line,sizeof line,f)) {
+                unsigned n; char key[KEY_CAP]={0};
+                if (sscanf(line,"%u\t%128[^\r\n]",&n,key)==2 && n<MAX_CLASSES)
+                    strlcpy(keys[n],key,KEY_CAP);
+            }
+            fclose(f);
+        }
+    }
+    return cls<MAX_CLASSES && keys[cls][0] ? keys[cls] : NULL;
+}
+#elif defined(__APPLE__)
+#include "dm_hover_names.h" // generated from the player's own monstats.txt
+static const char *dm_hover_name_key(uint32_t cls) {
+    return cls<sizeof dm_hover_mon_names/sizeof dm_hover_mon_names[0] ? dm_hover_mon_names[cls] : NULL;
+}
+#else
+// Non-Apple ports without the player-derived name table keep their existing UI.
+static const char *dm_hover_name_key(uint32_t cls) { (void)cls; return NULL; }
+#endif
 #include "dm_unit.h"
 #include "dm_hud.h"
 #include "dm_prof.h"
@@ -79,7 +113,7 @@ static int w_interact(uint64_t u) {   // 就近交互：游戏的点击入口（
                    // A waypoint (large footprint) appears at offset (3,4); an NPC at 4 cells comes and goes (he is walking, and it is gone again after the player stops). Stopped at 4 cells, tapping the target can interact (we call the click entry with the target), but after closing the dialog pressing the primary button does nothing
                    // (Akara 4 cells 0/5, 2 cells 5/5). So always walk to within 2 cells before interacting; when 2 cells cannot be reached (the target itself occupies the cell, or it is blocked) and the player is already within W_FAR cells, interact in place
 #define W_FAR 4
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
 #define W_GROUND 99   // g_go.type 的特殊值：目标不是单位，是地面上的一格（Mac 鼠标点空地走过去；只有 macOS 宿主有） | special value of g_go.type: the target is not a unit but a tile on the ground (Mac mouse click-to-walk; macOS host only)
 #define W_NEAREST_OK(t) ((t) == 2 || (t) == W_GROUND)
 static int g_hit_mon;   // 这一次命中把敌对怪也算进来（Mac 鼠标点怪 = 攻击；触屏不算，攻击归技能键） | this hit test also counts hostile monsters (Mac mouse click on a monster = attack; touch does not, attacking belongs to the skill buttons)
@@ -248,7 +282,8 @@ static int w_arrive(uint64_t pl, uint64_t u, int px, int py, int ox, int oy, con
         if (act != u) LOG("世界目标：出口砖 id %u 旁有把守它的物件 cls %u id %u（%d,%d，游戏自己选中的）→ 交互它", g_go.id, *(uint32_t *)(act + 4), *(uint32_t *)(act + 8), nx, ny); }
     g_go.on = 0; int r = w_interact(act); LOG("世界目标：类型 %u id %u %s（玩家 %d,%d 目标 %d,%d%s）→ 交互 %d", g_go.type, g_go.id, how, px, py, ox, oy, ok ? "" : "，四侧都进不了同一房间", r); return 1;
 }
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
+// ---- Physical mouse: click empty ground to move (never finger taps) ----
 // ---- Mac 鼠标：点空地走过去 ----
 // 触屏上「除摇杆外触点不触发点地移动」（见文件头）不变；这一段只给 Mac App 的鼠标用：键鼠玩家没有摇杆，点空地 = 走到那一点，按住 = 一直朝光标走（touch_mac.c 每隔几拍重发一次）。
 // 屏幕点 → 地面格：以玩家脚底的屏幕位置（游戏自己的投影）为原点，按等距投影反算——每「经典像素」合屏幕 k = 画面高 × 0.00206 像素（同上面物件占地菱形用的那个数），
@@ -264,6 +299,10 @@ static int w_arrive(uint64_t pl, uint64_t u, int px, int py, int ox, int oy, con
 static _Atomic uint64_t g_walk;
 void dm_world_walk(float nx, float ny) { if (nx < 0) nx = 0; if (nx > 1) nx = 1; if (ny < 0) ny = 0; if (ny > 1) ny = 1; atomic_store(&g_walk, 1ull << 32 | (uint64_t)(uint32_t)(nx * 65535) << 16 | (uint32_t)(ny * 65535)); }   // 任意线程：排一笔，主线程取手柄处执行；后一笔覆盖前一笔 | any thread: queue one request, executed where the main thread reads the gamepad; a later request overwrites an earlier one
 int dm_world_walking(void) { return g_go.on && g_go.type == W_GROUND; }
+void dm_world_mouse_stop(void) { // guest input thread only
+    atomic_store(&g_walk,0);
+    if (g_go.on && g_go.type == W_GROUND) g_go.on=0;
+}
 static void w_ground_end(const char *how, int px, int py) { g_go.on = 0; static int lg; if (lg++ < 400) LOG("点地面走：%s（玩家 %d,%d 目标 %d,%d）", how, px, py, g_gnd_x, g_gnd_y); }
 static void w_ground_step(uint8_t *b, uint64_t pl) {
     uint64_t dm_stick_last_ns(void); uint32_t dm_cur_tick(void); int px = 0, py = 0;
@@ -290,7 +329,7 @@ static void w_ground_step(uint8_t *b, uint64_t pl) {
 #endif
 static void w_go_step(void) {
     if (!g_go.on) return; uint64_t dm_stick_last_ns(void); uint8_t *b = wb(); uint64_t pl = w_player(), u = pl ? w_find(g_go.type, g_go.id) : 0; int px, py, x, y;
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     if (g_go.type == W_GROUND) { w_ground_step(b, pl); return; }
 #endif
     const char *why = !u ? "目标没了" : w_now_ns() > g_go.until_ns ? "15 秒没到" : dm_stick_last_ns() != g_go.stick ? "摇杆动了" : !w_unit_xy(pl, &px, &py) || !w_unit_xy(u, &x, &y) ? "读不到坐标" : (g_go.type == 4 && *(uint32_t *)(u + 0xc) != 3) ? "物品已不在地上" : NULL;
@@ -375,7 +414,7 @@ static int w_sprite_box(uint8_t *b, uint64_t u, int out[4]) {
         out[0] = *(int32_t *)(r + 8); out[1] = *(int32_t *)(r + 0xc); out[2] = *(int32_t *)(r + 0x10); out[3] = *(int32_t *)(r + 0x14); return out[1] > out[0] && out[3] > out[2] && out[1] - out[0] < 2000 && out[3] - out[2] < 2000; }
     return 0;
 }
-static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, int *by_label) {
+static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, int *by_label, int hover_only) {
     uint64_t pl = w_player(), scene = *(uint64_t *)(b + 0x2e2a698), best = 0; float bd = 1e9f, d; int brank = 2; *by_label = 0; if (!pl || !scene) return 0;
     int RWi = 0, RHi = 0; dm_screen_real(&RWi, &RHi); float RW = RWi > 0 ? RWi : 1, RH = RHi > 0 ? RHi : 1; int cam = w_cam_convert();   // 镜头实验开着：逐个候选换触点（见下） | camera experiment on: convert the touch point per candidate (see below)
     int persp = !cam && dm_cam_on();
@@ -386,12 +425,13 @@ static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, in
     for (uint64_t k = 0; rec && k < n && k < 512; k++) { int32_t *r = (int32_t *)(rec + k * 0x148); if (r[2] <= 0 || r[3] <= 0 || r[4] == -1) continue;
         if (dump) LOG("世界目标：标签 物品 id %d 矩形 (%d,%d %dx%d)", r[4], r[0], r[1], r[2], r[3]);
         if (w_in_rect(sx, sy, r[0] + r[2] / 2.0f, r[1] + dm_ui_proj_dy() + r[3] / 2.0f, (float)r[2], (float)r[3], min, &d) && d < bd) { uint64_t u = w_find(4, (uint32_t)r[4]); if (u && *(uint32_t *)(u + 0xc) == 3) { bd = d; best = u; brank = 0; *by_label = 1; } } }
-    for (int t = 0; t <= 5; t++) { if (t == 3) continue;   // 0 = 玩家类：只认尸体（见下） | 0 = player type: only corpses count (see below)
+    for (int t = 0; t <= 5; t++) { if (t == 3 || (hover_only && t != 1)) continue;   // Hover never selects objects, doors or corpses. Existing tap behaviour is unchanged.
         for (int k = 0; k < 128; k++) for (uint64_t u = *(uint64_t *)(b + 0x2d603a0 + t * 0x400 + k * 8); u; u = *(uint64_t *)(u + 0x158)) {
             if (t == 4 && *(uint32_t *)(u + 0xc) != 3) continue;   // 物品只认在地上的 | items only count when on the ground
             if (!(((int (*)(uint64_t, int, int, int, int))(b + 0x464a70))(u, 0, 0, -1, -1) & 1)) continue;
             if (t == 0 && u == pl) continue;
             int cat = ((int (*)(int, uint64_t, uint64_t))(b + 0x2f7b7c))(0x165, pl, u); if (t == 0 ? cat != 9 : t == 1 ? (cat != 5 && !W_MON_OK(cat)) : t == 2 ? cat != 2 : 0) continue;   // 类别 9 = 死亡状态的玩家单位（0x2f7c28–0x2f7c34：main+0x4667a0 对玩家类判模式 0x11）= 尸体，点它 = 取回装备（游戏点击入口对玩家类发 0x13） | category 9 = a player unit in the dead state (0x2f7c28–0x2f7c34: main+0x4667a0 checks mode 0x11 for the player type) = corpse, tapping it = retrieve equipment (the game's click entry sends 0x13 for the player type)
+            if (hover_only && *by_label) continue; // Exact item-label hits outrank NPC body overlap.
             float f[2], h[2]; if (!w_project(b, scene, u, f, 0)) continue;
             if (t == 4 || !w_project(b, scene, u, h, 1)) { h[0] = f[0]; h[1] = f[1]; }
             // 越肩镜头、框已在透视画面上（persp）：紧贴镜头近平面的单位，投影会炸成远大于画面的框，点哪都中它（实测沃里夫站在镜头旁：框 12937 × 29403、
@@ -435,6 +475,90 @@ static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, in
             if (in && (rank < brank || (rank == brank && d < bd))) { bd = d; best = u; brank = rank; *by_label = 0; } } }
     *dist = best ? bd : 0; return best;
 }
+
+// Mouse hover is intentionally separate from world taps. A hover must never call
+// w_go(), w_interact(), or synthesize a controller button. The game itself owns
+// the quality-coloured names of dropped items; highlight their existing label.
+static _Atomic uint64_t g_hover_request;
+static pthread_mutex_t g_hover_mu = PTHREAD_MUTEX_INITIALIZER;
+static dm_world_hover_view g_hover_view;
+void dm_world_hover_move(float x, float y) {
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) { dm_world_hover_end(); return; }
+    uint64_t v = 1ull << 63 | (uint64_t)(uint32_t)(x * 65535 + .5f) << 16 | (uint32_t)(y * 65535 + .5f);
+    atomic_store(&g_hover_request, v);
+}
+void dm_world_hover_end(void) {
+    atomic_store(&g_hover_request, 0);
+    pthread_mutex_lock(&g_hover_mu);
+    memset(&g_hover_view, 0, sizeof g_hover_view);
+    pthread_mutex_unlock(&g_hover_mu);
+}
+int dm_world_hover_read(dm_world_hover_view *out) {
+    if (!out) return 0;
+    pthread_mutex_lock(&g_hover_mu);
+    *out = g_hover_view;
+    pthread_mutex_unlock(&g_hover_mu);
+    return out->kind != 0;
+}
+static void w_hover_step(uint8_t *b) {
+    static uint64_t last_req, last_frame;
+    uint64_t req = atomic_load(&g_hover_request), frame = dm_guest_frame();
+    int dm_game_paused(void);
+    if (req == last_req && frame >= last_frame && frame - last_frame < 2) return;
+    last_req = req; last_frame = frame;
+    dm_world_hover_view view = {0};
+    if ((req >> 63) && dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused()) {
+        int W=0,H=0; dm_screen_real(&W,&H);
+        if (W > 0 && H > 0) {
+            float x = ((req >> 16) & 0xffff) / 65535.f * W;
+            float y = (req & 0xffff) / 65535.f * H;
+            float distance = 0; int label = 0;
+            // Unlike finger taps, a real mouse gets no fat-finger enlargement.
+            uint64_t unit = w_hit(b,x,y,1.f,&distance,&label,1);
+            if (unit && *(uint32_t *)unit == 1) {
+                uint32_t cls=*(uint32_t *)(unit+4);
+                uint64_t player=w_player();
+                int cat = player ? ((int (*)(int,uint64_t,uint64_t))(b+0x2f7b7c))(0x165,player,unit) : 0;
+if (cat == 5) {
+                    const char *key=dm_hover_name_key(cls);
+                    if (key && *key) {
+                        struct { const char *k; uint64_t n; } arg={key,strlen(key)};
+                        const char *name=dm_untag(((const char *(*)(void *))(b+0x7f5630))(&arg));
+                        if (name && *name) {
+                            float p[2]; uint64_t scene=*(uint64_t *)(b+0x2e2a698);
+                            if (scene && w_project(b,scene,unit,p,1)) {
+                                view.kind=1; view.x=fmaxf(0,fminf(1,p[0]/W));
+                                view.y=fmaxf(0,fminf(1,p[1]/H));
+                                strlcpy(view.title,name,sizeof view.title);
+                            }
+                        }
+                    }
+                }
+            } else if (unit && *(uint32_t *)unit == 4 && label) {
+                // Highlight only a visible, original ground item label. This
+                // preserves rare/set/unique names, colours, and loot filtering.
+                uint32_t id=*(uint32_t *)(unit+8);
+                uint64_t tab=(uint64_t)(uintptr_t)(b+0x2f0fee0);
+                uint64_t rec=*(uint64_t *)tab, count=*(uint64_t *)(tab+8);
+                for (uint64_t k=0; rec && k<count && k<512; ++k) {
+                    int32_t *r=(int32_t *)(rec+k*0x148);
+                    if (r[4] != (int32_t)id || r[2] <= 0 || r[3] <= 0 || r[2] > W || r[3] > H) continue;
+                    view.kind=2; view.x=(float)r[0]/W;
+                    view.y=(float)(r[1]+dm_ui_proj_dy())/H;
+                    view.w=(float)r[2]/W; view.h=(float)r[3]/H;
+                    break;
+                }
+            }
+        }
+    }
+    // A new pointer event or exit can arrive while the hit-test is running.
+    // Never publish the result of a superseded position (even if it was an NPC).
+    pthread_mutex_lock(&g_hover_mu);
+    if (atomic_load(&g_hover_request) != req) memset(&g_hover_view,0,sizeof g_hover_view);
+    else g_hover_view=view;
+    pthread_mutex_unlock(&g_hover_mu);
+}
+
 // 任意线程：排一笔点按（出图画面归一化坐标），主线程取手柄处执行。后一笔覆盖前一笔
 // Any thread: queue one tap (coordinates normalized to the rendered picture), executed by the main thread at the controller-poll point. A later one overwrites the earlier one
 static _Atomic uint64_t g_tap; static _Atomic unsigned g_tap_seq, g_tap_done; static _Atomic int g_tap_res, g_has_target;
@@ -442,14 +566,14 @@ unsigned dm_world_tap(float nx, float ny) { if (nx < 0) nx = 0; if (nx > 1) nx =
     unsigned seq = atomic_fetch_add(&g_tap_seq, 1) + 1; atomic_store(&g_tap, (uint64_t)seq << 32 | (uint64_t)(uint32_t)(nx * 65535) << 16 | (uint32_t)(ny * 65535)); return seq; }
 int dm_world_tap_result(unsigned seq) { return atomic_load(&g_tap_done) == seq ? atomic_load(&g_tap_res) : -1; }   // -1 还没执行；0 没有目标（什么都没发）；1 物品 2 NPC 3 物件 4 出口 | -1 not executed yet; 0 no target (nothing sent); 1 item 2 NPC 3 object 4 exit
 int dm_world_has_target(void) { return atomic_load(&g_has_target); }   // 按主键会去交互的目标存在（游戏手柄版自己的选择，main+0x2f7a0c）；任意线程读 | a target that the primary button would interact with exists (the game's own controller-version selection, main+0x2f7a0c); read from any thread
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
 static int w_hostile(uint8_t *b, uint64_t u) { if (*(uint32_t *)u != 1) return 0; uint64_t pl = w_player(); int c = pl ? ((int (*)(int, uint64_t, uint64_t))(b + 0x2f7b7c))(0x165, pl, u) : 0; return c == 1 || c == 0xa; }
 static uint64_t g_mouse_attack_at;
 static void w_attack(uint64_t u, const char *how) { g_mouse_attack_at = w_now_ns(); if (g_go.on) g_go.on = 0; int r = w_interact(u); static int lg; if (lg++ < 300) LOG("鼠标攻击：%s 类型 1 cls %u id %u → 点击入口 %d", how, *(uint32_t *)(u + 4), *(uint32_t *)(u + 8), r); }
 static void w_walk_step(uint8_t *b) {
     uint64_t t = atomic_exchange(&g_walk, 0); if (!t) return; uint64_t dm_stick_last_ns(void); uint64_t pl = w_player(), scene = *(uint64_t *)(b + 0x2e2a698); int W = 0, H = 0, px = 0, py = 0; float f[2];
     dm_screen_real(&W, &H); if (!pl || !scene || W <= 0 || H <= 0 || !w_unit_xy(pl, &px, &py) || !w_project(b, scene, pl, f, 0)) return;
-    { float d0 = 0; int lab0 = 0; g_hit_mon = 1; uint64_t mu = w_hit(b, ((t >> 16) & 0xffff) / 65535.0f * W, (t & 0xffff) / 65535.0f * H, H * 0.10f, &d0, &lab0); g_hit_mon = 0;
+    { float d0 = 0; int lab0 = 0; g_hit_mon = 1; uint64_t mu = w_hit(b, ((t >> 16) & 0xffff) / 65535.0f * W, (t & 0xffff) / 65535.0f * H, H * 0.10f, &d0, &lab0, 0); g_hit_mon = 0;
       if (mu && w_hostile(b, mu)) { if (w_now_ns() - g_gnd_stick_at >= 300000000ull && w_now_ns() - g_mouse_attack_at >= 200000000ull) w_attack(mu, "按住"); return; } }   // 按住时光标下是敌对怪：再打一下（摇杆 / W A S D 刚动过就让给它） | while held with a hostile monster under the pointer: hit once more (yielding to the stick / W A S D if they have just moved)
     if (g_go.on && g_go.type != W_GROUND) return;   // 正走向某个目标去交互：不打断 | walking towards some target to interact: do not interrupt
     if (w_now_ns() - g_gnd_stick_at < 300000000ull) return;   // 摇杆 / W A S D 0.3 秒内动过：让给它 | the stick / W A S D moved within 0.3 s: yield to it
@@ -465,7 +589,8 @@ static void w_walk_step(uint8_t *b) {
     g_go.n = g_go.i = g_go.replans = g_go.empty = g_go.direct = g_go.alt = g_go.alt_on = 0; g_go.stop_at = 0; g_gnd_x = x; g_gnd_y = y; g_go.on = 1;
 }
 #endif
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
+// ---- Physical mouse: click monster to attack ----
 // ---- Mac 鼠标：点怪 = 攻击 ----
 // 发令走游戏自己的点击入口（同 w_interact：手柄主键与键鼠左键共用的 main+0x4ace20，带上这只怪当指定目标）：近战它自己走过去打，主键上绑的是技能就对它放那个技能，不另写攻击逻辑。
 // 按住不放时 touch_mac.c 每 30 Hz 拍更新「朝光标走」（dm_world_walk）：敌对怪改成攻击（追着打），重复攻击仍至少间隔 0.2 秒，不是怪才走路。
@@ -477,7 +602,12 @@ unsigned dm_world_click(float nx, float ny) { atomic_store(&g_tap_mouse, 1); ret
 // 世界泵早于鼠标 hook：消费前也要取消暂停、面板或离局期间排队的鼠标指令，触屏/脚本点按不动。
 // The world pump precedes the mouse hook: also cancel queued mouse commands before consumption during pause, panels or game exit; leave touch/script taps alone.
 static void w_mouse_cancel_pending(void) {
+#if TARGET_OS_OSX
     if (dm_touch_host_world_active()) return;
+#else
+    int dm_game_paused(void);
+    if (dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused()) return;
+#endif
     if (atomic_exchange(&g_tap_mouse, 0)) atomic_store(&g_tap, 0);
     atomic_store(&g_walk, 0);
 }
@@ -486,11 +616,11 @@ static void w_tap_step(uint8_t *b) {
     uint64_t t = atomic_exchange(&g_tap, 0); if (!t) return; unsigned seq = (unsigned)(t >> 32); int res = 0;
     int W = 0, H = 0; dm_screen_real(&W, &H);   // 命中框按真实画面算，不能用游戏的「屏幕宽高」全局量（界面改成 16:9 后它的高是界面高，dm_uiscreen.c） | hit boxes are computed against the real picture, not the game's "screen width/height" globals (after the UI was changed to 16:9 its height is the UI height, dm_uiscreen.c)
     float sx = ((t >> 16) & 0xffff) / 65535.0f * W, sy = (t & 0xffff) / 65535.0f * H, d = 0; int lab = 0;
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     g_hit_mon = atomic_exchange(&g_tap_mouse, 0);
 #endif
-    uint64_t u = W > 0 && H > 0 ? w_hit(b, sx, sy, H * 0.10f, &d, &lab) : 0;
-#if TARGET_OS_OSX
+    uint64_t u = W > 0 && H > 0 ? w_hit(b, sx, sy, H * 0.10f, &d, &lab, 0) : 0;
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     g_hit_mon = 0;
     if (u && w_hostile(b, u)) { w_attack(u, "点"); u = 0; res = 6; }   // 鼠标点到敌对怪：攻击（见 w_attack），不走「走过去交互」 | the mouse clicked a hostile monster: attack (see w_attack), not "walk over and interact"
 #endif
@@ -787,7 +917,7 @@ static void w_cam_zoom(uint8_t *b) {
     else if (*z < 1.0f) { LOG("镜头缩放：cameraZoomSetting %.2f 低于原版下限，写回 1.20", *z); *z = 1.2f; }
 }
 void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at the controller poll
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     w_mouse_cancel_pending();
 #endif
     { void dm_rift_client_pump(uint8_t *); DM_PROF(0, "w.rift_client", dm_rift_client_pump(wb())); }   // 秘境爬塔：认击杀（dm_rift.c） | rift tower climb: recognize kills (dm_rift.c)
@@ -795,6 +925,7 @@ void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at th
     DM_PROF(0, "w.test_seek", w_test_seek_step());
     w_test_xy_step();
     uint8_t *b = wb(); if (!b) return;
+    DM_PROF(0, "w.hover", w_hover_step(b));
     DM_PROF(0, "w.cam", w_cam_clear());
     w_cam_zoom(b);
     if (g_it.active) w_interaction_poll(w_player(), dm_guest_frame());
@@ -842,8 +973,12 @@ void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at th
           else { int px = 0, py = 0, x, y; long bd = -1; w_unit_xy(w_player(), &px, &py);
               for (int k = 0; k < 128; k++) for (uint64_t c = *(uint64_t *)(b + 0x2d603a0 + gt * 0x400 + k * 8); c; c = *(uint64_t *)(c + 0x158)) if (*(uint32_t *)(c + 4) == (uint32_t)gi && w_unit_xy(c, &x, &y)) { long dd = (long)(x - px) * (x - px) + (long)(y - py) * (y - py); if (bd < 0 || dd < bd) { bd = dd; u = c; } } }
           if (u) { w_go(u); if (nearonly) g_go.stop_at = nearonly; } LOG("世界目标：DM_TEST_WORLD_GO %s → %s", e, u ? "已发" : "没找到"); if (u) LOG("世界目标：DM_TEST_WORLD_GO 目标 类型 %u 类号 %u id %u", *(uint32_t *)u, *(uint32_t *)(u + 4), *(uint32_t *)(u + 8)); } }
+#if TARGET_OS_IOS || defined(__ANDROID__)
+    // Process external mouse before resolving its queued world click.
+    dm_external_mouse_step();
+#endif
     w_tap_step(b);
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     { uint64_t dm_stick_last_ns(void); uint64_t v = dm_stick_last_ns(); if (v != g_gnd_stick_seen) { g_gnd_stick_seen = v; g_gnd_stick_at = w_now_ns(); } }
     w_walk_step(b);
 #endif

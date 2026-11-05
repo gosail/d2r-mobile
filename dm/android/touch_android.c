@@ -7,6 +7,7 @@
 #include "../host/dm_hud.h"
 #include "../host/dm_custom.h"
 #include "../host/dm_world.h"
+#include "../host/dm_external_mouse.h"
 #include "../host/dm_uiscreen.h"
 #include "../ios/Sources/dm_touch_native_art.h"
 #include <pthread.h>
@@ -133,6 +134,7 @@ void dm_android_touch_tablet(int tablet) {
 void dm_android_touch_focus(int active) {
     pthread_mutex_lock(&lock);
     focused = !!active; cancel = 1; head = tail = 0;
+    if (!active) dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0);
     pthread_mutex_unlock(&lock);
 }
 void dm_android_touch_event(int phase, int slot, float x, float y) {
@@ -200,6 +202,15 @@ static void world_rect(float r[4]) {
     if (dm_screen_real(&rw, &rh) && h > 0 && h < rh) { r[0] = -vr_x; r[1] = -vr_y; r[2] = win_w; r[3] = win_h; }
 }
 static void world_norm(float x, float y, float *nx, float *ny) { float r[4]; world_rect(r); *nx = (x - r[0]) / r[2]; *ny = (y - r[1]) / r[3]; }
+void dm_android_mouse_event(int op, float xdp, float ydp, int arg) {
+    pthread_mutex_lock(&lock);
+    float local_x = xdp - vr_x, local_y = ydp - vr_y;
+    float ux = width > 0 ? local_x/width : -1, uy = height > 0 ? local_y/height : -1;
+    float wx = -1, wy = -1;
+    world_norm(local_x,local_y,&wx,&wy);
+    dm_external_mouse_event(op,ux,uy,wx,wy,arg);
+    pthread_mutex_unlock(&lock);
+}
 static void requests(void) {
     if (seen_tab != tc.tab_tap_seq) { seen_tab = tc.tab_tap_seq; dm_ui_tab_go(); }
     if (seen_use != tc.use_seq) { seen_use = tc.use_seq; dm_ui_use_item(); }

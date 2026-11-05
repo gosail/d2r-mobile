@@ -11,6 +11,7 @@ double dm_brightness_now(void) { return g_dm_brightness; }
 static volatile int g_dm_thermal = -1;
 int dm_thermal_now(void) { return g_dm_thermal; }   // 最近的温控档位（0 正常 / 1 微热 / 2 严重 / 3 危急；−1 = 未读）   // 最近一次读到的屏幕亮度（−1 = 未读） | Most recent thermal state (0 nominal / 1 fair / 2 serious / 3 critical; −1 = not read)   // Most recently read screen brightness (−1 = not read)
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CATextLayer.h>
 #import <Metal/Metal.h>
 #include <signal.h>
 #include "front.h"
@@ -25,6 +26,7 @@ void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void); 
 #include "../../host/dm_cursor.h"
 #include "../../host/dm_hud.h"
 #include "../../host/dm_world.h"
+#include "../../host/dm_external_mouse.h"
 #include "../../host/dm_uiscreen.h"
 #include "../../host/dm_actions.h"
 #include "../../host/dm_i18n.h"
@@ -73,6 +75,8 @@ static BOOL touch_control_log_enabled(void) {
 - (void)restartCover:(int)mode;
 - (void)captureTouchLayer:(NSString *)path;
 - (void)refreshPortalBinding;
+- (void)dmMouseHover:(UIHoverGestureRecognizer *)recognizer;
+- (void)dmMouseScroll:(UIPanGestureRecognizer *)recognizer;
 @end
 static __weak DmMetalView *g_touch_view;
 // 真全屏（屏幕比 16:9 窄，iPad 4:3）：3D 铺满整窗，游戏视图（界面、自绘控件、界面触点）是贴底的一块 16:9，见 front_ios_view。
@@ -133,6 +137,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     UIView *_rsCover;   // 一键重开期间的黑屏（宿主 dm_cursor.c 经 g_dm_restart_cover_hook 开关）：盖在窗口最上层（整屏，含真全屏的留边），不露主菜单，吞掉这段时间的触点 | Black screen during one-tap restart (toggled by the host's dm_cursor.c via g_dm_restart_cover_hook): covers the top of the window (whole screen, including the true-fullscreen margins), does not reveal the main menu, and swallows touch points during this period
     int _navigation;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
+    CATextLayer *_hoverName; CALayer *_hoverLoot; BOOL _mouseSecondaryDown;
       // 镜头实验：小地图 / 全屏地图上人物朝向的指针（mapHeadingSync） | camera experiment: the facing pointer on the minimap / fullscreen map (mapHeadingSync)
     CALayer *_mgLabel[DM_MAP_GOAL_MAX], *_mgMark[DM_MAP_GOAL_MAX];   // 小地图任务终点：每个终点一个名牌 / 符号层 + 一个灰十字层（mapGoalSync） | Minimap quest goals: one nameplate / symbol layer + one grey cross layer per goal (mapGoalSync)
     NSMutableDictionary<NSString *,id> *_mgImg;   // NSNull = 文件不存在（不再每帧读盘重试） | NSNull = file missing (no per-frame disk retry)
@@ -491,6 +496,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     { static int ln=-1, lc; if(n!=ln && lc<40) { ln=n; lc++; LOG("画面外怪物指针：%d 个", n); } }
 }
 - (void)tickTouchControls:(double)now {
+    [self worldHoverSync];
     [self mapGoalSync];
     [self mapHeadingSync];
     [self threatsSync];
@@ -568,8 +574,92 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     if(_uiFinger && touch_done(_uiFinger)) { LOG("前端：【红】清理残留触摸（界面手指）"); _uiFinger=nil;   // 宿主那头一并收：在拖就结束滚动拖，否则作废这次界面点击（相 3 清 g_ut_phase / 删除长按） | Clean up on the host side too: if dragging, end the scroll drag; otherwise void this UI click (phase 3 clears g_ut_phase / removes the long press)
         if(_uiFeDrag||_uiDragOn) { _uiFeDrag=NO; _uiDragOn=NO; dm_ui_drag_end(); } else dm_ui_touch(3,0,0); }
 }
+// PC-style hover: NPCs use the game's localized name; dropped items keep their
+// original quality-coloured label and get a focus outline. Do not create a touch.
+- (void)worldHoverSync {
+    dm_world_hover_view h={0};
+    int show=!_navigation && !_feMode && dm_world_hover_read(&h);
+    if (!_hoverName) {
+        _hoverName=[CATextLayer layer]; _hoverName.alignmentMode=kCAAlignmentCenter;
+        _hoverName.fontSize=19; _hoverName.contentsScale=UIScreen.mainScreen.scale;
+        _hoverName.foregroundColor=[UIColor colorWithRed:.84 green:.77 blue:.58 alpha:1].CGColor;
+        _hoverName.backgroundColor=[UIColor colorWithWhite:0 alpha:.75].CGColor;
+        _hoverName.borderColor=[UIColor colorWithRed:.65 green:.54 blue:.33 alpha:.85].CGColor;
+        _hoverName.borderWidth=1; _hoverName.cornerRadius=4;
+        [self.layer addSublayer:_hoverName];
+        _hoverLoot=[CALayer layer]; _hoverLoot.borderWidth=2; _hoverLoot.cornerRadius=3;
+        _hoverLoot.borderColor=[UIColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
+        [self.layer addSublayer:_hoverLoot];
+    }
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    _hoverName.hidden=!show || h.kind!=1;
+    _hoverLoot.hidden=!show || h.kind!=2;
+    if (show) {
+        CGRect wr=world_rect(self);
+        if (h.kind==1) {
+            NSString *s=[NSString stringWithUTF8String:h.title];
+            if (!s.length) _hoverName.hidden=YES;
+            else {
+                CGFloat width=fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[UIFont systemFontOfSize:19]}].width+22));
+                CGFloat px=wr.origin.x+h.x*wr.size.width-width/2;
+                CGFloat py=wr.origin.y+h.y*wr.size.height-31;
+                _hoverName.string=s;
+                _hoverName.frame=CGRectMake(fmax(0,fmin(self.bounds.size.width-width,px)),py,width,28);
+            }
+        } else if (h.kind==2) {
+            _hoverLoot.frame=CGRectMake(wr.origin.x+h.x*wr.size.width-3, wr.origin.y+h.y*wr.size.height-2,
+                                        h.w*wr.size.width+6,h.h*wr.size.height+4);
+        }
+    }
+    [CATransaction commit];
+}
+// UIKit pointer events use separate world/UI coordinates; never create a fake finger.
+- (void)dmMouseEvent:(int)op point:(CGPoint)p arg:(int)arg {
+    CGSize b=self.bounds.size; CGRect wr=world_rect(self);
+    if (b.width<=0 || b.height<=0 || wr.size.width<=0 || wr.size.height<=0) return;
+    dm_external_mouse_event(op,(float)(p.x/b.width),(float)(p.y/b.height),
+        (float)((p.x-wr.origin.x)/wr.size.width),
+        (float)((p.y-wr.origin.y)/wr.size.height),arg);
+}
+- (void)dmMouseHover:(UIHoverGestureRecognizer *)recognizer {
+    UIGestureRecognizerState state=recognizer.state;
+    if (state==UIGestureRecognizerStateEnded || state==UIGestureRecognizerStateCancelled || state==UIGestureRecognizerStateFailed) {
+        dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0); return;
+    }
+    if (state!=UIGestureRecognizerStateBegan && state!=UIGestureRecognizerStateChanged) return;
+    [self dmMouseEvent:DM_MOUSE_HOVER point:[recognizer locationInView:self] arg:0];
+}
+- (void)dmMouseScroll:(UIPanGestureRecognizer *)recognizer {
+    if (recognizer.state!=UIGestureRecognizerStateChanged) return;
+    CGPoint delta=[recognizer translationInView:self];
+    if (fabs(delta.y)>1) [self dmMouseEvent:DM_MOUSE_WHEEL point:[recognizer locationInView:self] arg:delta.y<0?1:-1];
+    [recognizer setTranslation:CGPointZero inView:self];
+}
+- (NSSet<UITouch *> *)dmFilterPointerTouches:(NSSet<UITouch *> *)touches op:(int)op event:(UIEvent *)event {
+    NSMutableSet<UITouch *> *fingers=nil;
+    for (UITouch *t in touches) {
+        if (@available(iOS 13.4, *)) {
+            if (t.type==UITouchTypeIndirectPointer) {
+                int mouseOp=op;
+                if (op==DM_MOUSE_DOWN && (event.buttonMask & UIEventButtonMaskSecondary)) {
+                    mouseOp=DM_MOUSE_RIGHT_DOWN; _mouseSecondaryDown=YES;
+                } else if (op==DM_MOUSE_UP && _mouseSecondaryDown) {
+                    mouseOp=DM_MOUSE_RIGHT_UP; _mouseSecondaryDown=NO;
+                } else if (op==DM_MOUSE_LEAVE) _mouseSecondaryDown=NO;
+                [self dmMouseEvent:mouseOp point:[t locationInView:self] arg:0];
+                continue;
+            }
+        }
+        if (!fingers) fingers=[NSMutableSet set];
+        [fingers addObject:t];
+    }
+    return fingers ?: [NSSet set];
+}
+
 - (void)touchesBegan:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
-    (void)e;
+    ts=[self dmFilterPointerTouches:ts op:DM_MOUSE_DOWN event:e];
+    if (!ts.count) return;
+    dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0); // A real finger cancels an old hover.
     [self sweepEndedSlots];
     // 手柄模式下碰屏幕 = 回触屏模式（dm_gamepad.m），这一下只做这一件事：此刻屏上是手柄版界面，触屏控件还没显示出来（布局重载要几十帧），
     // 照常往下走的话，落点正好在看不见的回城钮 / 技能钮位置就会直接回城、放技能，面板态还会对手柄版面板发点击。
@@ -602,7 +692,8 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     [self pushFrom:"uitouch" phase:"began"];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
-    (void)e;
+    ts=[self dmFilterPointerTouches:ts op:DM_MOUSE_DRAG event:e];
+    if (!ts.count) return;
     if(_swallow.count) { NSMutableSet *r=[ts mutableCopy]; for(UITouch *t in ts) if([_swallow containsObject:t]) [r removeObject:t]; if(!r.count) return; ts=r; }
     if(atomic_load(&g_touch_frontend)) { [self uiTouch:ts phase:1]; return; }
     UITouch *uf=_uiFinger;
@@ -763,8 +854,14 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     } else { _pulseTicking=NO; return; }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(NSEC_PER_SEC/120)),dispatch_get_main_queue(),^{ [self pulseTick]; });
 }
-- (void)touchesEnded:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { (void)e; [self finishTouches:ts phase:"ended"]; }
-- (void)touchesCancelled:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { (void)e; [self finishTouches:ts phase:"cancelled"]; }
+- (void)touchesEnded:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
+    ts=[self dmFilterPointerTouches:ts op:DM_MOUSE_UP event:e];
+    if (ts.count) [self finishTouches:ts phase:"ended"];
+}
+- (void)touchesCancelled:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
+    ts=[self dmFilterPointerTouches:ts op:DM_MOUSE_LEAVE event:e];
+    if (ts.count) [self finishTouches:ts phase:"cancelled"];
+}
 - (CGPoint)scriptPoint:(NSString *)spec move:(BOOL)move {
     // 数字对 "x,y"（点）或 "@目标[+dx,dy]"：目标 = joy/swap/main/skill1-4/portal/belt1-4/menu/map/mmname（小地图点击区中心）/mmbody（小地图矩形中心）
     // Number pair "x,y" (points) or "@target[+dx,dy]": target = joy/swap/main/skill1-4/portal/belt1-4/menu/map/mmname (center of the minimap tap area)/mmbody (center of the minimap rectangle)
@@ -989,6 +1086,18 @@ static UIView *test_fold(UIView *top) {
     }
     return top;
 }
+static void dm_attach_mouse_hover(UIView *surface, DmMetalView *game) {
+    UIHoverGestureRecognizer *r=[[UIHoverGestureRecognizer alloc] initWithTarget:game action:@selector(dmMouseHover:)];
+    r.cancelsTouchesInView=NO; r.delaysTouchesBegan=NO; r.delaysTouchesEnded=NO;
+    [surface addGestureRecognizer:r];
+    if (@available(iOS 13.4, *)) {
+        UIPanGestureRecognizer *scroll=[[UIPanGestureRecognizer alloc] initWithTarget:game action:@selector(dmMouseScroll:)];
+        scroll.allowedTouchTypes=@[];
+        scroll.allowedScrollTypesMask=UIScrollTypeMaskDiscrete;
+        scroll.cancelsTouchesInView=NO;
+        [surface addGestureRecognizer:scroll];
+    }
+}
 UIView *front_ios_view(CGRect frame) {
     front_game_res(1);   // 「真全屏」开没开（g_full）是它第一次被调时按屏幕比例定的；下面摆视图要用，不能指望别处碰巧先调过 | whether "true fullscreen" is on (g_full) is decided from the screen aspect ratio the first time this is called; the view layout below needs it and cannot count on something else happening to have called it first
     CGRect full = frame; frame = letterbox_rect(frame);
@@ -1004,12 +1113,14 @@ UIView *front_ios_view(CGRect frame) {
     g_layer.drawableSize = CGSizeMake(frame.size.width * g_layer.contentsScale, frame.size.height * g_layer.contentsScale);
     // 真全屏一律套容器：窗口会变尺寸（iPhone Duo 展开 / 折叠），容器的布局回调负责跟着换出图尺寸；启动那一刻窗口碰巧是 16:9 也要套（Mac 上的场景初值 667x375）
     if (g_full || !CGRectEqualToRect(full, frame)) { DmLetterboxView *box = [[DmLetterboxView alloc] initWithFrame:full]; box.backgroundColor = UIColor.blackColor; box.game = v; [box addSubview:v];
+        dm_attach_mouse_hover(box,v); // full-screen pointer can hover above the 16:9 UI view
         if (g_full) {   // 出图层与游戏视图分离：出图层挂在容器上铺满整窗，游戏视图透明、叠在它上面 | The present layer is separated from the game view: the present layer hangs on the container and fills the whole window; the game view is transparent and stacked on top of it
             CAMetalLayer *ml = [CAMetalLayer layer]; ml.device = g_layer.device; ml.pixelFormat = MTLPixelFormatBGRA8Unorm; ml.contentsScale = g_layer.contentsScale; ml.frame = box.bounds;
             ml.drawableSize = CGSizeMake(full.size.width * ml.contentsScale, full.size.height * ml.contentsScale); [box.layer insertSublayer:ml atIndex:0];
             v.opaque = NO; v.layer.opaque = NO; v.backgroundColor = UIColor.clearColor; g_layer = ml; mtl_set_ui_rect_fn(ui_rect_frac);
             LOG("画面：窗口 %.0fx%.0f 比 16:9 窄 → 真全屏已开：出图层铺满整窗；游戏视图跟宿主的界面矩形走（局内贴底、局外居中），启动先按居中的 %.0fx%.0f 摆", full.size.width, full.size.height, frame.size.width, frame.size.height); return test_fold(box); }
         LOG("画面：窗口 %.0fx%.0f 与游戏画面比例不同 → 游戏视图 %.0fx%.0f 居中（左右各留 %.0f 点、上下各留 %.0f 点）", full.size.width, full.size.height, frame.size.width, frame.size.height, frame.origin.x - full.origin.x, frame.origin.y - full.origin.y); return test_fold(box); }
+    dm_attach_mouse_hover(v,v);
     return test_fold(v);
 }
 

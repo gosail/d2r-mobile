@@ -1,5 +1,6 @@
 #include "dm_elysium.h"
 #include "dm_cursor.h"
+#include "dm_external_mouse.h"
 #include "dm_custom.h"
 #include "dm.h"
 #include "dm_uiscreen.h"
@@ -2836,6 +2837,8 @@ static int ui_touch_mode(void) { int dm_padmode_current(void), dm_padmode_busy(v
 // Only the four execution pumps of the item gestures (long press / double-click use / buy / drag and drop) are additionally run in real-mouse mode; the pumps that change the touch layout - binding box, skill tab swap, mercenary page - are not run. With no request these four do nothing, so gamepad players are unaffected
 #if TARGET_OS_OSX
 #define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { int dm_touch_host_is_live(void), dm_padmode_busy(void); if (!tm && dm_touch_host_is_live() && !dm_padmode_busy()) { ui_long_pump(); ui_use_pump(); ui_buy_pump(pw, phh); ui_drag_pump(pm, proot, pw, phh); } } while (0)
+#elif TARGET_OS_IOS || defined(__ANDROID__)
+#define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { int dm_padmode_busy(void); if (!tm && dm_external_mouse_active() && !dm_padmode_busy()) { ui_long_pump(); ui_use_pump(); ui_buy_pump(pw, phh); ui_drag_pump(pm, proot, pw, phh); } } while (0)
 #else
 #define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { } while (0)
 #endif

@@ -14,7 +14,7 @@ targets:
       - name: 从游戏文件生成资源
         basedOnDependencyAnalysis: false
         script: |
-          [ -f "$SRCROOT/Gen/assets/NativeHUD/v4/hud.json" ] && [ -f "$SRCROOT/Sources/dm_touch_native_art.c" ] || python3 "$SRCROOT/tools/gen_assets.py"
+          [ -f "$SRCROOT/Gen/assets/NativeHUD/v4/hud.json" ] && [ -f "$SRCROOT/Sources/dm_touch_native_art.c" ] && [ -f "$SRCROOT/../host/dm_hover_names.h" ] || python3 "$SRCROOT/tools/gen_assets.py"
     sources:
       - Sources
       - Assets.xcassets               # App 图标（1024²、不透明；TestFlight 上传必需） | App icon (1024², opaque; required for TestFlight upload)

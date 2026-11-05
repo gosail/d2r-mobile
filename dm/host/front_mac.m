@@ -274,6 +274,81 @@ static void on_key(NSEvent *e, int down) {
     push();
 }
 
+// All three physical mouse buttons can be assigned to a *logical* primary,
+// secondary, or map action. The role is captured on mouse-down and kept until
+// that same physical button is released. Only one primary touch is active.
+static int mac_mouse_role[3]={0,1,2};
+static int mac_mouse_down[3],mac_mouse_secondary[3],mac_mouse_primary_owner=-1;
+static int mac_mouse_ui_pos(NSView *view,NSEvent *event,float *ux,float *uy,float *wx,float *wy) {
+    NSPoint p=[view convertPoint:event.locationInWindow fromView:nil];
+    NSRect gr=game_rect();
+    if(gr.size.width<=0 || gr.size.height<=0)return 0;
+    float x=(p.x-gr.origin.x)/gr.size.width;
+    float y=1.0-(p.y-gr.origin.y)/gr.size.height;
+    float worldX=x,worldY=y,uiY=y;
+    if(g_full && g_live) {
+        int rw=0,rh=0;double cx=0,cy=0,cw=1,ch=1;
+        if(dm_screen_real(&rw,&rh) && rw>0 && rh>0) {
+            double ca=(double)rw/rh,ga=gr.size.width/gr.size.height;
+            if(fabs(ga/ca-1)>=0.01) {
+                if(ga>ca){cw=ca/ga;cx=(1-cw)/2;}
+                else{ch=ga/ca;cy=(1-ch)/2;}
+            }
+        }
+        worldX=(x-cx)/cw;worldY=(y-cy)/ch;
+        double fy=0,fh=1;ui_rect_frac(&fy,&fh);
+        uiY=fh>0?(worldY-fy)/fh:worldY;
+    }
+    *ux=worldX;*uy=uiY;*wx=worldX;*wy=worldY;
+    return 1;
+}
+static void mac_primary_pointer(NSView *view,NSEvent *event,int op) {
+    float ux=0,uy=0,wx=0,wy=0;
+    if(!mac_mouse_ui_pos(view,event,&ux,&uy,&wx,&wy))return;
+    if(op==0 && (wx<0 || wx>1 || wy<0 || wy>1))return;
+    if(op==0 && !dm_uiscreen_ingame() && (ux<0 || ux>1 || uy<0 || uy>1))return;
+    if(g_live)dm_touch_host_live(op,ux,uy);
+    else if(op==2)dm_touch_set(NULL,0);
+    else if(op!=3) {
+        dm_touch t={0,fmaxf(0,fminf(1,ux)),fmaxf(0,fminf(1,uy))};
+        dm_touch_set(&t,1);
+    }
+}
+static void mac_secondary_pointer(NSView *view,NSEvent *event,int physical,int press) {
+    if(press) {
+        float ux,uy,wx,wy;
+        if(mac_mouse_ui_pos(view,event,&ux,&uy,&wx,&wy) &&
+           dm_ui_free_cursor() && ux>=0 && ux<=1 && uy>=0 && uy<=1 &&
+           dm_ui_item_at_now(ux,uy)==1) {
+            dm_ui_mouse_right_use(ux,uy);return;
+        }
+        mac_mouse_secondary[physical]=1;
+    } else mac_mouse_secondary[physical]=0;
+    g_mouse_btn=(mac_mouse_secondary[0]||mac_mouse_secondary[1]||mac_mouse_secondary[2])?DM_BTN_B:0;
+    push();
+}
+static void mac_mouse_physical(NSView *view,NSEvent *event,int physical,int phase) {
+    // phase 0=down,1=drag,2=up
+    if(phase==0) {
+        if(mac_mouse_down[physical])return;
+        mac_mouse_down[physical]=1;
+        mac_mouse_role[physical]=dm_kbmap_mouse_action((unsigned)physical);
+        if(mac_mouse_role[physical]==0 && mac_mouse_primary_owner<0) {
+            mac_mouse_primary_owner=physical;mac_primary_pointer(view,event,0);
+        } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,1);
+        else if(mac_mouse_role[physical]==2)dm_world_mouse_map_toggle();
+    } else if(phase==1) {
+        if(mac_mouse_down[physical] && mac_mouse_primary_owner==physical)
+            mac_primary_pointer(view,event,1);
+    } else {
+        if(!mac_mouse_down[physical])return;
+        mac_mouse_down[physical]=0;
+        if(mac_mouse_primary_owner==physical) {
+            mac_primary_pointer(view,event,2);mac_mouse_primary_owner=-1;
+        } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,0);
+    }
+}
+
 typedef struct { void (*fn)(void); } guest_arg;
 static void *guest_tramp(void *p) {
     static char alt[65536];                       // 信号备用栈是每线程的；崩溃打印要在客体线程上也生效 | The signal alternate stack is per thread; crash printing must also work on the guest thread
@@ -340,78 +415,38 @@ void front_run(void (*guest)(void)) {
             if (!e.isARepeat) on_key(e, e.type == NSEventTypeKeyDown);
             return nil;   // 吃掉，免得系统提示音 | Swallow it to avoid the system beep
         }];
-        // 左键沿用单点触屏；Mac App 的无按键悬停只交坐标，复用同一套窗口 / 全屏换算，不合成点击。
-        // Left clicks reuse single-point touch; Mac App button-free hover only submits coordinates using the same window / full-screen conversion, without synthesizing clicks.
-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp | NSEventMaskMouseMoved | NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
-            if (e.window != win) return e;
-            BOOL hover = e.type == NSEventTypeMouseMoved || e.type == NSEventTypeMouseExited;
-            if (g_live) {
-                int hint=dm_mouse_pointer_hint();
-                NSCursor *cursor=hint==2 ? NSCursor.closedHandCursor :
-                                 hint==1 ? NSCursor.openHandCursor : NSCursor.arrowCursor;
-                [cursor set];
+        // A single physical pointer feeds all three configurable mouse buttons.
+        // Plain movement still updates world/gear hover without a click.
+        [NSEvent addLocalMonitorForEventsMatchingMask:
+            NSEventMaskLeftMouseDown|NSEventMaskLeftMouseDragged|NSEventMaskLeftMouseUp|
+            NSEventMaskMouseMoved|NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
+            if(e.window!=win)return e;
+            if(e.type==NSEventTypeMouseMoved || e.type==NSEventTypeMouseExited) {
+                if(g_live) {
+                    int hint=dm_mouse_pointer_hint();
+                    [ (hint==2?NSCursor.closedHandCursor:hint==1?NSCursor.openHandCursor:NSCursor.arrowCursor) set];
+                    if(e.type==NSEventTypeMouseExited)dm_touch_host_live(3,-1,-1);
+                    else mac_primary_pointer(v,e,3);
+                }
+                return e;
             }
-            if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停输入：类型 %ld", (long)e.type);
-            if (hover && !g_live) return e;
-            if (e.type == NSEventTypeMouseExited) { dm_touch_host_live(3, -1, -1); return e; }
-            if (e.type == NSEventTypeLeftMouseUp) { if (g_live) dm_touch_host_live(2, 0, 0); else dm_touch_set(NULL, 0); return nil; }
-            NSPoint p = [v convertPoint:e.locationInWindow fromView:nil]; NSRect gr = game_rect();
-            if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停坐标：窗口 %.1f,%.1f 视图 %.1f,%.1f 画面 %.1f,%.1f %.1fx%.1f", e.locationInWindow.x, e.locationInWindow.y, p.x, p.y, gr.origin.x, gr.origin.y, gr.size.width, gr.size.height);
-            if (gr.size.width <= 0 || gr.size.height <= 0) return e;
-            float nx = (float)((p.x - gr.origin.x) / gr.size.width), ny = (float)(1.0 - (p.y - gr.origin.y) / gr.size.height);   // AppKit 视图原点在左下，触屏原点在左上 | The AppKit view origin is at bottom left, the touchscreen origin is at top left
-            if (e.type == NSEventTypeLeftMouseDown && (nx < 0 || nx > 1 || ny < 0 || ny > 1)) return nil;   // 按在黑边上：不算点 | Pressed on the black bars: not a click
-            if (g_full && g_live) {   // 真全屏：状态机吃界面矩形里的归一化坐标（同 iOS 的游戏视图）。两步： | true full screen: the state machine takes normalised coordinates inside the interface rectangle (like the iOS game view). Two steps:
-                // ① 先换到「实际显示的那块」：游戏当前分辨率（前端 16:9、局内整屏）按比例居中放进游戏画面，与上屏同一口径（nvn_mtl.m present_encode：比例差 1% 内铺满）；
-                // ② 再换到界面矩形（局内贴底）。局内界面矩形外是 3D 世界，带符号交下去（点世界换回整屏，touch_mac.c）；不在局内时显示块外是黑边，不算点
-                // (1) First map to "the block actually shown": the game's current resolution (16:9 in the front end, the whole screen in game) placed centred in the game picture by aspect ratio, the same measure as presentation (nvn_mtl.m present_encode: fill when the aspect ratios differ by less than 1%);
-                // (2) then map to the interface rectangle (along the bottom in game). In game, outside the interface rectangle is the 3D world, passed down with a sign (tapping the world maps back to the whole screen, touch_mac.c); outside the game the area beyond the shown block is the black bars, not counted as a tap
-                int rw = 0, rh = 0; double cx = 0, cy = 0, cw = 1, ch = 1;
-                if (dm_screen_real(&rw, &rh) && rw > 0 && rh > 0) { double ca = (double)rw / rh, ga = gr.size.width / gr.size.height;
-                    if (fabs(ga / ca - 1) >= 0.01) { if (ga > ca) { cw = ca / ga; cx = (1 - cw) / 2; } else { ch = ga / ca; cy = (1 - ch) / 2; } } }
-                float vx = (float)((nx - cx) / cw), vy = (float)((ny - cy) / ch);
-                double fy = 0, fh = 1; ui_rect_frac(&fy, &fh); float uy = fh > 0 ? (float)((vy - fy) / fh) : vy;
-                if (e.type == NSEventTypeLeftMouseDown && !dm_uiscreen_ingame() && (vx < 0 || vx > 1 || uy < 0 || uy > 1)) return nil;
-                dm_touch_host_live(hover ? 3 : e.type == NSEventTypeLeftMouseDown ? 0 : 1, vx, uy); return hover ? e : nil; }
-            if (hover) { dm_touch_host_live(3, nx, ny); return e; }
-            dm_touch t = {0, nx < 0 ? 0 : nx > 1 ? 1 : nx, ny < 0 ? 0 : ny > 1 ? 1 : ny};
-            if (g_live) { dm_touch_host_live(e.type == NSEventTypeLeftMouseDown ? 0 : 1, t.x, t.y); return nil; }
-            dm_touch_set(&t, 1); return nil;
+            int phase=e.type==NSEventTypeLeftMouseDown?0:e.type==NSEventTypeLeftMouseUp?2:1;
+            mac_mouse_physical(v,e,0,phase);return nil;
         }];
-        // 右键 = 手柄 B（返回 / 关面板）；滚轮 = 右摇杆上下推 0.12 秒（滚列表）。只在 App 形态接（命令行宿主的测试不受影响）
-        // Right click = gamepad B (back / close panel); wheel = push the right stick up or down for 0.12 s (scroll lists). Only wired in App form (tests of the command-line host are unaffected)
-        if (g_live) {
-            [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskRightMouseDown | NSEventMaskRightMouseUp handler:^NSEvent *(NSEvent *e) {
-                if (e.window != win) return e;
-                // Match iPad/Android: a right click in a free-cursor item
-                // panel goes through the game's native use-item command.
-                // No synthetic touch or fabricated cursor item is created.
-                static BOOL rightItemDown=NO;
-                if (e.type == NSEventTypeRightMouseUp && rightItemDown) {
-                    rightItemDown=NO;
-                    return nil;
-                }
-                if (e.type == NSEventTypeRightMouseDown && dm_ui_free_cursor()) {
-                    rightItemDown=YES;
-                    {
-                        NSPoint p=[v convertPoint:e.locationInWindow fromView:nil];
-                        NSRect gr=game_rect();
-                        double fy=0,fh=1;
-                        if (g_full) ui_rect_frac(&fy,&fh);
-                        if (gr.size.width>0 && gr.size.height>0 && fh>0) {
-                            float nx=(float)((p.x-gr.origin.x)/gr.size.width);
-                            float ny=(float)(((1.0-(p.y-gr.origin.y)/gr.size.height)-fy)/fh);
-                            dm_ui_mouse_right_use(nx,ny);
-                        }
-                    }
-                    return nil;
-                }
-                if (e.type == NSEventTypeRightMouseDown) g_mouse_btn |= DM_BTN_B; else g_mouse_btn &= ~(uint64_t)DM_BTN_B;
-                push(); return nil;
+        if(g_live) {
+            [NSEvent addLocalMonitorForEventsMatchingMask:
+                NSEventMaskRightMouseDown|NSEventMaskRightMouseDragged|NSEventMaskRightMouseUp
+                handler:^NSEvent *(NSEvent *e) {
+                if(e.window!=win)return e;
+                int phase=e.type==NSEventTypeRightMouseDown?0:e.type==NSEventTypeRightMouseUp?2:1;
+                mac_mouse_physical(v,e,1,phase);return nil;
             }];
-            [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp handler:^NSEvent *(NSEvent *e) {
-                if (e.window != win || e.buttonNumber != 2) return e;
-                if (e.type == NSEventTypeOtherMouseDown) dm_world_mouse_map_toggle();
-                return nil;
+            [NSEvent addLocalMonitorForEventsMatchingMask:
+                NSEventMaskOtherMouseDown|NSEventMaskOtherMouseDragged|NSEventMaskOtherMouseUp
+                handler:^NSEvent *(NSEvent *e) {
+                if(e.window!=win||e.buttonNumber!=2)return e;
+                int phase=e.type==NSEventTypeOtherMouseDown?0:e.type==NSEventTypeOtherMouseUp?2:1;
+                mac_mouse_physical(v,e,2,phase);return nil;
             }];
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent *(NSEvent *e) {
                 if (e.window != win || e.scrollingDeltaY == 0) return e;
@@ -536,7 +571,7 @@ void front_run(void (*guest)(void)) {
                   LOG("DM_TEST_COVER：盖上 %.1f 秒，游戏窗口%s是主窗口", dur, win.isKeyWindow ? "" : "不");
                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dur * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [c orderOut:nil]; LOG("DM_TEST_COVER：拿开"); });
               }); }
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = g_mouse_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = g_mouse_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); memset(mac_mouse_down,0,sizeof mac_mouse_down); memset(mac_mouse_secondary,0,sizeof mac_mouse_secondary); mac_mouse_primary_owner=-1; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
         [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(1); }];
         [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
         [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];

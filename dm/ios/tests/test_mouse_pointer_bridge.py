@@ -21,7 +21,7 @@ class PhysicalMouseWiring(unittest.TestCase):
         backend = self.read("host/dm_external_mouse.c")
         front = self.read("ios/Sources/front_ios.m")
         self.assertIn("DM_MOUSE_HOVER_END", header)
-        self.assertIn("if (e->op == DM_MOUSE_HOVER_END) { dm_world_hover_end(); continue; }", backend)
+        self.assertIn("mouse_hover_valid=0; dm_world_hover_end(); continue;", backend)
         self.assertIn("dm_external_mouse_event(DM_MOUSE_HOVER_END", front)
         self.assertIn("if (e->op == DM_MOUSE_LEAVE) { mouse_clear(); continue; }", backend)
 
@@ -51,6 +51,26 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("mouse_hover_valid && !mouse_down", mouse)
         self.assertIn("mouse_hover_valid && !mouse_down", mouse)
         self.assertNotIn("worldHoverSync", front)
+
+    def test_mouse_left_uses_native_item_pickup_in_all_three_ports(self):
+        gesture = self.read("ios/Sources/dm_touch_controls.c")
+        ios = self.read("ios/Sources/front_ios.m")
+        mac = self.read("host/touch_mac.c")
+        android = self.read("android/touch_android.c")
+        self.assertIn(".mouse_item=!!(s->navigation_mode && s->mouse_item_mode)", gesture)
+        self.assertIn("done.mouse_item && s->pointer_item == 1", gesture)
+        self.assertIn("pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 1)", gesture)
+        self.assertIn("_controls.mouse_item_mode=(t.type==UITouchTypeIndirectPointer)", ios)
+        self.assertIn("g_touch.state.mouse_item_mode = g_live_on;", mac)
+        self.assertIn("tc.mouse_item_mode=e.mouse;", android)
+
+    def test_native_monster_hud_uses_original_target_selector(self):
+        world = self.read("host/dm_world.c")
+        target = self.read("host/hle_target.c")
+        self.assertIn("dm_world_hover_monster_id", world)
+        self.assertIn("candidate_id==hover", target)
+        self.assertIn("gate_obs_set(OBS_TARGET_RANK, target_rank_obs)", target)
+        self.assertNotIn("new MouseHoverOverlay", self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
 
     def test_prepared_ci_build_without_npc_source_header(self):
         world = self.read("host/dm_world.c")

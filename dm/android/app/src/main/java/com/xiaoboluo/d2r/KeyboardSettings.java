@@ -4,6 +4,11 @@ package com.xiaoboluo.d2r;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.graphics.Color;
+import android.view.View;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Toast;
 import java.util.Locale;
 
@@ -42,6 +47,66 @@ final class KeyboardSettings {
         "技能5 (F5)","技能6 (F6)","技能7 (F7)","技能8 (F8)",
         "不绑定"
     };
+    static ScrollView createInline(Activity activity) {
+        ScrollView scroll=new ScrollView(activity);
+        scroll.setFillViewport(false);
+        scroll.setBackgroundColor(Color.argb(242,12,12,15));
+        scroll.setClickable(true);
+        LinearLayout content=new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int pad=(int)(12*activity.getResources().getDisplayMetrics().density);
+        content.setPadding(pad,pad,pad,pad);
+        scroll.addView(content,new ScrollView.LayoutParams(-1,-2));
+        return scroll;
+    }
+    static void refreshInline(Activity activity,ScrollView scroll) {
+        if(scroll==null || scroll.getChildCount()==0)return;
+        LinearLayout content=(LinearLayout)scroll.getChildAt(0);
+        content.removeAllViews();
+        int pad=(int)(6*activity.getResources().getDisplayMetrics().density);
+        for(int i=0;i<KEYS.length+4;i++) {
+            final int index=i;
+            String title;
+            if(i<KEYS.length) {
+                int val=DmActivity.nativeKbAction(KEYS[i]),j=0;
+                for(;j<ACTIONS.length-1 && ACTIONS[j]!=val;j++);
+                title=KEY_NAMES[i]+"     →     "+ACTION_NAMES[j];
+            } else if(i<KEYS.length+3) {
+                int physical=i-KEYS.length,role=DmActivity.nativeMouseBinding(physical);
+                title=MOUSE_NAMES[physical]+"     →     "+MOUSE_ACTIONS[role>=0 && role<3?role:0];
+            } else title=Locale.getDefault().getLanguage().equals("zh")?"恢复此角色默认键鼠设置":"Reset character's keyboard/mouse";
+            Button row=new Button(activity);
+            row.setText(title);
+            row.setAllCaps(false);
+            row.setTextColor(Color.WHITE);
+            row.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(45,45,52)));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+            lp.bottomMargin=pad;
+            content.addView(row,lp);
+            row.setOnClickListener(view->{
+                if(index<KEYS.length)chooseInline(activity,scroll,index);
+                else if(index<KEYS.length+3)chooseMouseInline(activity,scroll,index-KEYS.length);
+                else new AlertDialog.Builder(activity)
+                    .setMessage(Locale.getDefault().getLanguage().equals("zh")?"恢复此角色的全部默认键鼠设置？":"Reset keyboard and mouse for this character?")
+                    .setPositiveButton(Locale.getDefault().getLanguage().equals("zh")?"恢复":"Reset",(d,n)->{
+                        DmActivity.nativeKbDefaults();refreshInline(activity,scroll);
+                    })
+                    .setNegativeButton(Locale.getDefault().getLanguage().equals("zh")?"取消":"Cancel",null).show();
+            });
+        }
+    }
+    private static void chooseInline(Activity activity,ScrollView scroll,int index) {
+        new AlertDialog.Builder(activity).setTitle(KEY_NAMES[index]).setItems(ACTION_NAMES,(d,which)->{
+            if(DmActivity.nativeKbBind(KEYS[index],ACTIONS[which]))refreshInline(activity,scroll);
+            else Toast.makeText(activity,"Cannot save this character's key binding",Toast.LENGTH_LONG).show();
+        }).setNegativeButton("Cancel",null).show();
+    }
+    private static void chooseMouseInline(Activity activity,ScrollView scroll,int physical) {
+        new AlertDialog.Builder(activity).setTitle(MOUSE_NAMES[physical]).setItems(MOUSE_ACTIONS,(d,which)->{
+            if(DmActivity.nativeMouseBind(physical,which))refreshInline(activity,scroll);
+            else Toast.makeText(activity,"Cannot save this character's mouse binding",Toast.LENGTH_LONG).show();
+        }).setNegativeButton("Cancel",null).show();
+    }
     static void show(Activity activity) {
         final boolean zh=Locale.getDefault().getLanguage().equals("zh");
         String[] rows=new String[KEYS.length+4];

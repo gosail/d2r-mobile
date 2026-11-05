@@ -14,6 +14,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.view.View;
 import android.os.Environment;
 import android.provider.Settings;
 import android.system.ErrnoException;
@@ -108,14 +111,21 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private FrameLayout gameFrame;
     private TouchOverlay touchOverlay;
     private MouseHoverOverlay mouseHoverOverlay;
-    private Button kbSettingsButton;
+    private Button kbSettingsButton,controllerSettingsButton;
+    private LinearLayout kbDeviceTabs;
+    private ScrollView kbInlinePanel;
+    private boolean kbKeyboardMode;
     private final Handler kbUiHandler=new Handler(Looper.getMainLooper());
     private final Runnable kbUiPoll=new Runnable() {
         @Override public void run() {
-            if(kbSettingsButton!=null) {
+            if(kbDeviceTabs!=null) {
                 boolean visible=libraryLoaded && started && resumed && nativeKbControlsVisible()!=0;
-                kbSettingsButton.setVisibility(visible?View.VISIBLE:View.GONE);
-                if(visible) kbSettingsButton.bringToFront();
+                kbDeviceTabs.setVisibility(visible?View.VISIBLE:View.GONE);
+                if(kbInlinePanel!=null) {
+                    kbInlinePanel.setVisibility(visible && kbKeyboardMode?View.VISIBLE:View.GONE);
+                    if(visible && kbKeyboardMode)kbInlinePanel.bringToFront();
+                }
+                if(visible) kbDeviceTabs.bringToFront();
             }
             kbUiHandler.postDelayed(this,250);
         }
@@ -150,17 +160,48 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         gameFrame = new FrameLayout(this);
         gameFrame.addView(view, new FrameLayout.LayoutParams(-1, -1));
         setContentView(gameFrame);
+        // The two device categories are real controls, not aliases for
+        // the native controller Key1/Key2 alternate-binding slots.
+        float density=getResources().getDisplayMetrics().density;
+        kbDeviceTabs=new LinearLayout(this);
+        kbDeviceTabs.setOrientation(LinearLayout.HORIZONTAL);
         kbSettingsButton=new Button(this);
-        kbSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh") ? "键鼠设置" : "Keyboard");
-        FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(
-            (int)(148*getResources().getDisplayMetrics().density),
-            (int)(48*getResources().getDisplayMetrics().density),
-            Gravity.TOP|Gravity.END);
-        bp.topMargin=(int)(16*getResources().getDisplayMetrics().density);
-        bp.rightMargin=(int)(20*getResources().getDisplayMetrics().density);
-        gameFrame.addView(kbSettingsButton,bp);
-        kbSettingsButton.setVisibility(View.GONE);
-        kbSettingsButton.setOnClickListener(v -> KeyboardSettings.show(this));
+        kbSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"键鼠":"Keyboard & Mouse");
+        controllerSettingsButton=new Button(this);
+        controllerSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"手柄":"Controller");
+        int tabW=(int)(142*density),tabH=(int)(44*density);
+        kbDeviceTabs.addView(kbSettingsButton,new LinearLayout.LayoutParams(tabW,tabH));
+        kbDeviceTabs.addView(controllerSettingsButton,new LinearLayout.LayoutParams(tabW,tabH));
+        FrameLayout.LayoutParams tp=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.CENTER_HORIZONTAL);
+        tp.topMargin=(int)(46*density);
+        gameFrame.addView(kbDeviceTabs,tp);
+        kbDeviceTabs.setVisibility(View.GONE);
+        kbInlinePanel=KeyboardSettings.createInline(this);
+        FrameLayout.LayoutParams pp=new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER);
+        gameFrame.addView(kbInlinePanel,pp);
+        kbInlinePanel.setVisibility(View.GONE);
+        // Keep the original KeyBindingMenu and its .ctl visible by default.
+        kbKeyboardMode=false;
+        kbSettingsButton.setOnClickListener(view->{
+            kbKeyboardMode=true;
+            KeyboardSettings.refreshInline(this,kbInlinePanel);
+            kbInlinePanel.setVisibility(View.VISIBLE);
+            kbInlinePanel.bringToFront();
+            kbDeviceTabs.bringToFront();
+        });
+        controllerSettingsButton.setOnClickListener(view->{
+            kbKeyboardMode=false;kbInlinePanel.setVisibility(View.GONE);
+            kbDeviceTabs.bringToFront();
+        });
+        gameFrame.addOnLayoutChangeListener((view,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom)->{
+            if(kbInlinePanel==null)return;
+            int w=right-left,h=bottom-top;
+            if(w<=0||h<=0)return;
+            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(
+                Math.max(200,(int)(w*.72)),Math.max(180,(int)(h*.70)),Gravity.CENTER);
+            p.topMargin=(int)(h*.10);
+            kbInlinePanel.setLayoutParams(p);
+        });
         kbUiHandler.post(kbUiPoll);
         immersive();
     }

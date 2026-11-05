@@ -352,10 +352,20 @@ static int w_arrive(uint64_t pl, uint64_t u, int px, int py, int ox, int oy, con
 // As soon as the stick (including keyboard W A S D) moves, it yields to the stick: a walk in progress is cancelled and new requests within 0.3 s are not accepted.
 static _Atomic uint64_t g_walk;
 static _Atomic unsigned g_mouse_map_toggle;
+// Hold-to-attack captures the monster identity on mouse-down. Never retarget
+// onto another monster or turn a held attack into click-to-walk after it dies.
+static _Atomic uint64_t g_mouse_lock;
+static _Atomic int g_mouse_button_down;
+// Cleared on mouse-up; unlike mouse_stop(), a completed ground click keeps walking.
+void dm_world_mouse_release(void) {
+    atomic_store(&g_mouse_button_down,0);
+    atomic_store(&g_mouse_lock,0);
+}
 void dm_world_mouse_map_toggle(void) { atomic_fetch_add(&g_mouse_map_toggle,1); }
 void dm_world_walk(float nx, float ny) { if (nx < 0) nx = 0; if (nx > 1) nx = 1; if (ny < 0) ny = 0; if (ny > 1) ny = 1; atomic_store(&g_walk, 1ull << 32 | (uint64_t)(uint32_t)(nx * 65535) << 16 | (uint32_t)(ny * 65535)); }   // 任意线程：排一笔，主线程取手柄处执行；后一笔覆盖前一笔 | any thread: queue one request, executed where the main thread reads the gamepad; a later request overwrites an earlier one
 int dm_world_walking(void) { return g_go.on && g_go.type == W_GROUND; }
 void dm_world_mouse_stop(void) { // guest input thread only
+    dm_world_mouse_release();
     atomic_store(&g_walk,0);
     if (g_go.on && g_go.type == W_GROUND) g_go.on=0;
 }
@@ -647,6 +657,20 @@ static void w_attack(uint64_t u, const char *how) { g_mouse_attack_at = w_now_ns
 static void w_walk_step(uint8_t *b) {
     uint64_t t = atomic_exchange(&g_walk, 0); if (!t) return; uint64_t dm_stick_last_ns(void); uint64_t pl = w_player(), scene = *(uint64_t *)(b + 0x2e2a698); int W = 0, H = 0, px = 0, py = 0; float f[2];
     dm_screen_real(&W, &H); if (!pl || !scene || W <= 0 || H <= 0 || !w_unit_xy(pl, &px, &py) || !w_project(b, scene, pl, f, 0)) return;
+    // A monster selected at button-down has priority over subsequent pointer
+    // coordinates. A dead/disappeared monster ends the hold without walking.
+    uint64_t locked=atomic_load(&g_mouse_lock);
+    if (locked) {
+        if ((locked & (1ull<<63)) && atomic_load(&g_mouse_button_down)) {
+            uint32_t id=(uint32_t)locked, cls=(uint32_t)((locked>>32)&0x3fffffffu);
+            uint64_t mu=w_find(1,id);
+            if (mu && *(uint32_t *)(mu+4)==cls && w_hostile(b,mu)) {
+                if (w_now_ns()-g_gnd_stick_at>=300000000ull &&
+                    w_now_ns()-g_mouse_attack_at>=200000000ull) w_attack(mu,"锁定按住");
+            } else atomic_store(&g_mouse_lock,1ull<<62);
+        }
+        return;
+    }
     { float d0 = 0; int lab0 = 0; g_hit_mon = 1; uint64_t mu = w_hit(b, ((t >> 16) & 0xffff) / 65535.0f * W, (t & 0xffff) / 65535.0f * H, H * 0.10f, &d0, &lab0, 0); g_hit_mon = 0;
       if (mu && w_hostile(b, mu)) { if (w_now_ns() - g_gnd_stick_at >= 300000000ull && w_now_ns() - g_mouse_attack_at >= 200000000ull) w_attack(mu, "按住"); return; } }   // 按住时光标下是敌对怪：再打一下（摇杆 / W A S D 刚动过就让给它） | while held with a hostile monster under the pointer: hit once more (yielding to the stick / W A S D if they have just moved)
     if (g_go.on && g_go.type != W_GROUND) return;   // 正走向某个目标去交互：不打断 | walking towards some target to interact: do not interrupt
@@ -672,7 +696,7 @@ static void w_walk_step(uint8_t *b) {
 // Issued through the game's own click entry (same as w_interact: main+0x4ace20, shared by the controller main button and the keyboard/mouse left button, with this monster as the explicit target): melee walks over and hits; if the main button is bound to a skill, that skill is cast on it; no separate attack logic.
 // While held, touch_mac.c updates "walk toward the cursor" (dm_world_walk) every 30 Hz tick: a hostile monster turns into an attack (chasing it), repeated attacks are still at least 0.2 s apart, and only non-monsters mean walking.
 static _Atomic int g_tap_mouse;
-unsigned dm_world_click(float nx, float ny) { atomic_store(&g_tap_mouse, 1); return dm_world_tap(nx, ny); }   // 任意线程：鼠标左键点世界（比触屏的点按多认敌对怪） | any thread: left mouse click on the world (recognises hostile monsters in addition to what a touch tap does)
+unsigned dm_world_click(float nx, float ny) { dm_world_mouse_release(); atomic_store(&g_mouse_button_down,1); atomic_store(&g_tap_mouse, 1); return dm_world_tap(nx, ny); }   // 任意线程：鼠标左键点世界（比触屏的点按多认敌对怪） | any thread: left mouse click on the world (recognises hostile monsters in addition to what a touch tap does)
 // 世界泵早于鼠标 hook：消费前也要取消暂停、面板或离局期间排队的鼠标指令，触屏/脚本点按不动。
 // The world pump precedes the mouse hook: also cancel queued mouse commands before consumption during pause, panels or game exit; leave touch/script taps alone.
 static void w_mouse_cancel_pending(void) {
@@ -684,6 +708,7 @@ static void w_mouse_cancel_pending(void) {
 #endif
     if (atomic_exchange(&g_tap_mouse, 0)) atomic_store(&g_tap, 0);
     atomic_store(&g_walk, 0);
+    dm_world_mouse_release();
 }
 #endif
 static void w_tap_step(uint8_t *b) {
@@ -696,7 +721,11 @@ static void w_tap_step(uint8_t *b) {
     uint64_t u = W > 0 && H > 0 ? w_hit(b, sx, sy, H * 0.10f, &d, &lab, 0) : 0;
 #if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     g_hit_mon = 0;
-    if (u && w_hostile(b, u)) { w_attack(u, "点"); u = 0; res = 6; }   // 鼠标点到敌对怪：攻击（见 w_attack），不走「走过去交互」 | the mouse clicked a hostile monster: attack (see w_attack), not "walk over and interact"
+    if (u && w_hostile(b, u)) {
+        if (atomic_load(&g_mouse_button_down))
+            atomic_store(&g_mouse_lock,(1ull<<63) | ((uint64_t)(*(uint32_t *)(u+4)&0x3fffffffu)<<32) | *(uint32_t *)(u+8));
+        w_attack(u, "点"); u = 0; res = 6;
+    }   // 鼠标点到敌对怪：攻击（见 w_attack），不走「走过去交互」 | the mouse clicked a hostile monster: attack (see w_attack), not "walk over and interact"
 #endif
     if (u) { uint32_t ty = *(uint32_t *)u; res = ty == 4 ? 1 : ty == 1 ? 2 : ty == 2 ? 3 : ty == 0 ? 5 : 4; w_go(u); }
     static int logged; if (logged++ < 200) { if (u) LOG("世界目标：点 (%.0f,%.0f) → 类型 %u cls %u id %u（%s，离框中心 %.0f 像素）", sx, sy, *(uint32_t *)u, *(uint32_t *)(u + 4), *(uint32_t *)(u + 8), lab ? "名字标签" : "命中框", d); else if (res != 6) LOG("世界目标：点 (%.0f,%.0f) → 没有目标，不发令", sx, sy); }

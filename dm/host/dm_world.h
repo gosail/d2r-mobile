@@ -21,6 +21,7 @@ uint32_t dm_world_hover_monster_id(void); // native target selector; 0 = none
 unsigned dm_world_click(float nx, float ny);
 void dm_world_walk(float nx, float ny);
 void dm_world_mouse_stop(void);
+void dm_world_mouse_release(void); // mouse-up: release monster lock, preserve an existing ground route
 void dm_world_mouse_map_toggle(void); // enqueue physical middle-click; game thread applies.
 unsigned dm_world_tap(float nx, float ny);   // 任意线程：排一笔点按（出图画面归一化坐标 [0,1]）；主线程取手柄处解析目标并发令，没有目标什么都不发。返回序号 | any thread: queue one tap (coordinates normalized to the rendered picture, [0,1]); the main thread resolves the target and sends the command at the controller-poll point, and sends nothing when there is no target. Returns the sequence number
 int dm_world_tap_result(unsigned seq);       // -1 还没执行；0 没有目标；1 物品（拾取）2 NPC（对话）3 物件（使用）4 出口 5 尸体（取回） | -1 not executed yet; 0 no target; 1 item (pick up) 2 NPC (talk) 3 object (use) 4 exit 5 corpse (retrieve)

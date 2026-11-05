@@ -95,6 +95,9 @@ void dm_external_mouse_step(void) {
         // UIKit can end hover recognition on a mouse press. Do not discard
         // the pending world click or terminate an active mouse drag.
         if (e->op == DM_MOUSE_HOVER_END) {
+            // Indirect-pointer presses in iOS/Android panels are handled by
+            // the native item state machine, but still own the mouse session.
+            atomic_store(&mouse_active,1);
             mouse_hover_valid=0; dm_world_hover_end(); continue;
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
@@ -154,6 +157,7 @@ void dm_external_mouse_step(void) {
             continue;
         }
         if (e->op == DM_MOUSE_UP) {
+            dm_world_mouse_release();
             mouse_x = e->wx; mouse_y = e->wy;
             if (mouse_ui) dm_ui_touch(2, e->ux, e->uy);
             if (mouse_eat && atomic_load(&mouse_hud_until) == UINT64_MAX)

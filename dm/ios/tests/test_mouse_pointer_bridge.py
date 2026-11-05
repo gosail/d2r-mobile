@@ -74,6 +74,13 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("gate_obs_set(OBS_TARGET_RANK, target_rank_obs)", target)
         self.assertNotIn("new MouseHoverOverlay", self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
 
+    def test_mac_right_and_middle_buttons_use_same_actions(self):
+        mac = self.read("host/front_mac.m")
+        self.assertIn("dm_ui_mouse_right_use(nx,ny);", mac)
+        self.assertIn("NSEventMaskOtherMouseDown", mac)
+        self.assertIn("dm_world_mouse_map_toggle();", mac)
+        self.assertIn("rightItemDown=NO;", mac)
+
     def test_native_system_pointer_feedback_no_custom_item_sprite(self):
         c = self.read("host/dm_cursor.c")
         mac = self.read("host/front_mac.m")

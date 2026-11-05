@@ -53,6 +53,7 @@ SRC=\
 	dm_freetp.c \
 	dm_hud.c \
 	dm_i18n.c \
+	dm_kbmap.c \
 	dm_kills.c \
 	dm_lootfilter.c \
 	dm_movie_decode.c \

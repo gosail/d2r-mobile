@@ -101,6 +101,7 @@ void dm_external_mouse_step(void) {
             dm_world_mouse_map_toggle(); continue;
         }
         if (e->op == DM_MOUSE_RIGHT_DOWN) {
+            atomic_store(&mouse_active,1); // Right-click alone must run the native use-item pump.
             mouse_right_item=0;
             if (dm_uiscreen_panel() && e->ux>=0 && e->ux<=1 &&
                 e->uy>=0 && e->uy<=1 && dm_ui_item_at_now(e->ux,e->uy)==1) {

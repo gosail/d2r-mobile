@@ -722,7 +722,13 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     if(uf && [ts containsObject:uf]) { [self uiTouch:[NSSet setWithObject:uf] phase:1]; NSMutableSet *r=[ts mutableCopy]; [r removeObject:uf]; ts=r; if(!ts.count) return; }   // 界面手指（前端按下、按着进了局）只把它自己交给 uiTouch，局内别的手指照常 | The UI finger (pressed in the front end, still held on entering a run) hands only itself to uiTouch; other in-run fingers proceed as usual
     for(UITouch *t in ts) {
         int slot=-1;
-        for(int i=0;i<16;i++) if(_slot[i]==t) { CGPoint p=[t locationInView:self]; dm_tc_move_at(&_controls,i,p.x,p.y,CACurrentMediaTime()); slot=i;
+        for(int i=0;i<16;i++) if(_slot[i]==t) {
+            CGPoint p=[t locationInView:self];
+            BOOL mouseDrag=(t.type==UITouchTypeIndirectPointer && _controls.navigation_mode &&
+                            _controls.pointer_slot==i && _controls.finger[i].pointer_dragged);
+            CGFloat mouseLift=DM_TC_POINTER_LIFT_PT*dm_tc_scale_for_size(self.bounds.size.width,self.bounds.size.height);
+            dm_tc_move_at(&_controls,i,p.x,p.y+(mouseDrag?mouseLift:0),CACurrentMediaTime());
+            slot=i;
             if(_controls.cam_pitch!=0 || _controls.cam_yaw!=0) { void dm_cam_tilt(float); void dm_cam_turn(float); if(_controls.cam_pitch!=0) dm_cam_tilt(_controls.cam_pitch); if(_controls.cam_yaw!=0) dm_cam_turn(_controls.cam_yaw); _controls.cam_pitch=_controls.cam_yaw=0; }   // 镜头实验：右半屏拖动看四周（dm_touch_controls.c） | camera experiment: drag on the right half to look around
             // 界面连续手势（上下拖 = 滚动、按住滑块横拖）：手势层定型后把起手点与当前点交给宿主；认滑块时上下放宽 44 点（约 7 毫米，手指粗细）
             // Continuous UI gestures (vertical drag = scroll, hold a slider and drag horizontally): once the gesture layer has settled the type, give the start point and current point to the host; when recognizing a slider allow 44 points of vertical slack (about 7 mm, a finger's width)
@@ -731,7 +737,9 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                 dm_ui_drag_move((float)(p.x/z.width),(float)(p.y/z.height)); }
             // 拖放中：问落点（物品抬在手指上方）是不是物品区，松手时用最近一次的回答
             // During drag and drop: ask whether the drop point (the item is lifted above the finger) is an item area; on release use the most recent answer
-            if(_controls.navigation_mode && _controls.pointer_slot==i && _controls.finger[i].pointer_dragged && self.bounds.size.width>0) { _relSeq=dm_ui_drop_query((float)(p.x/self.bounds.size.width),(float)((p.y-DM_TC_POINTER_LIFT_PT*dm_tc_scale_for_size(self.bounds.size.width,self.bounds.size.height))/self.bounds.size.height),(float)(p.y/self.bounds.size.height)); _relAsked=YES; }
+            if(_controls.navigation_mode && _controls.pointer_slot==i && _controls.finger[i].pointer_dragged && self.bounds.size.width>0) { _relSeq=dm_ui_drop_query((float)(p.x/self.bounds.size.width),
+                (float)((p.y-(t.type==UITouchTypeIndirectPointer?0:mouseLift))/self.bounds.size.height),
+                (float)((p.y+(t.type==UITouchTypeIndirectPointer?mouseLift:0))/self.bounds.size.height)); _relAsked=YES; }
             break; }
         [self recordTouch:t slot:slot phase:"moved"];
     }
@@ -791,8 +799,15 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
             dm_tc_finger *pf=&_controls.finger[_controls.pointer_slot]; BOOL wait=NO;
             if(_itemAsked && dm_ui_item_result(_itemSeq)<0) wait=YES;
             else if(pf->pointer_dragged) { CGPoint ep=[t locationInView:self]; CGSize z=self.bounds.size;
-                dm_tc_move_at(&_controls,_controls.pointer_slot,ep.x,ep.y,CACurrentMediaTime());   // 抬起点可能比最后一次移动更远 | The lift point may be farther than the last move
-                _relSeq=dm_ui_drop_query((float)(ep.x/z.width),(float)((ep.y-DM_TC_POINTER_LIFT_PT*dm_tc_scale_for_size(z.width,z.height))/z.height),(float)(ep.y/z.height)); _relAsked=YES; _finalAsked=YES; wait=YES; }
+                CGFloat lift=DM_TC_POINTER_LIFT_PT*dm_tc_scale_for_size(z.width,z.height);
+                BOOL mouse=(t.type==UITouchTypeIndirectPointer);
+                dm_tc_move_at(&_controls,_controls.pointer_slot,ep.x,ep.y+(mouse?lift:0),CACurrentMediaTime());
+                // A real mouse places the native held-item sprite at the actual
+                // cursor. A finger retains the 40pt visual lifting offset.
+                _relSeq=dm_ui_drop_query((float)(ep.x/z.width),
+                    (float)((ep.y-(mouse?0:lift))/z.height),
+                    (float)((ep.y+(mouse?lift:0))/z.height));
+                _relAsked=YES; _finalAsked=YES; wait=YES; }
             if(wait) { _pendEnd=t; _pendEndTime=CACurrentMediaTime(); _pendWall=CACurrentMediaTime(); continue; }
         }
         for(int i=0;i<16;i++) if(_slot[i]==t) {

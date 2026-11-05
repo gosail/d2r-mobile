@@ -62,6 +62,8 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 1)", gesture)
         self.assertIn("_controls.mouse_item_mode=(t.type==UITouchTypeIndirectPointer)", ios)
         self.assertIn("g_touch.state.mouse_item_mode = g_live_on;", mac)
+        self.assertIn("t.type==UITouchTypeIndirectPointer?0:mouseLift", ios)
+        self.assertIn("ep.y+(mouse?lift:0)", ios)
         self.assertIn("tc.mouse_item_mode=e.mouse;", android)
 
     def test_native_monster_hud_uses_original_target_selector(self):

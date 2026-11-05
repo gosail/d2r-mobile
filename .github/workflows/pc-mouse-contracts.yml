@@ -30,6 +30,24 @@ jobs:
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
           /tmp/dm_test_keyboard
+      - name: Compile Android keyboard UI adapters against Android SDK
+        run: |
+          jar=$(find "${ANDROID_HOME}/platforms" -name android.jar | sort -V | tail -1)
+          test -n "$jar"
+          mkdir -p /tmp/dmkb/com/xiaoboluo/d2r /tmp/dmkb-classes
+          cat > /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java <<'STUB'
+          package com.xiaoboluo.d2r;
+          class DmActivity {
+              static native void nativeKeyboardEvent(int hid, boolean down);
+              static native int nativeKbAction(int hid);
+              static native boolean nativeKbBind(int hid, int action);
+              static native void nativeKbDefaults();
+          }
+          STUB
+          javac -cp "$jar" -d /tmp/dmkb-classes \
+            /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java \
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardInput.java \
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardSettings.java
 
   apple-syntax:
     runs-on: macos-15

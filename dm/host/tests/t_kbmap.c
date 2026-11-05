@@ -58,6 +58,13 @@ int main(int argc,char **argv) {
     pid_t pid=fork();assert(pid>=0);
     if(!pid){execl(argv[0],argv[0],root,(char*)0);_exit(127);}
     int status;assert(waitpid(pid,&status,0)==pid);assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);
+    dm_kbmap_controls_event("SettingsPanelMessage","CheckChanges","KeyBindingMenu");
+    assert(dm_kbmap_controls_visible());
+    dm_kbmap_controls_event("SettingsPanelMessage","CheckChanges","VideoOptionsPanel");
+    assert(!dm_kbmap_controls_visible());
+    dm_kbmap_controls_event("SettingsPanelMessage","CheckChanges","KeyBindingMenu");
+    dm_kbmap_controls_event("PanelManager","ClosePanel","SettingsPanel");
+    assert(!dm_kbmap_controls_visible());
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
     remove(fn);rmdir(save_dir);rmdir(root);
     puts("portable keyboard bindings: PASS");

@@ -29,3 +29,14 @@
 2. 同时回归手指单击、长按拖动、手柄技能绑定和切换 UI 的原逻辑。
 3. 无玩家实际 PC `.key` / `.ctl` 文件与原版行为基准时，二进制兼容不可标记通过。
 4. 静态 CI 只是代码约束，缺少用户资源时无法执行完整编译或游戏帧回放。
+
+## 键鼠配置（2026-11-06 调整）
+
+**取消 PC .key/.ctl 兼容要求。** 新增 `dm/host/dm_kbmap.c` 本地配置 `sw_keyboard.txt`，存于存档根目录同级，格式为 `D2RMobileKeyboard=1` 文件头加 `USB-HID-usage=action` 覆盖项。保存用临时文件 + 原子改名，不覆盖角色存档、原生手柄绑定表或 PC 文件。
+
+- **Mac 默认基线**：WASD = 左摇杆；J/K/U/I = A/B/X/Y；Q/E/Z/C = L/R/ZL/ZR；F/G = 摇杆点击；方向键 = 十字键；Space = A。移动端加 F1–F8 原生技能位、1–4 药水十字方向、M 地图。
+- **iOS**：`DmMetalView pressesBegan/Ended/Cancelled` 通过 `UIKey.keyCode`（USB HID 码）交给配置层；失活清除按下状态。控制页提供「键鼠设置」按键并可编辑、保存。
+- **Android**：`KeyboardInput.java` 把 `KeyEvent` 转同一 USB HID 码，由 JNI 交给独立键盘通道；控制页「键鼠设置」弹出编辑器，保存同格式；切后台或失焦清除按下状态。
+- **手柄**：继续使用原有 `KeyBindingMenu` 和 `dm_pad_set`，与 `dm_kb_set` 分离；触屏保留 `dm_input_set`。
+- **自动测试**：Linux 原生 C 对照覆盖默认键位、组合按键、松键、移动、F5 技能、M 地图以及重启读盘；静态检查三端入口，Apple Objective-C 语法检查，Android 键盘 UI 类 SDK Java 语法检查。
+- **待实机验证**：iPad 键盘能否稳定成为 first responder、Android 键盘系统截获、原游戏按键消费、控制页事件可见性、技能与药水实际效果、配置文件在各平台重启后是否正确载入；左中右鼠标按键的自由重新映射尚未实现。

@@ -23,6 +23,16 @@ class KeyboardContract(unittest.TestCase):
         for s in ("KEYCODE_F1","KEYCODE_DPAD_UP","SOURCE_GAMEPAD","KEYCODE_A","nativeKeyboardEvent"):
             self.assertIn(s,k)
         self.assertIn("dm_kbmap_key_event((unsigned)usage,down!=0)",n)
+    def test_controls_editor_entry(self):
+        native=src("host/dm_kbmap.c")
+        ui=src("ios/Sources/front_ios.m")
+        android=src("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java")
+        editor=src("android/app/src/main/java/com/xiaoboluo/d2r/KeyboardSettings.java")
+        self.assertIn('arg && !strcmp(arg,"KeyBindingMenu")',native)
+        self.assertIn('[self kbSettingsSync]',ui)
+        self.assertIn('dm_kbmap_bind(usage,(unsigned)action)',ui)
+        self.assertIn('KeyboardSettings.show(this)',android)
+        self.assertIn('DmActivity.nativeKbBind(KEYS[idx],ACTIONS[which])',editor)
     def test_local_non_pc_config(self):
         c=src("host/dm_kbmap.c")
         self.assertIn("sw_keyboard.txt",c)

@@ -880,9 +880,17 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                 // must never be followed by a synthetic left-button release.
                 BOOL middle=(event.buttonMask & (UIEventButtonMask)(1u<<2))!=0;
                 if (op==DM_MOUSE_DOWN && middle) {
-                    _mouseMiddleDown=YES;
-                    [self dmMouseEvent:DM_MOUSE_MIDDLE_DOWN point:p arg:0];
-                    continue;
+                    if (dm_kbmap_mouse_action(2)==0 &&
+                        (_navigation || [self dmMouseHitsTouchControl:p])) {
+                        if (!_pointerAsTouch) _pointerAsTouch=[NSMutableSet set];
+                        [_pointerAsTouch addObject:t];
+                        asTouch=YES;
+                        dm_external_mouse_event(DM_MOUSE_HOVER_END,0,0,0,0,0);
+                    } else {
+                        _mouseMiddleDown=YES;
+                        [self dmMouseEvent:DM_MOUSE_MIDDLE_DOWN point:p arg:0];
+                        continue;
+                    }
                 }
                 if (_mouseMiddleDown) {
                     if (op==DM_MOUSE_UP) {
@@ -891,7 +899,9 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                     } else if(op==DM_MOUSE_LEAVE) _mouseMiddleDown=NO;
                     continue;
                 }
-                if (op==DM_MOUSE_DOWN && !secondary && dm_kbmap_mouse_action(0)==0 &&
+                if (op==DM_MOUSE_DOWN && !asTouch &&
+                    ((!secondary && !middle && dm_kbmap_mouse_action(0)==0) ||
+                     (secondary && dm_kbmap_mouse_action(1)==0)) &&
                     (_navigation || [self dmMouseHitsTouchControl:p])) {
                     if (!_pointerAsTouch) _pointerAsTouch=[NSMutableSet set];
                     [_pointerAsTouch addObject:t];

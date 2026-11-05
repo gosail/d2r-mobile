@@ -28,6 +28,63 @@ static int g_live;   // App 形态（或 DM_TOUCH_LIVE=1）：鼠标进我们的
 static CAMetalLayer *g_layer;
 static NSWindow *g_win;
 static NSView *g_view;
+// Mouse-only overlay above Metal. It consumes no clicks and uses the same
+// guest-owned target snapshot as iPad/Android. AppKit layers use bottom-left Y.
+static CAShapeLayer *g_mouse_outline;
+static CALayer *g_mouse_back,*g_mouse_hp_bg,*g_mouse_hp_fill;
+static CATextLayer *g_mouse_label;
+static void mouse_hover_draw(void) {
+    if (!g_mouse_outline) {
+        g_mouse_outline=[CAShapeLayer layer];
+        g_mouse_outline.strokeColor=NSColor.systemYellowColor.CGColor;
+        g_mouse_outline.fillColor=NSColor.clearColor.CGColor;
+        g_mouse_outline.lineWidth=2;
+        g_mouse_back=[CALayer layer];
+        g_mouse_back.backgroundColor=[NSColor colorWithCalibratedWhite:0 alpha:0.82].CGColor;
+        g_mouse_back.cornerRadius=4;
+        g_mouse_label=[CATextLayer layer];
+        g_mouse_label.foregroundColor=NSColor.whiteColor.CGColor;
+        g_mouse_label.fontSize=15;
+        g_mouse_label.wrapped=YES;
+        g_mouse_hp_bg=[CALayer layer];
+        g_mouse_hp_bg.backgroundColor=NSColor.darkGrayColor.CGColor;
+        g_mouse_hp_fill=[CALayer layer];
+        g_mouse_hp_fill.backgroundColor=NSColor.systemRedColor.CGColor;
+        for (CALayer *l in @[g_mouse_outline,g_mouse_back,g_mouse_label,g_mouse_hp_bg,g_mouse_hp_fill])
+            [g_view.layer addSublayer:l];
+    }
+    dm_world_hover_view h={0};
+    BOOL active=g_live && dm_world_hover_read(&h);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    g_mouse_outline.hidden=g_mouse_back.hidden=g_mouse_label.hidden=g_mouse_hp_bg.hidden=g_mouse_hp_fill.hidden=YES;
+    if (active) {
+        NSRect gr=game_rect(); double W=gr.size.width,H=gr.size.height;
+        g_mouse_label.contentsScale=g_view.window.backingScaleFactor ?: 2;
+        if ((h.kind==2 || h.kind==4) && h.w>0 && h.h>0) {
+            CGRect r=CGRectMake(gr.origin.x+h.x*W-3,gr.origin.y+(1-h.y-h.h)*H-3,
+                                h.w*W+6,h.h*H+6);
+            CGPathRef p=CGPathCreateWithRoundedRect(r,4,4,NULL);
+            g_mouse_outline.path=p; CGPathRelease(p); g_mouse_outline.hidden=NO;
+        } else if ((h.kind==1 || h.kind==3) && h.title[0]) {
+            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+            NSString *details=(h.kind==3 && h.details[0]) ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
+            NSString *msg=details.length ? [NSString stringWithFormat:@"%@\n%@",name,details] : name;
+            CGFloat w=MIN(260,MAX(135,W*0.27)), ht=details.length ? 63 : 38;
+            CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+h.x*W-w/2));
+            CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
+            g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
+            g_mouse_label.frame=CGRectMake(x+8,y+7,w-16,ht-12);
+            g_mouse_label.string=msg;g_mouse_label.hidden=NO;
+            if (h.kind==3 && h.hp_max>0) {
+                CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
+                g_mouse_hp_bg.frame=CGRectMake(x+8,y+4,w-16,4);
+                g_mouse_hp_fill.frame=CGRectMake(x+8,y+4,(w-16)*ratio,4);
+                g_mouse_hp_bg.hidden=g_mouse_hp_fill.hidden=NO;
+            }
+        }
+    }
+    [CATransaction commit];
+}
 // 真全屏（App 形态，屏幕比 16:9 窄——16:10 的 MacBook，「不能全屏」：全屏后上下各 56 点黑边）：照 iPad 那套（front_ios.m、dm_uiscreen.c）——
 // 启动时按屏幕比例（全屏时的内容区：屏幕扣掉刘海安全区）定游戏分辨率，局内 3D 铺满、界面按 16:9 贴底（开大面板居中），前端各页与读取画面游戏自己按 16:9 出、上下留边。
 // 窗口锁成同一比例，窗口态与全屏态都铺满。屏幕不比 16:9 窄（外接 16:9 / 更宽的屏）：照旧全程 16:9。比例在启动时按主屏定，之后挪到别的屏不重算（游戏分辨率只在启动时定）。
@@ -217,13 +274,14 @@ void front_run(void (*guest)(void)) {
             (void)timer;
             BOOL hide = !dm_uiscreen_ingame() || (g_live && !dm_touch_host_world_active());
             dm_rift_hud_draw(v, NSRectToCGRect(game_rect()), hide);
+            mouse_hover_draw();
         }];
         [NSRunLoop.mainRunLoop addTimer:riftHUDTimer forMode:NSRunLoopCommonModes];
         [win center];
         g_live = getenv("DM_APP") || getenv("DM_TOUCH_LIVE"); if (g_live) dm_touch_host_live_enable();
 
-        // The original game UI owns monster bars, names and item labels.
-        // Mouse hover selects native candidates; never add a host-drawn HUD.
+        // The game supplies target data; our passive overlay shows the
+        // highlight even when this console UI does not draw a PC hover label.
 
         if (g_live) {
             win.acceptsMouseMovedEvents = YES;

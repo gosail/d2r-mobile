@@ -205,7 +205,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_BUTTON_RELEASE:
-                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0) return true;
+                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0) { op=10; break; }
                 if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
                     (a == MotionEvent.ACTION_UP && secondaryMouseDown)) {
                     op=6; secondaryMouseDown=false;

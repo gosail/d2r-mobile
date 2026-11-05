@@ -858,10 +858,13 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                     continue;
                 }
                 if (_mouseMiddleDown) {
-                    if (op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE) _mouseMiddleDown=NO;
+                    if (op==DM_MOUSE_UP) {
+                        [self dmMouseEvent:DM_MOUSE_MIDDLE_UP point:p arg:0];
+                        _mouseMiddleDown=NO;
+                    } else if(op==DM_MOUSE_LEAVE) _mouseMiddleDown=NO;
                     continue;
                 }
-                if (op==DM_MOUSE_DOWN && !secondary &&
+                if (op==DM_MOUSE_DOWN && !secondary && dm_kbmap_mouse_action(0)==0 &&
                     (_navigation || [self dmMouseHitsTouchControl:p])) {
                     if (!_pointerAsTouch) _pointerAsTouch=[NSMutableSet set];
                     [_pointerAsTouch addObject:t];

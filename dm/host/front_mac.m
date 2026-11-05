@@ -11,6 +11,7 @@
 #import <ImageIO/ImageIO.h>
 #include "dm.h"
 #include "dm_input.h"
+#include "dm_kbmap.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
 #include "dm_cursor.h"
@@ -218,25 +219,58 @@ static void push(void) {
     int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
     dm_input_set(g_btn, lx, ly, 0, g_wheel * 32767);
 }
-static int key_bit(unsigned short code) {
-    switch (code) {
-        case 38: return 0;  case 40: return 1;  case 32: return 2;  case 34: return 3;    // J K U I → A B X Y
-        case 3: return 4;   case 5: return 5;                                            // F G → 按摇杆 | F G → press stick
-        case 12: return 6;  case 14: return 7;  case 6: return 8;   case 8: return 9;    // Q E Z C → L R ZL ZR
-        case 36: return g_live ? 40 : 10; case 48: return 11;                            // 回车 Tab → + −（App 形态：回车交给 touch_mac.c 按当前页决定是 ＋ 还是确认，见那里） | Return Tab -> + - (App form: Return is handed to touch_mac.c, which decides by the current page whether it is + or confirm, see there)
-        case 24: case 69: return 10;                                                     // = 键（＋ 那个键）、小键盘 + → ＋ | the = key (the one with +) and keypad + -> +
-        case 49: return 0;                                                               // 空格 → A（确认） | Space -> A (confirm)
-        case 53: return g_live ? 41 : -1;                                                // Esc → 返回（App 形态；局内没有面板时是开功能页，touch_mac.c） | Esc -> back (App form; with no panel open in game it opens the function page, touch_mac.c)
-        case 123: return 12; case 126: return 13; case 124: return 14; case 125: return 15; // ← ↑ → ↓
+// USB HID usage adapter for AppKit virtual-key codes; same local binding
+// file as iPad/Android. Default J/K/U/I, WASD etc. remain unchanged.
+static unsigned char g_mac_keys_down[256],g_mac_actions[256];
+static int mac_hid_usage(unsigned short c) {
+    switch(c) {
+        case 0:return 0x04; case 1:return 0x16; case 2:return 0x07;
+        case 3:return 0x09; case 5:return 0x0a; case 6:return 0x1d;
+        case 8:return 0x06; case 12:return 0x14; case 13:return 0x1a;
+        case 14:return 0x08; case 24:return 0x2e; case 32:return 0x18;
+        case 34:return 0x0c; case 36:return 0x28; case 38:return 0x0d;
+        case 40:return 0x0e; case 46:return 0x10; case 48:return 0x2b;
+        case 49:return 0x2c; case 53:return 0x29; case 69:return 0x57;
+        case 123:return 0x50; case 126:return 0x52;
+        case 124:return 0x4f; case 125:return 0x51;
+        case 18:return 0x1e; case 19:return 0x1f;
+        case 20:return 0x20; case 21:return 0x21;
+        case 122:return 0x3a; case 120:return 0x3b;
+        case 99:return 0x3c; case 118:return 0x3d;
+        case 96:return 0x3e; case 97:return 0x3f;
+        case 98:return 0x40; case 100:return 0x41;
     }
     return -1;
 }
 static void on_key(NSEvent *e, int down) {
-    unsigned short c = e.keyCode;
-    switch (c) { case 13: g_w = down; break; case 0: g_a = down; break; case 1: g_s = down; break; case 2: g_d = down; break; }
-    int b = key_bit(c);
-    if (down && (b >= 0 || c == 13 || c <= 2)) dm_padmode_request_glyph(DM_GLYPH_KBD);   // 按了游戏用的键：键位图标换成键盘键帽（鼠标移动 / 点击不算） | a key used by the game was pressed: switch the key icons to keyboard key caps (mouse moves / clicks do not count)
-    if (b >= 0) g_btn = down ? (g_btn | 1ull << b) : (g_btn & ~(1ull << b));
+    int u=mac_hid_usage(e.keyCode);
+    if(u<0) return;
+    if((int)g_mac_keys_down[u]==!!down) return;
+    if(down) {
+        g_mac_actions[u]=(unsigned char)dm_kbmap_action((unsigned)u);
+        if(g_mac_actions[u]==DM_KB_MAP) dm_world_mouse_map_toggle();
+        g_mac_keys_down[u]=1;
+    } else g_mac_keys_down[u]=0;
+    g_btn=0;g_w=g_a=g_s=g_d=0;
+    int used=0;
+    for(unsigned k=0;k<256;k++)if(g_mac_keys_down[k]) {
+        int action=g_mac_actions[k];
+        if(action<16) { g_btn|=1ull<<action;used=1; }
+        else if(action==DM_KB_MOVE_UP) {g_w=1;used=1;}
+        else if(action==DM_KB_MOVE_LEFT) {g_a=1;used=1;}
+        else if(action==DM_KB_MOVE_DOWN) {g_s=1;used=1;}
+        else if(action==DM_KB_MOVE_RIGHT) {g_d=1;used=1;}
+        else if(action==DM_KB_ENTER) {g_btn|=1ull<<(g_live?40:10);used=1;}
+        else if(action==DM_KB_ESCAPE) {if(g_live)g_btn|=1ull<<41;used=1;}
+        else if(action==DM_KB_MAP)used=1;
+        else if(action>=DM_KB_SKILL1 && action<=DM_KB_SKILL8) {
+            static const unsigned btn[]={1,2,3,7};
+            int slot=action-DM_KB_SKILL1;
+            if(slot>=4)g_btn|=DM_BTN_ZL;
+            g_btn|=1ull<<btn[slot%4];used=1;
+        }
+    }
+    if(down && used)dm_padmode_request_glyph(DM_GLYPH_KBD);
     push();
 }
 
@@ -502,7 +536,7 @@ void front_run(void (*guest)(void)) {
                   LOG("DM_TEST_COVER：盖上 %.1f 秒，游戏窗口%s是主窗口", dur, win.isKeyWindow ? "" : "不");
                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dur * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [c orderOut:nil]; LOG("DM_TEST_COVER：拿开"); });
               }); }
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = 0; g_w = g_a = g_s = g_d = 0; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
         [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(1); }];
         [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
         [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];

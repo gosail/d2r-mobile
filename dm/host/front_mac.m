@@ -200,7 +200,7 @@ double front_display_refresh(char *name, size_t n) {
 - (void)keys:(id)s { (void)s; show_keys(); }
 - (void)share:(id)s { (void)s; share_logs_ui(); }
 @end
-static uint64_t g_btn;
+static uint64_t g_btn, g_mouse_btn; // independent held channels
 static int g_w, g_a, g_s, g_d;
 
 void *front_metal_layer(void) { return (__bridge void *)g_layer; }
@@ -217,7 +217,7 @@ static NSPoint g_test_last;   // 合成鼠标脚本：上一条带坐标的指�
 static int g_wheel;   // 滚轮：+1 / −1 = 右摇杆向上 / 向下推一小会儿（原版手柄版用右摇杆滚列表） | Wheel: +1 / -1 = push the right stick up / down for a short while (the original gamepad UI scrolls lists with the right stick)
 static void push(void) {
     int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
-    dm_input_set(g_btn, lx, ly, 0, g_wheel * 32767);
+    dm_input_set(g_btn | g_mouse_btn, lx, ly, 0, g_wheel * 32767);
 }
 // USB HID usage adapter for AppKit virtual-key codes; same local binding
 // file as iPad/Android. Default J/K/U/I, WASD etc. remain unchanged.
@@ -405,7 +405,7 @@ void front_run(void (*guest)(void)) {
                     }
                     return nil;
                 }
-                if (e.type == NSEventTypeRightMouseDown) g_btn |= DM_BTN_B; else g_btn &= ~(uint64_t)DM_BTN_B;
+                if (e.type == NSEventTypeRightMouseDown) g_mouse_btn |= DM_BTN_B; else g_mouse_btn &= ~(uint64_t)DM_BTN_B;
                 push(); return nil;
             }];
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp handler:^NSEvent *(NSEvent *e) {
@@ -536,7 +536,7 @@ void front_run(void (*guest)(void)) {
                   LOG("DM_TEST_COVER：盖上 %.1f 秒，游戏窗口%s是主窗口", dur, win.isKeyWindow ? "" : "不");
                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dur * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [c orderOut:nil]; LOG("DM_TEST_COVER：拿开"); });
               }); }
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = g_mouse_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
         [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(1); }];
         [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
         [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];

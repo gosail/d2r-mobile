@@ -359,7 +359,9 @@ static _Atomic int g_mouse_button_down;
 // Cleared on mouse-up; unlike mouse_stop(), a completed ground click keeps walking.
 void dm_world_mouse_release(void) {
     atomic_store(&g_mouse_button_down,0);
-    atomic_store(&g_mouse_lock,0);
+    // A queued repeat from this attack must not become a ground-walk after
+    // the button is released. Preserve existing one-click ground navigation.
+    if (atomic_exchange(&g_mouse_lock,0)) atomic_store(&g_walk,0);
 }
 void dm_world_mouse_map_toggle(void) { atomic_fetch_add(&g_mouse_map_toggle,1); }
 void dm_world_walk(float nx, float ny) { if (nx < 0) nx = 0; if (nx > 1) nx = 1; if (ny < 0) ny = 0; if (ny > 1) ny = 1; atomic_store(&g_walk, 1ull << 32 | (uint64_t)(uint32_t)(nx * 65535) << 16 | (uint32_t)(ny * 65535)); }   // 任意线程：排一笔，主线程取手柄处执行；后一笔覆盖前一笔 | any thread: queue one request, executed where the main thread reads the gamepad; a later request overwrites an earlier one

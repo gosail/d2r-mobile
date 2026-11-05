@@ -55,5 +55,24 @@ class PhysicalMouseParity(unittest.TestCase):
         self.assertIn("view.immune_mask", world)
         self.assertIn("view.tier", world)
 
+
+    def test_monster_hold_is_bound_to_original_id(self):
+        world = self.get("host/dm_world.c")
+        mac = self.get("host/touch_mac.c")
+        portable = self.get("host/dm_external_mouse.c")
+        self.assertIn("g_mouse_lock", world)
+        self.assertIn("w_find(1,id)", world)
+        self.assertIn("dm_world_mouse_release(); g_lm.owned", mac)
+        self.assertIn("dm_world_mouse_release();", portable)
+        self.assertIn("A dead/disappeared monster ends the hold without walking", world)
+
+    def test_item_stays_held_until_explicit_drop(self):
+        cursor = self.get("host/dm_cursor.c")
+        mac = self.get("host/touch_mac.c")
+        self.assertIn("physical_mouse_owns_item()", cursor)
+        self.assertIn("dm_ui_hover_now(x,y);", cursor)
+        self.assertIn("g_live_hover_latest", mac)
+        self.assertIn("fresh ? fresh : atomic_load(&g_live_hover_latest)", mac)
+
 if __name__ == "__main__":
     unittest.main()

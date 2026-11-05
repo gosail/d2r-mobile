@@ -460,6 +460,10 @@ void dm_android_touch_step(uint64_t guest_now, uint64_t *buttons, int32_t *lx, i
         }
     }
     if (!tc.pulse_button && dm_tc_pulse_pending(&tc) && resume_sample && sample >= resume_sample) { dm_tc_pulse_resume(&tc); resume_sample = 0; }
+    // A stationary physical pointer owns focus after its item click settles.
+    // Do not re-apply the old finger cursor over the newest mouse hover.
+    if (dm_external_mouse_active() && !mouse_touch_on && tc.pointer_slot==DM_TC_NONE &&
+        !tc.pulse_button && !dm_tc_pulse_pending(&tc)) tc.pointer_valid=0;
     if (tc.pointer_valid) dm_cursor_set_screen(tc.pointer_x,tc.pointer_y,width,height); else dm_cursor_clear();
     int active = 0; for (int i=0;i<DM_TC_MAX_TOUCH;++i) active |= tc.finger[i].active;
     dm_ui_hand_idle(!active && !tc.pulse_button && !dm_tc_pulse_pending(&tc) && !dm_cursor_pending() && !dm_ui_touch_active());

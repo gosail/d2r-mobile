@@ -4,7 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 // Read-only mouse hover result. kind: 0 none, 1 NPC (localized title),
-// 2 ground item (original rarity-coloured label outline), 3 hostile monster
+// 2 ground item (original rarity-coloured label outline), 3 hostile monster,
+// 4 interactable world object (outline only, no fabricated name)
 // (localized title when its player-derived NameStr key is available).
 // All coordinates are fractions of the actual rendered world, origin upper left.
 typedef struct {

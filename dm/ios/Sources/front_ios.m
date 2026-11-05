@@ -136,6 +136,9 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     BOOL _padMode, _feMode;   // 手柄模式 / 前端页面：两者任一成立就藏触屏控件层 | Controller mode / front-end page: the touch controls layer is hidden if either holds
     UIView *_rsCover;   // 一键重开期间的黑屏（宿主 dm_cursor.c 经 g_dm_restart_cover_hook 开关）：盖在窗口最上层（整屏，含真全屏的留边），不露主菜单，吞掉这段时间的触点 | Black screen during one-tap restart (toggled by the host's dm_cursor.c via g_dm_restart_cover_hook): covers the top of the window (whole screen, including the true-fullscreen margins), does not reveal the main menu, and swallows touch points during this period
     int _navigation;
+    CATextLayer *_mouseHoverLabel;
+    CALayer *_mouseHoverBacking, *_mouseHoverHpBg, *_mouseHoverHpFill;
+    CAShapeLayer *_mouseHoverOutline;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
     BOOL _mouseSecondaryDown;
     // Real mouse clicks on visible touch controls or a UI panel reuse the
@@ -513,6 +516,68 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
         [UIPointerShape shapeWithRoundedRect:CGRectMake(-10,-10,20,20)] constrainedAxes:0];
     return [UIPointerStyle systemPointerStyle];
 }
+// Non-interactive PC pointer target feedback. The engine provides all
+// names/health/immunity values; no touch or controller command is synthesized.
+- (void)mouseHoverSync {
+    dm_world_hover_view h={0};
+    BOOL active=!_info.hidden && !_navigation && dm_world_hover_read(&h);
+    if (!_mouseHoverOutline) {
+        _mouseHoverOutline=[CAShapeLayer layer];
+        _mouseHoverOutline.strokeColor=UIColor.systemYellowColor.CGColor;
+        _mouseHoverOutline.fillColor=UIColor.clearColor.CGColor;
+        _mouseHoverOutline.lineWidth=2.0;
+        [_info.layer addSublayer:_mouseHoverOutline];
+        _mouseHoverBacking=[CALayer layer];
+        _mouseHoverBacking.backgroundColor=[UIColor colorWithWhite:0 alpha:0.79].CGColor;
+        _mouseHoverBacking.cornerRadius=5;
+        [_info.layer addSublayer:_mouseHoverBacking];
+        _mouseHoverLabel=[CATextLayer layer];
+        _mouseHoverLabel.contentsScale=UIScreen.mainScreen.scale;
+        _mouseHoverLabel.fontSize=15;
+        _mouseHoverLabel.foregroundColor=UIColor.whiteColor.CGColor;
+        _mouseHoverLabel.wrapped=YES;
+        [_info.layer addSublayer:_mouseHoverLabel];
+        _mouseHoverHpBg=[CALayer layer];
+        _mouseHoverHpBg.backgroundColor=UIColor.darkGrayColor.CGColor;
+        [_info.layer addSublayer:_mouseHoverHpBg];
+        _mouseHoverHpFill=[CALayer layer];
+        _mouseHoverHpFill.backgroundColor=UIColor.systemRedColor.CGColor;
+        [_info.layer addSublayer:_mouseHoverHpFill];
+    }
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    _mouseHoverLabel.hidden=_mouseHoverBacking.hidden=_mouseHoverHpBg.hidden=_mouseHoverHpFill.hidden=YES;
+    _mouseHoverOutline.hidden=YES;
+    if (active) {
+        CGRect w=world_rect(self);
+        if ((h.kind==2 || h.kind==4) && h.w>0 && h.h>0) {
+            CGRect area=CGRectMake(w.origin.x+h.x*w.size.width,w.origin.y+h.y*w.size.height,
+                                  h.w*w.size.width,h.h*w.size.height);
+            _mouseHoverOutline.path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(area,-3,-3) cornerRadius:4].CGPath;
+            _mouseHoverOutline.hidden=NO;
+        } else if ((h.kind==1 || h.kind==3) && h.title[0]) {
+            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+            NSString *detail=h.kind==3 && h.details[0] ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
+            NSString *label=detail.length ? [NSString stringWithFormat:@"%@\n%@",name,detail] : name;
+            CGFloat width=MIN(260,MAX(120,w.size.width*0.28));
+            CGFloat height=detail.length ? 61 : 36;
+            CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+h.x*w.size.width-width/2));
+            CGFloat y=MAX(CGRectGetMinY(w),CGRectGetMinY(w)+h.y*w.size.height-height-9);
+            CGRect panel=CGRectMake(x,y,width,height);
+            _mouseHoverBacking.frame=panel; _mouseHoverBacking.hidden=NO;
+            _mouseHoverLabel.string=label;
+            _mouseHoverLabel.frame=CGRectInset(panel,8,6);
+            _mouseHoverLabel.hidden=NO;
+            if (h.kind==3 && h.hp_max>0) {
+                CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
+                CGRect track=CGRectMake(x+8,y+height-9,width-16,4);
+                _mouseHoverHpBg.frame=track;
+                _mouseHoverHpFill.frame=CGRectMake(track.origin.x,track.origin.y,track.size.width*ratio,track.size.height);
+                _mouseHoverHpBg.hidden=_mouseHoverHpFill.hidden=NO;
+            }
+        }
+    }
+    [CATransaction commit];
+}
 - (void)tickTouchControls:(double)now {
     if (@available(iOS 13.4,*)) {
         int hint=dm_mouse_pointer_hint();
@@ -521,8 +586,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
             [_nativePointerInteraction invalidate];
         }
     }
-    // Original controller UI renders the selected monster and its status.
-    // No separate UIKit monster/loot tooltip is composited over the game.
+    [self mouseHoverSync];
     [self mapGoalSync];
     [self mapHeadingSync];
     [self threatsSync];
@@ -570,7 +634,8 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     // The tooltip shows only while a finger is down / just after a tap: the game keeps showing the tooltip for the cell the controller cursor rests on, so with touch it stays covering things after release (covers the middle of the skill tree, the tabs on the vendor page, and lingers after a drag and drop).
     // The tooltip cannot be closed, so the approach is the same as binding mode: when the time is up, park the cursor at the left edge of the screen (outside the panel). Do nothing while holding an item, in binding mode, or while keys are still being delivered.
     // Panel just opened and not tapped yet: the game puts the controller cursor on the belt by default, and with a multi-row belt the belt stays expanded over the ring slot, so tapping the ring hits a potion and a double tap drinks it -- park the cursor away at the moment the panel opens too
-    if(!_controls.navigation_mode || _padMode) _tipUntil=-2;   // 手柄模式：光标归原版手柄管，不发停靠请求（停靠请求一直有效，物品栏里十字键 / 摇杆挪不动光标） | Controller mode: the cursor belongs to the original controller handling, so no park request is sent (a park request stays in effect indefinitely, and the D-pad / stick could not move the cursor in the inventory)
+    if (dm_external_mouse_active() && !_pointerAsTouch.count) _tipUntil=-1;
+    else if(!_controls.navigation_mode || _padMode) _tipUntil=-2;   // 手柄模式：光标归原版手柄管，不发停靠请求（停靠请求一直有效，物品栏里十字键 / 摇杆挪不动光标） | Controller mode: the cursor belongs to the original controller handling, so no park request is sent (a park request stays in effect indefinitely, and the D-pad / stick could not move the cursor in the inventory)
     else if(_controls.pointer_slot>=0) _tipUntil=-1;   // 手指按着：不收（松手时重新计时） | Finger down: do not close (timing restarts on release)
     else if(_tipUntil==-2) { if(dm_ui_free_cursor()) _tipUntil=now+0.3; }   // 只在有自由光标的页停（暂停菜单 / 主菜单这类不动：冒烟玩家路径红） | Park only on pages with a free cursor (pause menu / main menu and the like stay put: smoke test player path fails)
     else if(_tipUntil>0 && now>=_tipUntil && !_controls.holding && !dm_ui_bind_active() && !dm_ui_touch_active() && !_controls.pulse_button && !dm_tc_pulse_pending(&_controls) && !dm_cursor_pending()) {   // dm_ui_touch_active：这一下点击宿主还没处理完（点绑定框格子要等它处理了才进绑定态）——不等的话光标先被挪走，游戏的绑定框就不认随后的键 | dm_ui_touch_active: the host has not finished handling this click (tapping a binding box cell enters binding mode only after it is handled) -- without waiting, the cursor is moved away first and the game's binding box does not accept the following key
@@ -581,6 +646,9 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     if(_controls.buttons!=tb && !_controls.pulse_button) [self pushFrom:"tick" phase:"none"];   // tick 里键位变了（第二组：主钮的键在 ZL 领先够了那一拍补上） | Key state changed in tick (second set: the main button's key is added on the tick when ZL has led long enough)
     else if(_controls.belt_request && !_controls.pulse_button) [self pushFrom:"tick" phase:"none"];   // 腰带上面几排的单击过了双击窗（dm_tc_tick 里定下的 belt_request）：当拍交宿主，不等下一次触摸 | A single tap on the upper belt rows has passed the double-tap window (belt_request decided in dm_tc_tick): hand it to the host within this tick, without waiting for the next touch
     if(_controls.pulse_button && !_pulseTicking) { [self pushFrom:"tick" phase:"none"]; [self armPulseEnd]; }   // tick 里起的脉冲（面板外点按后「按 B 到面板关掉」的后续几下） | Pulses started in tick (the follow-up presses of "press B until the panel closes" after a tap outside the panel)
+    if (dm_external_mouse_active() && !_pointerAsTouch.count &&
+        _controls.pointer_slot==DM_TC_NONE && !_controls.pulse_button && !dm_tc_pulse_pending(&_controls))
+        _controls.pointer_valid=0;
     if (_controls.pointer_valid)
         dm_cursor_set_screen(_controls.pointer_x, _controls.pointer_y, self.bounds.size.width, self.bounds.size.height);
     else if (_controls.navigation_mode) dm_cursor_clear();   // 手势层放开了手柄光标（触点不在物品区）：不再推摇杆 | The gesture layer released the controller cursor (touch point not in an item area): stop pushing the stick

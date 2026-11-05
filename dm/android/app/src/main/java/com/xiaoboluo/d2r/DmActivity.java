@@ -95,6 +95,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private SurfaceView view;
     private FrameLayout gameFrame;
     private TouchOverlay touchOverlay;
+    private MouseHoverOverlay mouseHoverOverlay;
     private boolean started;
     private boolean secondaryMouseDown;
     boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
@@ -422,6 +423,9 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
             });
             if (BuildConfig.DEBUG && getIntent().getBooleanExtra("dmNoHud", false)) touchOverlay.setDebugNoHud(true);   // 调试包：量游戏自己的 HUD 时不画自绘层 | debug builds: no overlay drawing while measuring the game's own HUD
             gameFrame.addView(touchOverlay, new FrameLayout.LayoutParams(-1, -1));
+            // Non-interactive world pointer feedback stays above the touch HUD.
+            mouseHoverOverlay = new MouseHoverOverlay(this);
+            gameFrame.addView(mouseHoverOverlay, new FrameLayout.LayoutParams(-1, -1));
             touchOverlay.requestApplyInsets();
         }
         if (!view.getHolder().getSurface().isValid() || view.getWidth() <= 0 || view.getHeight() <= 0) return;

@@ -199,10 +199,12 @@ int dm_ui_mouse_hover_now(float nx, float ny) {
         // The native cursor (and held item sprite) follows the mouse between
         // clicks. Hover never issues a synthetic drop or a second A press.
         atomic_store(&g_mouse_item_hover,0);
-        dm_ui_hover_now(x,y);
-        return 0;
+        int ok=dm_ui_hover_now(x,y);
+        if (ok) dm_cursor_clear(); // stale touch pointer must not snap back
+        return ok;
     }
     int ok = dm_ui_hover_now(x, y);
+    if (ok) dm_cursor_clear();
     dm_cursor_item_info hover_item={0};
     int item=ok && nx>=0 && nx<=1 && ny>=0 && ny<=1 &&
              dm_cursor_item(&hover_item) && hover_item.container!=DM_ITEM_AT_SHOP;

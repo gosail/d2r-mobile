@@ -493,7 +493,7 @@ static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, in
     for (uint64_t k = 0; rec && k < n && k < 512; k++) { int32_t *r = (int32_t *)(rec + k * 0x148); if (r[2] <= 0 || r[3] <= 0 || r[4] == -1) continue;
         if (dump) LOG("世界目标：标签 物品 id %d 矩形 (%d,%d %dx%d)", r[4], r[0], r[1], r[2], r[3]);
         if (w_in_rect(sx, sy, r[0] + r[2] / 2.0f, r[1] + dm_ui_proj_dy() + r[3] / 2.0f, (float)r[2], (float)r[3], min, &d) && d < bd) { uint64_t u = w_find(4, (uint32_t)r[4]); if (u && *(uint32_t *)(u + 0xc) == 3) { bd = d; best = u; brank = 0; *by_label = 1; } } }
-    for (int t = 0; t <= 5; t++) { if (t == 3 || (hover_only && t != 1)) continue;   // Hover never selects objects, doors or corpses. Existing tap behaviour is unchanged.
+    for (int t = 0; t <= 5; t++) { if (t == 3 || (hover_only && t != 1 && t != 2)) continue;   // Hover never selects objects, doors or corpses. Existing tap behaviour is unchanged.
         for (int k = 0; k < 128; k++) for (uint64_t u = *(uint64_t *)(b + 0x2d603a0 + t * 0x400 + k * 8); u; u = *(uint64_t *)(u + 0x158)) {
             if (t == 4 && *(uint32_t *)(u + 0xc) != 3) continue;   // 物品只认在地上的 | items only count when on the ground
             if (!(((int (*)(uint64_t, int, int, int, int))(b + 0x464a70))(u, 0, 0, -1, -1) & 1)) continue;
@@ -612,8 +612,48 @@ if (cat == 5 || cat == 1 || cat == 0xa) {
                             // health, affixes and resistances. Only publish the
                             // hovered unit ID for the native target selector.
                             native_mon_id=*(uint32_t *)(unit+8);
+                            // Read combat stats only on the guest game thread.
+                            // Stat indices follow the game's itemstatcost table.
+                            // HP values are stored as fixed-point 8-bit fractions.
+                            int (*stat)(uint64_t,int,int)=(void *)(b+0x5b9290);
+                            int current=stat(unit,6,0), maximum=stat(unit,7,0);
+                            if (maximum>0 && maximum<0x40000000 && current>=0 && current<=maximum) {
+                                view.hp=(current+255)>>8;
+                                view.hp_max=(maximum+255)>>8;
+                            }
+                            extern int dm_threat_tier(uint64_t) __attribute__((weak));
+                            int rank=dm_threat_tier ? dm_threat_tier(unit) : -1;
+                            if (rank<0) {
+                                uint64_t md=*(uint64_t *)(unit+0x10);
+                                unsigned f=md ? *(uint8_t *)(md+0x1a) : 0;
+                                rank=(f&0x0a)?2:(f&0x04)?1:0;
+                            }
+                            view.tier=rank;
+                            const int stat_id[6]={36,37,39,41,43,45};
+                            const char *en[6]={"Physical","Magic","Fire","Lightning","Cold","Poison"};
+                            const char *zh[6]={"物理","魔法","火焰","闪电","冰冷","毒素"};
+                            for (int z=0;z<6;z++) if (stat(unit,stat_id[z],0)>=100) {
+                                view.immune_mask|=1u<<z;
+                                const char *s=dm_lang_zh()?zh[z]:en[z];
+                                if (view.details[0]) strlcat(view.details,", ",sizeof view.details);
+                                strlcat(view.details,s,sizeof view.details);
+                            }
+                            if (view.details[0])
+                                strlcat(view.details,dm_lang_zh()?"免疫":" immune",sizeof view.details);
+                            // The native target selector still applies the game's
+                            // eligibility/range/LOS rules; this is display only.
                         }
                     }
+                }
+            } else if (unit && *(uint32_t *)unit == 2) {
+                // Interactable objects, portals and waypoints have a pointer
+                // selection outline too, without issuing a click or walk.
+                float p[2]; uint64_t scene=*(uint64_t *)(b+0x2e2a698);
+                if (scene && w_project(b,scene,unit,p,0)) {
+                    view.kind=4;
+                    view.x=fmaxf(0,fminf(1,(p[0]-W*0.017f)/W));
+                    view.y=fmaxf(0,fminf(1,(p[1]-H*0.045f)/H));
+                    view.w=0.034f; view.h=0.045f;
                 }
             } else if (unit && *(uint32_t *)unit == 4 && label) {
                 // Highlight only a visible, original ground item label. This

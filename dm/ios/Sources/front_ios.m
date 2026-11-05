@@ -132,6 +132,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     UITouch *_slot[16];   // 强引用（真机 SIGSEGV：原先不保留，某条路径没清槽时手指对象已释放，下次 pushFrom 读它就崩）。所有结束 / 取消路径都要清槽 | Strong references (real-device SIGSEGV: previously not retained, so when some path failed to clear the slot the finger object was already released and the next pushFrom crashed reading it). All end / cancel paths must clear the slot
     dm_tc_state _controls;
     DmTouchOverlay *_overlay;
+    UIButton *_kbSettingsButton;
     UIView *_info;   // 信息层：秘境任务条、小地图任务终点。不是触屏控件，手柄模式也要显示（只在前端页面藏），所以不挂在 _overlay 上 | info layer: the Rift objective bar and the minimap quest goal. These are not touch controls and must show in controller mode too (hidden only on front-end pages), so they are not attached to _overlay
     NSHashTable<UITouch *> *_swallow;   // 手柄模式下落下的手指：只用来切回触屏模式，整根（按下 / 移动 / 抬起）不交给手势层和界面点击 | Fingers that landed in controller mode: used only to switch back to touch mode; the whole touch (down / move / up) is not passed to the gesture layer or UI clicks
     BOOL _padMode, _feMode;   // 手柄模式 / 前端页面：两者任一成立就藏触屏控件层 | Controller mode / front-end page: the touch controls layer is hidden if either holds
@@ -156,6 +157,93 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     int32_t _minLeft,_maxLeft; uint64_t _lastButtons; unsigned _touchAPresses,_touchShots; UITouch *_uiFinger; CGPoint _uiFeO; BOOL _uiFeDrag; BOOL _uiDragOn; UITouch *_mapTouch, *_bindTouch; UIView *_ghostDim; BOOL _ghostOn; uint64_t _bindKey; uint32_t _selId; double _statNext; double _tipUntil, _addAt; unsigned _mapWorldSeq; BOOL _mapWorldAsked; CGPoint _mapWorldPt; CGPoint _mapP0, _bindP0; double _mapT0; BOOL _pulseTicking; uint64_t _pulseEpoch,_pulseS0; double _pulseT0,_pulseSeen,_pulseFree; unsigned _itemSeq,_relSeq; BOOL _relAsked,_itemAsked; int _itemKind;
 }
 + (Class)layerClass { return CAMetalLayer.class; }
+// Keyboard editor belongs to the Controls tab; controller's native
+// KeyBindingMenu is left in place and continues to save gamepad mappings.
+static NSString *kbActionLabel(int action) {
+    static const int ids[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+        16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
+    static NSArray<NSString *> *names;
+    if(!names)names=@[@"A / Confirm",@"B / Back",@"X",@"Y",@"Left stick click",@"Right stick click",
+        @"L",@"R",@"ZL",@"ZR",@"Menu (+)",@"Menu (-)",@"Potion 1 / Left",
+        @"Potion 2 / Up",@"Potion 3 / Right",@"Potion 4 / Down",
+        @"Move Up",@"Move Left",@"Move Down",@"Move Right",
+        @"Confirm / Enter",@"Back / Escape",@"Toggle Map",
+        @"Skill 1",@"Skill 2",@"Skill 3",@"Skill 4",
+        @"Skill 5",@"Skill 6",@"Skill 7",@"Skill 8",@"Unbound"];
+    for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++)if(action==ids[i])return names[i];
+    return @"Unbound";
+}
+- (void)kbChooseUsage:(unsigned)usage label:(NSString *)keyName {
+    static const int ids[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+        16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
+    UIAlertController *pick=[UIAlertController alertControllerWithTitle:keyName
+        message:dm_lang_zh()?@"选择按键功能（独立于手柄）":@"Select keyboard action (separate from controller)"
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++) {
+        int action=ids[i];
+        [pick addAction:[UIAlertAction actionWithTitle:kbActionLabel(action)
+          style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            (void)a;
+            if(!dm_kbmap_bind(usage,(unsigned)action)) {
+                UIAlertController *error=[UIAlertController alertControllerWithTitle:@"Save failed"
+                  message:@"Could not write sw_keyboard.txt" preferredStyle:UIAlertControllerStyleAlert];
+                [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                [self.window.rootViewController presentViewController:error animated:YES completion:nil];
+            } else [self kbSettingsOpen];
+          }]];
+    }
+    [pick addAction:[UIAlertAction actionWithTitle:dm_lang_zh()?@"取消":@"Cancel"
+        style:UIAlertActionStyleCancel handler:nil]];
+    pick.popoverPresentationController.sourceView=_kbSettingsButton;
+    pick.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
+    [self.window.rootViewController presentViewController:pick animated:YES completion:nil];
+}
+- (void)kbSettingsOpen {
+    static const unsigned char usages[]={
+        0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
+        0x28,0x29,0x2b,0x2c,0x2e,0x50,0x52,0x4f,0x51,0x1e,0x1f,0x20,0x21,
+        0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x10
+    };
+    NSArray<NSString *> *keys=@[@"W",@"A",@"S",@"D",@"J",@"K",@"U",@"I",@"F",@"G",
+        @"Q",@"E",@"Z",@"C",@"Enter",@"Escape",@"Tab",@"Space",@"=",
+        @"←",@"↑",@"→",@"↓",@"1",@"2",@"3",@"4",
+        @"F1",@"F2",@"F3",@"F4",@"F5",@"F6",@"F7",@"F8",@"M"];
+    UIAlertController *list=[UIAlertController alertControllerWithTitle:
+        (dm_lang_zh()?@"控制 · 键鼠":@"Controls · Keyboard")
+        message:(dm_lang_zh()?@"选择要修改的物理按键":@"Choose a physical key to rebind")
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for(NSUInteger i=0;i<keys.count;i++) {
+        unsigned usage=usages[i]; NSString *label=keys[i];
+        NSString *caption=[NSString stringWithFormat:@"%@  →  %@",label,kbActionLabel(dm_kbmap_action(usage))];
+        [list addAction:[UIAlertAction actionWithTitle:caption style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction *a) {(void)a;[self kbChooseUsage:usage label:label];}]];
+    }
+    [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复默认键位":@"Restore defaults")
+        style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+            (void)a; dm_kbmap_restore_defaults();[self kbSettingsOpen];
+        }]];
+    [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"关闭":@"Close")
+        style:UIAlertActionStyleCancel handler:nil]];
+    list.popoverPresentationController.sourceView=_kbSettingsButton;
+    list.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
+    [self.window.rootViewController presentViewController:list animated:YES completion:nil];
+}
+- (void)kbSettingsSync {
+    BOOL visible=dm_kbmap_controls_visible()!=0 && !_feMode;
+    if(!visible && !_kbSettingsButton)return;
+    if(!_kbSettingsButton) {
+        _kbSettingsButton=[UIButton buttonWithType:UIButtonTypeSystem];
+        _kbSettingsButton.backgroundColor=[UIColor colorWithWhite:.10 alpha:.9];
+        _kbSettingsButton.layer.cornerRadius=9;
+        [_kbSettingsButton setTitle:(dm_lang_zh()?@"键鼠设置":@"Keyboard") forState:UIControlStateNormal];
+        [_kbSettingsButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        [_kbSettingsButton addTarget:self action:@selector(kbSettingsOpen) forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:_kbSettingsButton];
+    }
+    _kbSettingsButton.frame=CGRectMake(MAX(0,self.bounds.size.width-128),20,118,42);
+    _kbSettingsButton.hidden=!visible;
+}
+
 // iPad external keyboards report USB HID usages via UIKey.keyCode.
 // A real finger, a physical controller and a physical keyboard keep
 // independent host input channels; text-entry modals own first responder.
@@ -620,6 +708,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
         }
     }
     [self mouseHoverSync];
+    [self kbSettingsSync];
     [self mapGoalSync];
     [self mapHeadingSync];
     [self threatsSync];

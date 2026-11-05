@@ -3098,7 +3098,10 @@ static const char *sel_cur(uint8_t *b, const char *want, int64_t *at) {   // 当
 }
 static void sel_keep(const char *cat, const char *act) {
     module_t *m = main_module(); if (!m) return; uint8_t *b = (uint8_t *)m->base; uint64_t fr = dm_guest_frame();
-    if (!strcmp(cat, "CharacterSelect") && !strcmp(act, "SelectCharacter")) { const char *nm = sel_cur(b, NULL, NULL); g_sel_name[0] = 0; if (nm) { strlcpy(g_sel_name, nm, sizeof g_sel_name); g_sel_fr = fr; } return; }
+    if (!strcmp(cat, "CharacterSelect") && !strcmp(act, "SelectCharacter")) { const char *nm = sel_cur(b, NULL, NULL); g_sel_name[0] = 0; if (nm) { strlcpy(g_sel_name, nm, sizeof g_sel_name); g_sel_fr = fr;
+        void dm_kbmap_select_character(const char *) __attribute__((weak));
+        if(dm_kbmap_select_character) dm_kbmap_select_character(nm);
+    } return; }
     if (!g_sel_name[0] || strcmp(act, "UpdateCharacterInfo")) return;
     if (fr - g_sel_fr > 120) { g_sel_name[0] = 0; return; }   // 只管确认后紧跟的那次重排；之后玩家再移高亮是另一回事 | Only handles the one re-sort right after the confirm; the player moving the highlight afterwards is a different matter
     int64_t at; const char *nm = sel_cur(b, g_sel_name, &at); char want[17]; strlcpy(want, g_sel_name, sizeof want); g_sel_name[0] = 0;

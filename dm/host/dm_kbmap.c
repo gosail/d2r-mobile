@@ -1,5 +1,6 @@
 // Shared keyboard binding/persistence layer for macOS defaults, iOS and Android.
-// File: <save root>/../sw_keyboard.txt. Never touches character .key/.ctl files.
+// Per-character file: <save root>/<hero>/<hero>.key, using D2RMobileKeyboard=1.
+// The game's native <hero>.ctl is left entirely under its own control.
 #include "dm_kbmap.h"
 #include "dm_input.h"
 #include "dm_world.h"
@@ -10,12 +11,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 const char *dm_save_commitdir(void);
+const char *dm_save_workdir(void);
+void dm_kb_clear(void);
 static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char map[256],def[256],down[256],active[256];
 static unsigned char mouse_map[3]={0,1,2};
-static int inited,loaded;
+static int inited,loaded,foreign_format;
+static char hero[64]; // selected character, protected by km_mu
 static void defaults(unsigned char *m) {
     memset(m,DM_KB_UNBOUND,256);
     // Same physical keys as front_mac.m: WASD, J/K/U/I, F/G, Q/E/Z/C.
@@ -40,11 +45,36 @@ static int valid(unsigned a) {
     return a<20 || a==DM_KB_ENTER || a==DM_KB_ESCAPE ||
         a==DM_KB_MAP || (a>=DM_KB_SKILL1 && a<=DM_KB_SKILL8) || a==DM_KB_UNBOUND;
 }
-static int filename(char *out,size_t n) {
-    const char *root=dm_save_commitdir();
-    if (!root || !*root) return 0; // mount is not ready; retry on next event
-    int len=snprintf(out,n,"%s/../sw_keyboard.txt",root);
+// Reject path separators and unselected/empty hero names. Names are copied
+// from the game's own selected or in-world unit, never from UI text fields.
+static int hero_name_ok(const char *name) {
+    if(!name || !*name || strlen(name)>48 || !strcmp(name,".") || !strcmp(name,".."))
+        return 0;
+    for(const unsigned char *p=(const unsigned char *)name;*p;p++)
+        if(*p<' ' || *p=='/' || *p=='\\' || *p==127) return 0;
+    return 1;
+}
+static int filename_at(char *out,size_t n,const char *root) {
+    if(!root || !*root || !hero_name_ok(hero))return 0;
+    int len=snprintf(out,n,"%s/%s/%s.key",root,hero,hero);
     return len>0 && (size_t)len<n;
+}
+static int filename(char *out,size_t n) {
+    return filename_at(out,n,dm_save_commitdir());
+}
+void dm_kbmap_select_character(const char *name) {
+    if(!hero_name_ok(name))return;
+    pthread_mutex_lock(&km_mu);
+    init_locked();
+    if(strcmp(hero,name)) {
+        snprintf(hero,sizeof hero,"%s",name);
+        memcpy(map,def,sizeof map);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;
+        memset(down,0,sizeof down);memset(active,0,sizeof active);
+        loaded=foreign_format=0;
+        // load on first read, so a newly mounted save is visible.
+        dm_kb_clear();
+    }
+    pthread_mutex_unlock(&km_mu);
 }
 static void load_locked(void) {
     init_locked();
@@ -52,9 +82,12 @@ static void load_locked(void) {
     char fn[1152];
     if (!filename(fn,sizeof fn)) return;
     loaded=1;
-    FILE *f=fopen(fn,"r");if(!f)return;
+    FILE *f=fopen(fn,"rb");if(!f)return;
     char line[128];
-    if(!fgets(line,sizeof line,f) || strcmp(line,"D2RMobileKeyboard=1\n")) {fclose(f);return;}
+    if(!fgets(line,sizeof line,f) || strcmp(line,"D2RMobileKeyboard=1\n")) {
+        // A pre-existing native/PC .key belongs to its owner; never truncate.
+        foreign_format=1;fclose(f);return;
+    }
     while(fgets(line,sizeof line,f)) {
         unsigned usage=0,action=0;char extra=0;
         if(sscanf(line,"mouse%u=%u %c",&usage,&action,&extra)==2) {
@@ -66,11 +99,21 @@ static void load_locked(void) {
     }
     fclose(f);
 }
-static int save_locked(void) {
+// Write to a requested save tree via atomic rename; refuse to overwrite a
+// .key that was not written by this program.
+static int save_to(const char *root) {
     char fn[1152],tmp[1176];
-    if(!filename(fn,sizeof fn))return 0;
+    if(foreign_format || !filename_at(fn,sizeof fn,root))return 0;
+    FILE *old=fopen(fn,"rb");
+    if(old) {
+        char header[128];
+        int ours=fgets(header,sizeof header,old) &&
+                  !strcmp(header,"D2RMobileKeyboard=1\n");
+        fclose(old);
+        if(!ours)return 0;
+    }
     if(snprintf(tmp,sizeof tmp,"%s.tmp",fn)<=0)return 0;
-    FILE *f=fopen(tmp,"w");if(!f)return 0;
+    FILE *f=fopen(tmp,"wb");if(!f)return 0;
     int ok=fputs("D2RMobileKeyboard=1\n",f)>=0;
     for(unsigned i=0;ok && i<256;i++)if(map[i]!=def[i])
         ok=fprintf(f,"%02x=%u\n",i,(unsigned)map[i])>0;
@@ -81,6 +124,45 @@ static int save_locked(void) {
     if(!ok)remove(tmp);
     return ok;
 }
+static int save_locked(void) {
+    const char *commit=dm_save_commitdir();
+    const char *work=dm_save_workdir();
+    // Keep the live transaction copy and durable committed copy aligned.
+    // A game save clones work -> commit; pre-commit below refreshes the key.
+    if(work && strcmp(work,commit?commit:"") && !save_to(work))return 0;
+    return save_to(commit);
+}
+void dm_kbmap_pre_commit(const char *workdir) {
+    if(!workdir)return;
+    pthread_mutex_lock(&km_mu);
+    // Do not synthesize a .key before the user explicitly edits bindings.
+    // Only sync a file that we own from the committed directory.
+    char fn[1152];
+    if(filename(fn,sizeof fn)) {
+        FILE *f=fopen(fn,"rb");
+        char buf[4096],header[128];
+        size_t n=0;
+        if(f && fgets(header,sizeof header,f) &&
+           !strcmp(header,"D2RMobileKeyboard=1\n")) {
+            size_t h=strlen(header);memcpy(buf,header,h);n=h;
+            n+=fread(buf+n,1,sizeof buf-n,f);
+            if(feof(f) && n<sizeof buf) {
+                char dst[1152],tmp[1176];
+                if(filename_at(dst,sizeof dst,workdir) &&
+                   snprintf(tmp,sizeof tmp,"%s.tmp",dst)>0) {
+                    FILE *out=fopen(tmp,"wb");
+                    int ok=out && fwrite(buf,1,n,out)==n;
+                    if(out && fclose(out))ok=0;
+                    if(ok)ok=rename(tmp,dst)==0;
+                    if(!ok)remove(tmp);
+                }
+            }
+        }
+        if(f)fclose(f);
+    }
+    pthread_mutex_unlock(&km_mu);
+}
+
 int dm_kbmap_action(unsigned usage) {
     if(usage>=256)return DM_KB_UNBOUND;
     pthread_mutex_lock(&km_mu);load_locked();

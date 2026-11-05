@@ -18,3 +18,8 @@ void dm_kbmap_controls_event(const char *category,const char *action,const char 
 // 0 primary/click, 1 secondary/use, 2 toggle map. Same local config.
 int dm_kbmap_mouse_action(unsigned physical);
 int dm_kbmap_bind_mouse(unsigned physical,unsigned action);
+
+// Called on the guest game thread when the active/selected character changes.
+void dm_kbmap_select_character(const char *name);
+// Invoked before a transactional game save; never touches native .ctl.
+void dm_kbmap_pre_commit(const char *workdir);

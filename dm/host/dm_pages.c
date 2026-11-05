@@ -318,7 +318,10 @@ static void pg_sock_test(uint64_t G, uint64_t player, uint8_t *b, uint32_t tq) {
 void dm_pages_tick(uint64_t G, uint64_t player, uint8_t *b) {   // 服务端拍（diag.c hud_tick）；不在局内 player 为 0 | Server tick (hud_tick in diag.c); player is 0 when not in a run
     static uint64_t lp; if (!player) { lp = 0; g_pload = 0; return; }
     uint32_t tq = *(uint32_t *)(G + 0x170);
-    if (player != lp) { lp = player; uint64_t pd = *(uint64_t *)(player + 0x10); pthread_mutex_lock(&g_pmu); strlcpy(g_pchar, pd ? (const char *)pd : "", sizeof g_pchar);
+    if (player != lp) { lp = player; uint64_t pd = *(uint64_t *)(player + 0x10);
+        { void dm_kbmap_select_character(const char *) __attribute__((weak));
+          if(dm_kbmap_select_character && pd) dm_kbmap_select_character((const char *)pd); }
+        pthread_mutex_lock(&g_pmu); strlcpy(g_pchar, pd ? (const char *)pd : "", sizeof g_pchar);
         { const char *sn = dm_stash_name(b); strlcpy(g_pstash, sn ? sn : "", sizeof g_pstash); } pages_load(b, player); g_pload = 1; pthread_mutex_unlock(&g_pmu); }
     { pthread_mutex_lock(&g_pmu);
       { static uint64_t pv, tick_seq; uint64_t v = *(uint64_t *)(G + 0x5800), w = dm_fs_d2s_wseq();   // [G+0x5800] 变成真时刻 = 游戏序列化了（请存盘时我们拨成 1） | [G+0x5800] became a real time = the game serialized (we set it to 1 when requesting a save)

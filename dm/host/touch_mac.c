@@ -5,6 +5,7 @@
 #include "dm_hud.h"
 #include "../ios/Sources/dm_touch_controls.h"
 #include "dm_uiscreen.h"
+#include "dm_world.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,18 +59,27 @@ static struct { _Atomic unsigned head, tail; struct { int op; float nx, ny; } q[
 // 悬停只留最新位置，不占点击队列；位 63 = 待处理，位 62 = 已离开画面。游戏线程才读界面树。
 // Coalesce hover positions outside the click queue; bit 63 = pending, bit 62 = outside the picture. Only the game thread reads UI widgets.
 static _Atomic uint64_t g_live_hover;
+// Keep the last stationary pointer position: a queued inventory action may
+// temporarily suppress hover, so retry it after the action completes.
+static _Atomic uint64_t g_live_hover_latest;
+static int g_live_right_held,g_live_right_latch;
 // 世界手势从按下到抬起独占；点选答案只用于空地回退，不能让抬起再触发一次。
 // Own a world gesture from down through up; the pick result only supplies the ground fallback, never a second click on release.
 static struct { int owned, down, repeat; uint32_t last; float x, y; unsigned tap_seq; float tap_x, tap_y; } g_lm;
 void dm_touch_host_live(int op, float nx, float ny) {   // 前端线程：op 0 按下 1 拖动 2 抬起 3 悬停；坐标 = 界面归一化，悬停可在画面外 | Front-end thread: op 0 down, 1 drag, 2 up, 3 hover; coordinates = UI-normalized, hover may be outside the picture
     if (!g_live_on) return;
     if (op == 3) {
+        if (dm_touch_host_world_active() && nx >= 0 && nx <= 1 && ui_y_to_screen(ny) >= 0 && ui_y_to_screen(ny) <= 1)
+            dm_world_hover_move(nx, ui_y_to_screen(ny));
+        else dm_world_hover_end();
         uint64_t p = 1ull << 63;
         if (nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) p |= (uint64_t)(uint32_t)(nx * 65535 + .5f) << 16 | (uint32_t)(ny * 65535 + .5f);
         else p |= 1ull << 62;
+        atomic_store(&g_live_hover_latest, p);
         atomic_store(&g_live_hover, p); return;
     }
     atomic_store(&g_live_hover, 0);
+    dm_world_hover_end(); // Mouse press / drag / release cancels stale hover.
     if (!g_live_on) return; unsigned t = atomic_load(&g_live.tail); if (t - atomic_load(&g_live.head) >= 64) return;
     g_live.q[t % 64].op = op; g_live.q[t % 64].nx = nx; g_live.q[t % 64].ny = ny; atomic_store(&g_live.tail, t + 1);
 }
@@ -217,9 +227,21 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
         while ((h = atomic_load(&g_live.head)) != atomic_load(&g_live.tail)) {
             int op = g_live.q[h % 64].op; float nx = g_live.q[h % 64].nx, ny = g_live.q[h % 64].ny; if (op != 2) { px = nx; py = ny; }
             if (op == 0) memset(&g_lm, 0, sizeof g_lm);
+            // A physical right click uses the same safe item-use entry as
+            // iPad and Android. Elsewhere it remains the legacy B/back key.
+            if (op == 4) {
+                if (dm_uiscreen_panel() && dm_ui_item_at_now(px,py)==1) {
+                    dm_ui_mouse_right_use(px,py);
+                } else { g_live_right_held=1; g_live_right_latch=1; }
+                atomic_store(&g_live.head,h+1); continue;
+            }
+            if (op == 5) {
+                g_live_right_held=0;
+                atomic_store(&g_live.head,h+1); continue;
+            }
             if (g_lm.owned) {
                 g_lm.x = px; g_lm.y = py;
-                if (op == 2) g_lm.owned = g_lm.down = 0;
+                if (op == 2) { dm_world_mouse_release(); g_lm.owned = g_lm.down = 0; }
                 atomic_store(&g_live.head, h + 1); continue;
             }
             // 按在按键提示条的某一条上：这一下不当点击，改成按那个键 4 拍（dm_padmode.c）；按在局内底部 HUD 的技能格 / 腰带格 / 钮上：按住期间按着对应的键，抬起再放（至少 3 拍）；
@@ -263,25 +285,29 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
         // A panel, pause or leaving the game cancels this world gesture, and nothing is handed to the UI until release.
         { void dm_world_walk(float, float); int dm_world_tap_result(unsigned), dm_game_paused(void); uint32_t tk = touch_cur_tick();
           dm_tc_set_joy_block(&g_touch.state, 1);
-          if (!in || g_touch.state.navigation_mode || dm_game_paused()) { g_lm.down = g_lm.repeat = 0; g_lm.tap_seq = 0; }
+          if (!in || g_touch.state.navigation_mode || dm_game_paused()) { if (g_lm.down) dm_world_mouse_release(); g_lm.down = g_lm.repeat = 0; g_lm.tap_seq = 0; }
           if (g_lm.tap_seq) { int r = dm_world_tap_result(g_lm.tap_seq); if (r >= 0) {
-              g_lm.repeat = r == 0 || r == 6; g_lm.last = tk;
+              g_lm.repeat = r == 6 ? 2 : r == 0 ? 1 : 0; g_lm.last = tk; // 2 = monster locked, ignore subsequent pointer position
               if (r == 0) dm_world_walk(g_lm.tap_x, g_lm.tap_y);
               g_lm.tap_seq = 0;
           } }
-          if (g_lm.down && g_lm.repeat && tk != g_lm.last && dm_ui_item_at_now(g_lm.x, g_lm.y) == 3) {
+          if (g_lm.down && g_lm.repeat && tk != g_lm.last &&
+              (g_lm.repeat == 2 || dm_ui_item_at_now(g_lm.x, g_lm.y) == 3)) {
               g_lm.last = tk; dm_world_walk(g_lm.x, ui_y_to_screen(g_lm.y));
           } }
     }
     if (g_live_on) {
-        uint64_t h = atomic_exchange(&g_live_hover, 0);
-        if (h && getenv("DM_TEST_HOVER_LOG")) fprintf(stderr, "[dm] 鼠标悬停派发：%#llx 手势 %d 槽 %d 队列 %d/%d 脉冲 %llu\n", (unsigned long long)h, g_lm.owned, g_touch.state.pointer_slot, g_touch.next, g_touch.count, (unsigned long long)g_touch.state.pulse_button);
+        uint64_t fresh = atomic_exchange(&g_live_hover, 0);
+        uint64_t h = fresh ? fresh : atomic_load(&g_live_hover_latest);
+        if (fresh && getenv("DM_TEST_HOVER_LOG")) fprintf(stderr, "[dm] 鼠标悬停派发：%#llx 手势 %d 槽 %d 队列 %d/%d 脉冲 %llu\n", (unsigned long long)h, g_lm.owned, g_touch.state.pointer_slot, g_touch.next, g_touch.count, (unsigned long long)g_touch.state.pulse_button);
         if (h && !g_live_btn && !g_lm.owned && g_touch.next == g_touch.count && g_touch.state.pointer_slot == DM_TC_NONE && !g_touch.state.buttons && !g_touch.state.pulse_button && !*buttons && !*lx && !*ly && !*rx && !*ry) {
             float x = h & (1ull << 62) ? -1 : (float)((h >> 16) & 0xffff) / 65535, y = h & (1ull << 62) ? -1 : (float)(h & 0xffff) / 65535;
             if (dm_ui_mouse_hover_now(x, y)) { g_touch.state.pointer_valid = 0; dm_cursor_clear(); }
         }
     }
     if (g_live_btn) { if ((int32_t)(g_live_btn_until - touch_cur_tick()) > 0) *buttons |= g_live_btn; else g_live_btn = 0; }
+    if (g_live_right_held || g_live_right_latch) *buttons |= DM_BTN_B;
+    g_live_right_latch=0;
     if (!g_touch.enabled || !g_touch.started) return;
     uint32_t tick = touch_cur_tick();
     if (!g_touch.prefix && !g_touch.tick_set) { g_touch.to_game_tick = tick; g_touch.tick_set = 1; }
@@ -326,7 +352,13 @@ apply_input:
     while (g_touch.next < g_touch.count && g_touch.event[g_touch.next].beat <= g_touch.beat) {
         touch_event *e = &g_touch.event[g_touch.next++];
         if (e->slot < 0 || e->slot >= DM_TC_MAX_TOUCH) continue;
-        if (e->op == TOUCH_DOWN) { dm_tc_begin(&g_touch.state, e->slot, e->x, e->y); if (g_touch.state.navigation_mode && e->slot == g_touch.state.pointer_slot) dm_tc_pointer_item(&g_touch.state, dm_ui_item_at_now(e->x / 2868, e->y / 1320)); }
+        if (e->op == TOUCH_DOWN) {
+            g_touch.state.mouse_item_mode = g_live_on;
+            dm_tc_begin(&g_touch.state, e->slot, e->x, e->y);
+            g_touch.state.mouse_item_mode = 0;
+            if (g_touch.state.navigation_mode && e->slot == g_touch.state.pointer_slot)
+                dm_tc_pointer_item(&g_touch.state, dm_ui_item_at_now(e->x / 2868, e->y / 1320));
+        }
         else if (e->op == TOUCH_MOVE) {
             // 真鼠标拖物品：触屏层把物品图抬在「手指」上方 DM_TC_POINTER_LIFT_PT（手指会挡住图），落点也按抬起后的图算；鼠标不挡东西，物品图应当就在光标上。
             // 所以拖动已经起了之后，把光标位置下移同样的量当「手指位置」喂给触屏层：抬起后的图正好落在光标上，松手落点 = 光标。起拖前不移（不然一下单击会被这段位移当成拖）

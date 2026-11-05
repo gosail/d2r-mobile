@@ -241,7 +241,17 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
             }
             if (g_lm.owned) {
                 g_lm.x = px; g_lm.y = py;
-                if (op == 2) { dm_world_mouse_release(); g_lm.owned = g_lm.down = 0; }
+                if (op == 2) {
+                    dm_world_mouse_release(); g_lm.owned = g_lm.down = 0;
+                    // Resume hover at the pointer's last real position after
+                    // a click/drag release, without needing an extra mouseMove.
+                    if (px >= 0 && px <= 1 && py >= 0 && py <= 1) {
+                        uint64_t h=(1ull<<63) |
+                            (uint64_t)(uint32_t)(px*65535.f+.5f)<<16 |
+                            (uint32_t)(py*65535.f+.5f);
+                        atomic_store(&g_live_hover_latest,h);
+                    }
+                }
                 atomic_store(&g_live.head, h + 1); continue;
             }
             // 按在按键提示条的某一条上：这一下不当点击，改成按那个键 4 拍（dm_padmode.c）；按在局内底部 HUD 的技能格 / 腰带格 / 钮上：按住期间按着对应的键，抬起再放（至少 3 拍）；

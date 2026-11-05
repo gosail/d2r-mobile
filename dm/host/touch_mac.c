@@ -346,7 +346,13 @@ apply_input:
     while (g_touch.next < g_touch.count && g_touch.event[g_touch.next].beat <= g_touch.beat) {
         touch_event *e = &g_touch.event[g_touch.next++];
         if (e->slot < 0 || e->slot >= DM_TC_MAX_TOUCH) continue;
-        if (e->op == TOUCH_DOWN) { dm_tc_begin(&g_touch.state, e->slot, e->x, e->y); if (g_touch.state.navigation_mode && e->slot == g_touch.state.pointer_slot) dm_tc_pointer_item(&g_touch.state, dm_ui_item_at_now(e->x / 2868, e->y / 1320)); }
+        if (e->op == TOUCH_DOWN) {
+            g_touch.state.mouse_item_mode = g_live_on;
+            dm_tc_begin(&g_touch.state, e->slot, e->x, e->y);
+            g_touch.state.mouse_item_mode = 0;
+            if (g_touch.state.navigation_mode && e->slot == g_touch.state.pointer_slot)
+                dm_tc_pointer_item(&g_touch.state, dm_ui_item_at_now(e->x / 2868, e->y / 1320));
+        }
         else if (e->op == TOUCH_MOVE) {
             // 真鼠标拖物品：触屏层把物品图抬在「手指」上方 DM_TC_POINTER_LIFT_PT（手指会挡住图），落点也按抬起后的图算；鼠标不挡东西，物品图应当就在光标上。
             // 所以拖动已经起了之后，把光标位置下移同样的量当「手指位置」喂给触屏层：抬起后的图正好落在光标上，松手落点 = 光标。起拖前不移（不然一下单击会被这段位移当成拖）

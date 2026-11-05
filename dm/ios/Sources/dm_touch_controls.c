@@ -505,7 +505,8 @@ void dm_tc_begin_at(dm_tc_state *s, int slot, float x, float y, double now_s) {
     }
     *f = (dm_tc_finger){.active=1, .target=enabled ? hit : DM_TC_NONE, .x=x, .y=y,
                            .aim_origin_x=x, .aim_origin_y=y,
-                           .start_time_s=now_s};
+                           .start_time_s=now_s,
+                           .mouse_item=!!(s->navigation_mode && s->mouse_item_mode)};
     /* 禁用圆仍阻止落入左摇杆区，防止隐藏回城触点变成移动。 | A disabled circle still blocks falling through into the left stick area, preventing a hidden town-portal touch point from turning into movement. */
     if (s->navigation_mode && hit == DM_TC_NONE && s->pointer_slot == DM_TC_NONE) {
         s->pointer_slot = slot;
@@ -622,6 +623,17 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
                               点按钮（类 0）不在这里吞掉、照常发鼠标点击：原先连合成钮也吞，手上有东西时点合成什么都不发；合成钮由宿主先收手上那件再按，见 dm_cursor.c
                               Still holding an item (the last drop did not succeed): tap the item area = put down; tap outside the panel / the black grid on either side = drop (Y); tapping tabs or elsewhere does nothing.
                                                             Tapping a button (class 0) is not swallowed here and sends a mouse click as usual: previously even the transmute button was swallowed, and tapping transmute with something in hand sent nothing; for the transmute button the host first stows the held item and then presses, see dm_cursor.c */
+            else if (done.mouse_item && s->pointer_item == 1 && !s->pointer_shop &&
+                     !s->pointer_stack && !s->pointer_lock &&
+                     !atomic_load(&g_imbue_open)) {
+                /* Physical mouse: left click directly picks the item up via
+                   the game's A pick-up transaction. A finger's single tap
+                   still only displays the tooltip; its double tap behaviour
+                   is unchanged. The existing holding branch above handles
+                   left-click placement, and drag uses the same pulse path. */
+                pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 1);
+                s->last_tap_s = -1e9;
+            }
             else if (s->pointer_item == 2) { ++s->tab_tap_seq; }
             else if (s->pointer_item == 6 || s->pointer_item == 11) { }   /* 压着被上层面板盖住的按钮：不点、不发键 | Pressing on a button covered by an upper panel: no click, no key */
             else if (s->pointer_item == 3) { if (!atomic_load(&g_dead_modal)) { s->close_left = 3; s->close_next_s = now_s; atomic_store(&g_close_stop, 0); } }   /* 面板外：不发鼠标点击（会落到游戏世界 = 点地走路），按 B 关面板——子菜单里一下 B 只退一级，所以按到面板关掉为止（至多 3 下，见 dm_tc_tick）；死亡弹窗开着时不动 | Outside the panel: do not send a mouse click (it would land in the game world = tap ground to walk); press B to close the panel -- in a submenu one B only goes back one level, so press until the panel is closed (at most 3 presses, see dm_tc_tick); do nothing while the death popup is open */

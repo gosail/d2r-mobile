@@ -10,6 +10,10 @@ import android.content.Intent;
 import android.net.Uri;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.widget.Button;
 import android.os.Environment;
 import android.provider.Settings;
 import android.system.ErrnoException;
@@ -87,6 +91,10 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native void nativePad(long buttons, int lx, int ly, int rx, int ry);
     static native void nativeKeyboardEvent(int hidUsage, boolean down);
     static native void nativeKeyboardReset();
+    static native int nativeKbControlsVisible();
+    static native int nativeKbAction(int hidUsage);
+    static native boolean nativeKbBind(int hidUsage, int action);
+    static native void nativeKbDefaults();
     static native void nativePadMode(int pad);
     static native void nativePadGlyph(int glyph);
 
@@ -98,6 +106,18 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private FrameLayout gameFrame;
     private TouchOverlay touchOverlay;
     private MouseHoverOverlay mouseHoverOverlay;
+    private Button kbSettingsButton;
+    private final Handler kbUiHandler=new Handler(Looper.getMainLooper());
+    private final Runnable kbUiPoll=new Runnable() {
+        @Override public void run() {
+            if(kbSettingsButton!=null) {
+                boolean visible=libraryLoaded && started && resumed && nativeKbControlsVisible()!=0;
+                kbSettingsButton.setVisibility(visible?View.VISIBLE:View.GONE);
+                if(visible) kbSettingsButton.bringToFront();
+            }
+            kbUiHandler.postDelayed(this,250);
+        }
+    };
     private boolean started;
     private boolean secondaryMouseDown;
     boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
@@ -128,6 +148,18 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         gameFrame = new FrameLayout(this);
         gameFrame.addView(view, new FrameLayout.LayoutParams(-1, -1));
         setContentView(gameFrame);
+        kbSettingsButton=new Button(this);
+        kbSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh") ? "键鼠设置" : "Keyboard");
+        FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(
+            (int)(148*getResources().getDisplayMetrics().density),
+            (int)(48*getResources().getDisplayMetrics().density),
+            Gravity.TOP|Gravity.END);
+        bp.topMargin=(int)(16*getResources().getDisplayMetrics().density);
+        bp.rightMargin=(int)(20*getResources().getDisplayMetrics().density);
+        gameFrame.addView(kbSettingsButton,bp);
+        kbSettingsButton.setVisibility(View.GONE);
+        kbSettingsButton.setOnClickListener(v -> KeyboardSettings.show(this));
+        kbUiHandler.post(kbUiPoll);
         immersive();
     }
 
@@ -597,7 +629,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     @Override protected void onPause() { if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } resumed = false; if (camSensor != null) camSensor.stop(); if (camButtons != null) camButtons.stop(); if (camThreats != null) camThreats.stop(); if (inputDialog != null) inputDialog.dismiss(); releaseTouches(); PadInput.reset(); if (touchOverlay != null) touchOverlay.setInputEnabled(false); if (started) nativeFocus(0); super.onPause(); }
     @Override protected void onStart() { super.onStart(); if (started) nativeFocus(2); }
     @Override protected void onStop() { if (started) nativeFocus(1); com.xiaoboluo.d2r.widget.HeroWidgetProvider.requestUpdate(this); super.onStop(); }
-    @Override protected void onDestroy() { if (displays != null) displays.unregisterDisplayListener(this); if (inputDialog != null) inputDialog.dismiss(); if (current.get() == this) current.clear(); super.onDestroy(); }
+    @Override protected void onDestroy() { kbUiHandler.removeCallbacks(kbUiPoll); if (displays != null) displays.unregisterDisplayListener(this); if (inputDialog != null) inputDialog.dismiss(); if (current.get() == this) current.clear(); super.onDestroy(); }
     @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); else { releaseTouches(); if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } } }
 
     @Override public void surfaceCreated(SurfaceHolder h) {}

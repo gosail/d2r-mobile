@@ -457,6 +457,20 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JN
     (*env)->SetIntArrayRegion(env,out,0,4,rect);
 }
 
+// Local keyboard controls; used by the button on the native Controls tab.
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbControlsVisible(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_kbmap_controls_visible();
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbAction(JNIEnv *e,jclass c,jint usage) {
+    (void)e;(void)c;return usage<0 ? DM_KB_UNBOUND : dm_kbmap_action((unsigned)usage);
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbBind(JNIEnv *e,jclass c,jint usage,jint action) {
+    (void)e;(void)c;return usage>=0 && action>=0 && dm_kbmap_bind((unsigned)usage,(unsigned)action);
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbDefaults(JNIEnv *e,jclass c) {
+    (void)e;(void)c;dm_kbmap_restore_defaults();
+}
+
 // Physical keyboard is separate from the touch and gamepad input channels.
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardEvent(JNIEnv *env,jclass cls,jint usage,jboolean down) {
     (void)env;(void)cls;

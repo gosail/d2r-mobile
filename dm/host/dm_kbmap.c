@@ -216,7 +216,7 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
         unsigned a=map[usage];
         if(a==DM_KB_MAP) { dm_world_mouse_map_toggle(); a=DM_KB_UNBOUND; }
         // Choose Enter/Esc meaning when pressed; hold it until key release.
-        if(a==DM_KB_ENTER)a=0; // confirm, matching Mac keyboard's common action
+        if(a==DM_KB_ENTER)a=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0; // same page semantics as Mac
         if(a==DM_KB_ESCAPE)a=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:1;
         active[usage]=(unsigned char)a;down[usage]=1;
     } else { down[usage]=0;active[usage]=DM_KB_UNBOUND; }

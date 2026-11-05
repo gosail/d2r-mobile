@@ -59,6 +59,10 @@ int main(int argc,char **argv) {
     dm_kbmap_reset();assert(buttons==0);
     dm_kbmap_key_event(0x1e,1);assert(buttons & DM_BTN_LEFT);
     dm_kbmap_key_event(0x1e,0);
+    dm_kbmap_key_event(0x28,1);assert(buttons & DM_BTN_PLUS);
+    dm_kbmap_key_event(0x28,0);assert(buttons==0);
+    dm_kbmap_key_event(0x29,1);assert(buttons & DM_BTN_PLUS);
+    dm_kbmap_key_event(0x29,0);assert(buttons==0);
     dm_kbmap_key_event(0x10,1);assert(maps==1);
     dm_kbmap_key_event(0x10,1);assert(maps==1);
     dm_kbmap_key_event(0x10,0);

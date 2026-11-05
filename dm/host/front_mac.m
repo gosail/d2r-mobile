@@ -260,8 +260,8 @@ static void on_key(NSEvent *e, int down) {
         else if(action==DM_KB_MOVE_LEFT) {g_a=1;used=1;}
         else if(action==DM_KB_MOVE_DOWN) {g_s=1;used=1;}
         else if(action==DM_KB_MOVE_RIGHT) {g_d=1;used=1;}
-        else if(action==DM_KB_ENTER) {g_btn|=1ull<<(g_live?40:10);used=1;}
-        else if(action==DM_KB_ESCAPE) {if(g_live)g_btn|=1ull<<41;used=1;}
+        else if(action==DM_KB_ENTER) {g_btn|=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_A;used=1;}
+        else if(action==DM_KB_ESCAPE) {g_btn|=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_B;used=1;}
         else if(action==DM_KB_MAP)used=1;
         else if(action>=DM_KB_SKILL1 && action<=DM_KB_SKILL8) {
             static const unsigned btn[]={1,2,3,7};

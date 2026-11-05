@@ -25,3 +25,14 @@ jobs:
           python -m unittest discover -v -s dm/ios/tests -p test_controls_tab.py
           python -m unittest discover -v -s dm/ios/tests -p test_mouse_pc_parity.py
           python -m unittest discover -v -s dm/ios/tests -p test_mouse_world_render.py
+
+  apple-syntax:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: macOS AppKit mouse overlay syntax
+        run: |
+          xcrun clang -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -mmacosx-version-min=15.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/host/front_mac.m
+      - name: iPadOS UIKit mouse overlay syntax
+        run: |
+          xcrun --sdk iphoneos clang -arch arm64 -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -miphoneos-version-min=16.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/ios/Sources/front_ios.m

@@ -209,14 +209,18 @@ void dm_external_mouse_step(void) {
     if (mouse_seq) {
         int result = dm_world_tap_result(mouse_seq);
         if (result >= 0) {
-            mouse_repeat = result == 0 || result == 6;
+            mouse_repeat = result == 6 ? 2 : result == 0 ? 1 : 0; // target identity vs. ground movement
             mouse_seq = 0; mouse_last_walk = now_ns();
             if (result == 0 && mouse_world_ok()) dm_world_walk(mouse_tap_x, mouse_tap_y);
         }
     }
     uint64_t now = now_ns();
     if (mouse_world && mouse_down && mouse_repeat && mouse_world_ok() && now - mouse_last_walk >= 33333333ull) {
-        mouse_last_walk = now; dm_world_walk(mouse_x, mouse_y);
+        mouse_last_walk = now;
+        // A monster held at button-down never follows the moving pointer.
+        // The world lock re-resolves that monster by type+id every tick.
+        dm_world_walk(mouse_repeat==2 ? mouse_tap_x : mouse_x,
+                      mouse_repeat==2 ? mouse_tap_y : mouse_y);
     }
 }
 void dm_external_mouse_apply(uint64_t *buttons, int32_t *rx, int32_t *ry) {

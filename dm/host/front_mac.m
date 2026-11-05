@@ -62,7 +62,7 @@ static void mouse_hover_draw(void) {
     if (active) {
         NSRect gr=game_rect(); double W=gr.size.width,H=gr.size.height;
         g_mouse_label.contentsScale=g_view.window.backingScaleFactor ?: 2;
-        if ((h.kind==2 || h.kind==4) && h.w>0 && h.h>0) {
+        if (h.kind>=1 && h.kind<=4 && h.w>0 && h.h>0) {
             CGRect r=CGRectMake(gr.origin.x+h.x*W-3,gr.origin.y+(1-h.y-h.h)*H-3,
                                 h.w*W+6,h.h*H+6);
             CGPathRef p=CGPathCreateWithRoundedRect(r,4,4,NULL);
@@ -72,7 +72,7 @@ static void mouse_hover_draw(void) {
             NSString *details=(h.kind==3 && h.details[0]) ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
             NSString *msg=details.length ? [NSString stringWithFormat:@"%@\n%@",name,details] : name;
             CGFloat w=MIN(260,MAX(135,W*0.27)), ht=details.length ? 63 : 38;
-            CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+h.x*W-w/2));
+            CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+(h.x+h.w*.5f)*W-w/2));
             CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
             g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
             g_mouse_label.frame=CGRectMake(x+8,y+7,w-16,ht-12);

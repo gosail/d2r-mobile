@@ -493,7 +493,7 @@ static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, in
     for (uint64_t k = 0; rec && k < n && k < 512; k++) { int32_t *r = (int32_t *)(rec + k * 0x148); if (r[2] <= 0 || r[3] <= 0 || r[4] == -1) continue;
         if (dump) LOG("世界目标：标签 物品 id %d 矩形 (%d,%d %dx%d)", r[4], r[0], r[1], r[2], r[3]);
         if (w_in_rect(sx, sy, r[0] + r[2] / 2.0f, r[1] + dm_ui_proj_dy() + r[3] / 2.0f, (float)r[2], (float)r[3], min, &d) && d < bd) { uint64_t u = w_find(4, (uint32_t)r[4]); if (u && *(uint32_t *)(u + 0xc) == 3) { bd = d; best = u; brank = 0; *by_label = 1; } } }
-    for (int t = 0; t <= 5; t++) { if (t == 3 || (hover_only && t != 1 && t != 2)) continue;   // Hover never selects objects, doors or corpses. Existing tap behaviour is unchanged.
+    for (int t = 0; t <= 5; t++) { if (t == 3 || (hover_only && t != 1 && t != 2)) continue;   // Hover only considers live NPC/monster and interactable objects; item labels are tested first.
         for (int k = 0; k < 128; k++) for (uint64_t u = *(uint64_t *)(b + 0x2d603a0 + t * 0x400 + k * 8); u; u = *(uint64_t *)(u + 0x158)) {
             if (t == 4 && *(uint32_t *)(u + 0xc) != 3) continue;   // 物品只认在地上的 | items only count when on the ground
             if (!(((int (*)(uint64_t, int, int, int, int))(b + 0x464a70))(u, 0, 0, -1, -1) & 1)) continue;
@@ -593,7 +593,7 @@ static void w_hover_step(uint8_t *b) {
                 uint32_t cls=*(uint32_t *)(unit+4);
                 uint64_t player=w_player();
                 int cat = player ? ((int (*)(int,uint64_t,uint64_t))(b+0x2f7b7c))(0x165,player,unit) : 0;
-if (cat == 5 || cat == 1 || cat == 0xa) {
+                if (cat == 5 || cat == 1 || cat == 0xa) {
                     const char *key=dm_hover_name_key(cls), *name=NULL;
                     if (key && *key) {
                         struct { const char *k; uint64_t n; } arg={key,strlen(key)};
@@ -602,11 +602,18 @@ if (cat == 5 || cat == 1 || cat == 0xa) {
                     float p[2]; uint64_t scene=*(uint64_t *)(b+0x2e2a698);
                     if (scene && w_project(b,scene,unit,p,1)) {
                         view.kind=cat==5 ? 1 : 3;
-                        view.x=fmaxf(0,fminf(1,p[0]/W));
-                        view.y=fmaxf(0,fminf(1,p[1]/H));
+                        // Always expose a genuine target outline, including
+                        // monsters/NPCs without a generated localization key.
+                        // Text is displayed only when the game returns it.
+                        float feet[2]={p[0],p[1]};
+                        (void)w_project(b,scene,unit,feet,0);
+                        float top=fminf(p[1],feet[1]), bottom=fmaxf(p[1],feet[1]);
+                        float tall=fmaxf((float)H*0.038f,bottom-top);
+                        float wide=fmaxf((float)W*0.028f,tall*0.44f);
+                        view.x=fmaxf(0,fminf(1,(p[0]-wide*.5f)/W));
+                        view.y=fmaxf(0,fminf(1,(top-(float)H*.015f)/H));
+                        view.w=fminf(1-view.x,wide/W);view.h=fminf(1-view.y,(tall+(float)H*.03f)/H);
                         if (name && *name) strlcpy(view.title,name,sizeof view.title);
-                        else if (cat != 5) snprintf(view.title,sizeof view.title,"Monster #%u",cls);
-                        else view.kind=0; // NPC without a known name stays hidden.
                         if (view.kind==3) {
                             // The game's own selected-target HUD supplies its
                             // health, affixes and resistances. Only publish the

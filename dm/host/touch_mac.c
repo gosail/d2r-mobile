@@ -303,7 +303,9 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
           } }
           if (g_lm.down && g_lm.repeat && tk != g_lm.last &&
               (g_lm.repeat == 2 || dm_ui_item_at_now(g_lm.x, g_lm.y) == 3)) {
-              g_lm.last = tk; dm_world_walk(g_lm.x, ui_y_to_screen(g_lm.y));
+              g_lm.last = tk;
+        dm_world_walk(g_lm.repeat==2 ? g_lm.tap_x : g_lm.x,
+                      g_lm.repeat==2 ? g_lm.tap_y : ui_y_to_screen(g_lm.y));
           } }
     }
     if (g_live_on) {

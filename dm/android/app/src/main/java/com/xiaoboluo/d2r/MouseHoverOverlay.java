@@ -44,7 +44,7 @@ final class MouseHoverOverlay extends View {
                 float d = getResources().getDisplayMetrics().density;
                 float size=monster?Math.max(text.measureText(parts[0]),text.measureText(detail)):text.measureText(parts[0]);
                 float bw=Math.min(ox+w-8*d,Math.max(90*d,size+22*d));
-                float px=ox+h[1]*w;
+                float px=ox+(h[1]+h[3]/2)*w;
                 float left=Math.max(ox,Math.min(ox+w-bw,px-bw/2));
                 float height=monster?(detail.isEmpty()?42*d:60*d):29*d;
                 float top=oy+h[2]*ht-height-3*d;
@@ -65,7 +65,8 @@ final class MouseHoverOverlay extends View {
                     float fraction=Math.max(0,Math.min(1,h[5]/h[6]));
                     canvas.drawRoundRect(new RectF(left+6*d,top+height-9*d,left+6*d+(bw-12*d)*fraction,top+height-4*d),2*d,2*d,hp);
                 }
-            } else if ((int)h[0] == 2 || (int)h[0] == 4) {
+            }
+            if ((int)h[0] >= 1 && (int)h[0] <= 4 && h[3]>0 && h[4]>0) {
                 float d = getResources().getDisplayMetrics().density;
                 RectF box = new RectF(ox + h[1] * w - 3 * d, oy + h[2] * ht - 2 * d,
                         ox + (h[1] + h[3]) * w + 3 * d, oy + (h[2] + h[4]) * ht + 2 * d);

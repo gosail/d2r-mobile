@@ -697,7 +697,7 @@ static NSString *kbActionLabel(int action) {
     _mouseHoverOutline.hidden=YES;
     if (active) {
         CGRect w=world_rect(self);
-        if ((h.kind==2 || h.kind==4) && h.w>0 && h.h>0) {
+        if (h.kind>=1 && h.kind<=4 && h.w>0 && h.h>0) {
             CGRect area=CGRectMake(w.origin.x+h.x*w.size.width,w.origin.y+h.y*w.size.height,
                                   h.w*w.size.width,h.h*w.size.height);
             _mouseHoverOutline.path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(area,-3,-3) cornerRadius:4].CGPath;
@@ -708,7 +708,7 @@ static NSString *kbActionLabel(int action) {
             NSString *label=detail.length ? [NSString stringWithFormat:@"%@\n%@",name,detail] : name;
             CGFloat width=MIN(260,MAX(120,w.size.width*0.28));
             CGFloat height=detail.length ? 61 : 36;
-            CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+h.x*w.size.width-width/2));
+            CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+(h.x+h.w*.5f)*w.size.width-width/2));
             CGFloat y=MAX(CGRectGetMinY(w),CGRectGetMinY(w)+h.y*w.size.height-height-9);
             CGRect panel=CGRectMake(x,y,width,height);
             _mouseHoverBacking.frame=panel; _mouseHoverBacking.hidden=NO;

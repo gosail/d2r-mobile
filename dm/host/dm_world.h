@@ -7,6 +7,9 @@
 // 2 ground item (original rarity-coloured label outline), 3 hostile monster,
 // 4 interactable world object (outline only, no fabricated name)
 // (localized title when its player-derived NameStr key is available).
+// For NPC/monsters x/y/w/h is the real target highlight rectangle,
+// and an empty title still leaves a visible outline; never display an
+// invented class-ID placeholder as if it were the game's real name.
 // All coordinates are fractions of the actual rendered world, origin upper left.
 typedef struct {
     int kind; float x, y, w, h;

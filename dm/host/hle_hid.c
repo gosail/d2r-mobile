@@ -12,9 +12,6 @@
 #include "front.h"
 #include <stdatomic.h>
 #include "dm_cursor.h"
-#if defined(__APPLE__)
-#include <TargetConditionals.h>
-#endif
 #include <math.h>
 _Atomic int g_dm_l_presses;
 
@@ -34,9 +31,6 @@ typedef struct {
 _Static_assert(sizeof(NpadState) == 0x28, "NpadState");
 
 static struct { _Atomic uint64_t buttons; _Atomic int32_t lx, ly, rx, ry; } g_in;
-#if TARGET_OS_IOS || defined(__ANDROID__)
-#include "dm_external_mouse.h"
-#endif
 static _Atomic int64_t g_sampling;
 static _Atomic uint64_t g_sampled_right;
 void dm_input_sampled_right(int32_t *rx,int32_t *ry) {
@@ -427,10 +421,6 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
       if (tset > 0) { held = (s->buttons & 0xf) ? held + 1 : 0; if (held > tdelay) { s->rx = trx; s->ry = tryy; } } }
     if (s->lx || s->ly || (km & PK_MASK & ~(uint64_t)PK_TOUCH)) atomic_store(&g_stick_ns, now_ns());   // 玩家的摇杆（前端 / 脚本伪键）最近一次非零；光标改写的摇杆不算 | the last time the player's stick (front end / script pseudo-keys) was non-zero; a stick rewritten by the cursor does not count
     dm_cursor_apply(&s->buttons, &s->lx, &s->ly);   // 指针目标：本次采样内按原版光标位置改写左摇杆 / A（见 dm_cursor.h） | pointer target: within this sample, rewrite the left stick / A according to the original game's cursor position (see dm_cursor.h)
-#if TARGET_OS_IOS || defined(__ANDROID__)
-    // Mouse right-click / wheel / HUD buttons share controller sampling, without altering touch controls.
-    dm_external_mouse_apply(&s->buttons, &s->rx, &s->ry);
-#endif
     { static uint64_t prev; if ((s->buttons & DM_BTN_L) && !(prev & DM_BTN_L)) { int n = atomic_fetch_add(&g_dm_l_presses, 1) + 1; if (n <= 3) LOG("取手柄处：「显示物品」键（L）交给了游戏，本进程第 %d 次", n); } prev = s->buttons; }   // 「显示物品」键（L）交给游戏的按下次数（首领掉落读数用，dm_bossrush.c） | number of presses of the 「显示物品」(Show Items) key (L) delivered to the game (used by the boss drop readout, dm_bossrush.c)
     if (km & PK_LSL) s->lx = -32767; if (km & PK_LSR) s->lx = 32767;   // 脚本摇杆伪键：推满（Horizon 摇杆 ±32767，上为正） | script stick pseudo-keys: push to full (Horizon stick ±32767, up is positive)
     if (km & PK_LSU) s->ly = 32767;  if (km & PK_LSD) s->ly = -32767;

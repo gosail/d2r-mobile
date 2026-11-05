@@ -23,10 +23,6 @@
 #include <jni.h>
 #include "vulkan_present.h"
 #include "touch_android.h"
-#include "front_android.h"
-#include "../host/dm_world.h"
-#include "../host/dm_cursor.h"
-#include "../host/dm_uiscreen.h"
 #include "lifecycle_dispatch.h"
 #include "overlay_validate.h"
 #include "dm_overlay_contract.h"
@@ -327,9 +323,6 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeStart(JNIEnv *env
     // times a frame, briefly, on locks its job workers hold.
     setenv("DM_HLE_SPIN_US", "30", 0);
     if (!getenv("DM_LANG") && *lg) setenv("DM_LANG", lg, 0);   // 首次安装的语言按系统首选（同 iOS CFLocaleCopyPreferredLanguages，见 dm_i18n.c） | first-install language follows the system preference (as iOS CFLocaleCopyPreferredLanguages, see dm_i18n.c)
-    // The user-generated NPC string-key table stays in the imported game bundle, not in the APK.
-    { char hover_path[1300]; snprintf(hover_path,sizeof hover_path,"%s/out/hover_names.tsv",g_runtime);
-      setenv("DM_HOVER_NAMES",hover_path,1); }
     if (chdir(g_files)) LOG("【红】chdir %s 失败 errno %d", g_files, errno);
     (*env)->ReleaseStringUTFChars(env, files, f); (*env)->ReleaseStringUTFChars(env, ext, x); (*env)->ReleaseStringUTFChars(env, src, s); (*env)->ReleaseStringUTFChars(env, lang, lg);
     if (n <= 0) return -2;
@@ -428,32 +421,6 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeTouch(JNIEnv *env
     if (n) { (*env)->GetIntArrayRegion(env, ids, 0, n, id); (*env)->GetFloatArrayRegion(env, xs, 0, n, x); (*env)->GetFloatArrayRegion(env, ys, 0, n, y); }
     for (int i = 0; i < n; i++) t[i] = (dm_touch){(uint32_t)id[i], x[i], y[i]};
     dm_touch_set(t, n);
-}
-
-JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMousePointerHint(JNIEnv *env,jclass cls) {
-    (void)env; (void)cls; return dm_mouse_pointer_hint();
-}
-JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv *env,jclass cls,jint op,jfloat x,jfloat y,jint arg) {
-    (void)env; (void)cls; dm_android_mouse_event(op,x,y,arg);
-}
-JNIEXPORT jstring JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseHover(JNIEnv *env,jclass cls,jfloatArray out) {
-    (void)cls; dm_world_hover_view h={0}; dm_world_hover_read(&h);
-    if (out && (*env)->GetArrayLength(env,out)>=9) {
-        float v[9]={(float)h.kind,h.x,h.y,h.w,h.h,(float)h.hp,(float)h.hp_max,(float)h.tier,(float)h.immune_mask};
-        (*env)->SetFloatArrayRegion(env,out,0,9,v);
-    }
-    char label[sizeof(h.title)+sizeof(h.details)+4];
-    if(h.kind==3 && h.details[0]) snprintf(label,sizeof label,"%s\n%s",h.title,h.details);
-    else snprintf(label,sizeof label,"%s",h.title);
-    return (*env)->NewStringUTF(env,label);
-}
-JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JNIEnv *env,jclass cls,jint w,jint h,jintArray out) {
-    (void)cls;
-    if (!out || (*env)->GetArrayLength(env,out)<4) return;
-    int rect[4]={0,0,w,h};
-    front_android_view_rect(w,h,rect);
-    if (front_android_full() && dm_uiscreen_ingame()) { rect[0]=0; rect[1]=0; rect[2]=w; rect[3]=h; }
-    (*env)->SetIntArrayRegion(env,out,0,4,rect);
 }
 
 // 实体手柄（Java PadInput.java）→ 宿主手柄状态。与触屏的虚拟手柄分开存，游戏取手柄时按键取或、摇杆触屏优先（hle_hid.c 的 fill）。

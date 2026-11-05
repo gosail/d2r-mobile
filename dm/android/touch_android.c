@@ -7,7 +7,6 @@
 #include "../host/dm_hud.h"
 #include "../host/dm_custom.h"
 #include "../host/dm_world.h"
-#include "../host/dm_external_mouse.h"
 #include "../host/dm_uiscreen.h"
 #include "../ios/Sources/dm_touch_native_art.h"
 #include <pthread.h>
@@ -21,7 +20,7 @@ void dm_tp_request(void);
 /* 绑定观测桥未接入时不捏造技能绑定；基础键位仍走共用状态机。 | Do not fabricate skill bindings if the observation bridge is absent; basic keys still use the shared state machine. */
 void dm_touch_game_set_scene(int game, uint64_t scene, uint64_t world) __attribute__((weak));
 
-typedef struct { int phase, slot, mouse; float x, y; double time; } touch_event;
+typedef struct { int phase, slot; float x, y; double time; } touch_event;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static dm_tc_state tc;
 static dm_tc_scene scene;
@@ -32,7 +31,6 @@ static int hud_blocked;
 static touch_event queue[256];
 static unsigned head, tail;
 static int ready, focused = 1, cancel, resizing, ui_drag;
-static int mouse_touch_on;
 /* 窗口 dp（整屏，dm_android_touch_resize）与游戏视图矩形 dp（相对窗口左上角，dm_android_touch_view）；width/height 是视图尺寸，也就是 dm_tc 的坐标空间。
    没收到视图矩形时视图 = 整屏。 | Window dp (whole screen, dm_android_touch_resize) and the game view rectangle in dp (from the window's top-left corner,
    dm_android_touch_view); width/height is the view size, i.e. dm_tc's coordinate space. The view is the whole window until a view rectangle arrives. */
@@ -134,24 +132,19 @@ void dm_android_touch_tablet(int tablet) {
 }
 void dm_android_touch_focus(int active) {
     pthread_mutex_lock(&lock);
-    focused = !!active; cancel = 1; head = tail = 0; mouse_touch_on = 0;
-    if (!active) dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0);
+    focused = !!active; cancel = 1; head = tail = 0;
     pthread_mutex_unlock(&lock);
 }
 void dm_android_touch_event(int phase, int slot, float x, float y) {
     if (phase < 0 || phase > 3 || slot < 0 || slot >= DM_TC_MAX_TOUCH || !isfinite(x) || !isfinite(y)) return;
     pthread_mutex_lock(&lock);
     if (focused) {
-        // A real finger exits the physical-mouse session; re-enable the
-        // ordinary touch-only idle-item guard after the device switch.
-        if (phase == 0 && slot < DM_TC_MAX_TOUCH - 1)
-            dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0);
         /* 溢出只取消，绝不遗留按住的摇杆/按键。 | Overflow cancels instead of leaving a stick/key held. */
         if (tail - head == 256) { cancel = 1; head = tail = 0; }
         /* Java 给的是窗口 dp：减视图原点换成 dm_tc 的视图坐标；真全屏下 y 可为负（视图上方那条只有 3D 的区域，点怪 / 点地照常，界面与控件点不到）。
            Java gives window dp: subtract the view origin to get dm_tc's view coordinates; in true fullscreen y may be negative -- the 3D-only
            strip above the view, where tapping monsters / ground still works but the UI and controls cannot be hit. */
-        else { queue[tail++ % 256] = (touch_event){phase, slot, 0, x - vr_x, y - vr_y, now_ns() / 1e9}; }
+        else { queue[tail++ % 256] = (touch_event){phase, slot, x - vr_x, y - vr_y, now_ns() / 1e9}; }
     }
     pthread_mutex_unlock(&lock);
 }
@@ -207,33 +200,6 @@ static void world_rect(float r[4]) {
     if (dm_screen_real(&rw, &rh) && h > 0 && h < rh) { r[0] = -vr_x; r[1] = -vr_y; r[2] = win_w; r[3] = win_h; }
 }
 static void world_norm(float x, float y, float *nx, float *ny) { float r[4]; world_rect(r); *nx = (x - r[0]) / r[2]; *ny = (y - r[1]) / r[3]; }
-void dm_android_mouse_event(int op, float xdp, float ydp, int arg) {
-    pthread_mutex_lock(&lock);
-    float local_x = xdp - vr_x, local_y = ydp - vr_y;
-    float ux = width > 0 ? local_x/width : -1, uy = height > 0 ? local_y/height : -1;
-    float wx = -1, wy = -1;
-    world_norm(local_x,local_y,&wx,&wy);
-    init_locked();
-    // Feed UI-panel and visible touch-HUD mouse presses through the SAME
-    // dm_tc pick/drop state machine that a finger uses. World clicks stay
-    // on the external mouse bridge (PC-style click-to-walk/attack).
-    const int mouse_slot=DM_TC_MAX_TOUCH-1; // Java reserves this slot.
-    if (op==DM_MOUSE_DOWN && !mouse_touch_on &&
-        (tc.navigation_mode ||
-         (dm_tc_hit(&tc.layout,local_x,local_y)>=0 &&
-          (tc.enabled_targets & (1u<<dm_tc_hit(&tc.layout,local_x,local_y)))))) {
-        mouse_touch_on=1;
-        if(tail-head<256) queue[tail++%256]=(touch_event){0,mouse_slot,1,local_x,local_y,now_ns()/1e9};
-        else { cancel=1;head=tail=0;mouse_touch_on=0; }
-        dm_external_mouse_event(DM_MOUSE_HOVER_END,0,0,0,0,0);
-    } else if(mouse_touch_on && (op==DM_MOUSE_DRAG || op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE)) {
-        int phase=op==DM_MOUSE_DRAG?1:op==DM_MOUSE_UP?2:3;
-        if(tail-head<256) queue[tail++%256]=(touch_event){phase,mouse_slot,1,local_x,local_y,now_ns()/1e9};
-        else { cancel=1;head=tail=0; }
-        if(phase>=2) mouse_touch_on=0;
-    } else dm_external_mouse_event(op,ux,uy,wx,wy,arg);
-    pthread_mutex_unlock(&lock);
-}
 static void requests(void) {
     if (seen_tab != tc.tab_tap_seq) { seen_tab = tc.tab_tap_seq; dm_ui_tab_go(); }
     if (seen_use != tc.use_seq) { seen_use = tc.use_seq; dm_ui_use_item(); }
@@ -386,14 +352,10 @@ void dm_android_touch_step(uint64_t guest_now, uint64_t *buttons, int32_t *lx, i
         if (e.phase == 0) {
             if (dm_tc_belt_outside(&tc,e.x,e.y)) { dm_belt_expand(0); continue; }
             { int dm_cam_mode(void), dm_cam_style(void); tc.cam_on = dm_cam_mode(); tc.cam_orbit = dm_cam_style() == 1; }   /* 镜头实验：右半屏拖动看四周要知道档 | camera experiment: looking around on the right half needs the mode */
-            tc.mouse_item_mode=e.mouse;
             dm_tc_begin_at(&tc,e.slot,e.x,e.y,e.time);
-            tc.mouse_item_mode=0;
             if (!tc.navigation_mode && f->target == DM_TC_PORTAL) { dm_tc_cancel_finger(&tc,e.slot); dm_tp_request(); }
             if (tc.navigation_mode && tc.pointer_slot == e.slot) dm_tc_pointer_item(&tc,dm_ui_item_at_now(e.x/width,e.y/height));
         } else if (e.phase == 1 || e.phase == 2) {
-            if (e.mouse && f->pointer_dragged && tc.navigation_mode)
-                e.y+=DM_TC_POINTER_LIFT_PT*dm_tc_scale_for_size(width,height);
             dm_tc_move_at(&tc,e.slot,e.x,e.y,e.time);
             if (tc.cam_pitch != 0 || tc.cam_yaw != 0) { void dm_cam_tilt(float); void dm_cam_turn(float); if (tc.cam_pitch != 0) dm_cam_tilt(tc.cam_pitch); if (tc.cam_yaw != 0) dm_cam_turn(tc.cam_yaw); tc.cam_pitch = tc.cam_yaw = 0; }   /* 镜头实验：右半屏拖动看四周（dm_touch_controls.c） | camera experiment: drag on the right half to look around */
             event_cancelled = f->aim_cancelled;

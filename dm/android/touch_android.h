@@ -17,8 +17,6 @@ void dm_android_touch_view(float x_dp, float y_dp, float width_dp, float height_
 void dm_android_touch_tablet(int tablet);
 /* phase: 0 down, 1 move, 2 up, 3 cancel; slot: stable 0..15; coordinates in dp. | 阶段：按下/移动/抬起/取消；槽固定0..15；坐标dp。 */
 void dm_android_touch_event(int phase, int slot, float x, float y);
-// Dedicated physical mouse channel; x/y are window dp, never finger slots.
-void dm_android_mouse_event(int op, float xdp, float ydp, int arg);
 void dm_android_touch_focus(int active);
 void dm_android_touch_uimsg(const char *cat, const char *act, const char *arg);
 void dm_android_touch_step(uint64_t guest_now, uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);

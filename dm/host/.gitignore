@@ -2,6 +2,5 @@
 dm_vault_tab.h
 dm_hud_exp.h
 dm_bright_levels.inc
-dm_hover_names.h
 *.h.tmp
 *.inc.tmp

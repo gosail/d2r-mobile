@@ -12,8 +12,6 @@
 #include "dm.h"
 #include "dm_input.h"
 #include "dm_uiscreen.h"
-#include "dm_world.h"
-#include "dm_cursor.h"
 #include "touch_mac.h"
 #import "../ios/Sources/dm_rift_hud.h"
 void mtl_set_ui_rect_fn(void (*fn)(double *y, double *h));
@@ -221,10 +219,6 @@ void front_run(void (*guest)(void)) {
         [NSRunLoop.mainRunLoop addTimer:riftHUDTimer forMode:NSRunLoopCommonModes];
         [win center];
         g_live = getenv("DM_APP") || getenv("DM_TOUCH_LIVE"); if (g_live) dm_touch_host_live_enable();
-
-        // The original game UI owns monster bars, names and item labels.
-        // Mouse hover selects native candidates; never add a host-drawn HUD.
-
         if (g_live) {
             win.acceptsMouseMovedEvents = YES;
             [v addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:v userInfo:nil]];
@@ -252,12 +246,6 @@ void front_run(void (*guest)(void)) {
         [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp | NSEventMaskMouseMoved | NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;
             BOOL hover = e.type == NSEventTypeMouseMoved || e.type == NSEventTypeMouseExited;
-            if (g_live) {
-                int hint=dm_mouse_pointer_hint();
-                NSCursor *cursor=hint==2 ? NSCursor.closedHandCursor :
-                                 hint==1 ? NSCursor.openHandCursor : NSCursor.arrowCursor;
-                [cursor set];
-            }
             if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停输入：类型 %ld", (long)e.type);
             if (hover && !g_live) return e;
             if (e.type == NSEventTypeMouseExited) { dm_touch_host_live(3, -1, -1); return e; }
@@ -289,36 +277,8 @@ void front_run(void (*guest)(void)) {
         if (g_live) {
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskRightMouseDown | NSEventMaskRightMouseUp handler:^NSEvent *(NSEvent *e) {
                 if (e.window != win) return e;
-                // Match iPad/Android: a right click in a free-cursor item
-                // panel goes through the game's native use-item command.
-                // No synthetic touch or fabricated cursor item is created.
-                static BOOL rightItemDown=NO;
-                if (e.type == NSEventTypeRightMouseUp && rightItemDown) {
-                    rightItemDown=NO;
-                    return nil;
-                }
-                if (e.type == NSEventTypeRightMouseDown && dm_ui_free_cursor()) {
-                    rightItemDown=YES;
-                    {
-                        NSPoint p=[v convertPoint:e.locationInWindow fromView:nil];
-                        NSRect gr=game_rect();
-                        double fy=0,fh=1;
-                        if (g_full) ui_rect_frac(&fy,&fh);
-                        if (gr.size.width>0 && gr.size.height>0 && fh>0) {
-                            float nx=(float)((p.x-gr.origin.x)/gr.size.width);
-                            float ny=(float)(((1.0-(p.y-gr.origin.y)/gr.size.height)-fy)/fh);
-                            dm_ui_mouse_right_use(nx,ny);
-                        }
-                    }
-                    return nil;
-                }
                 if (e.type == NSEventTypeRightMouseDown) g_btn |= DM_BTN_B; else g_btn &= ~(uint64_t)DM_BTN_B;
                 push(); return nil;
-            }];
-            [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp handler:^NSEvent *(NSEvent *e) {
-                if (e.window != win || e.buttonNumber != 2) return e;
-                if (e.type == NSEventTypeOtherMouseDown) dm_world_mouse_map_toggle();
-                return nil;
             }];
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent *(NSEvent *e) {
                 if (e.window != win || e.scrollingDeltaY == 0) return e;

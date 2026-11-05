@@ -39,4 +39,4 @@
 - **Android**：`KeyboardInput.java` 把 `KeyEvent` 转同一 USB HID 码，由 JNI 交给独立键盘通道；控制页「键鼠设置」弹出编辑器，保存同格式；切后台或失焦清除按下状态。
 - **手柄**：继续使用原有 `KeyBindingMenu` 和 `dm_pad_set`，与 `dm_kb_set` 分离；触屏保留 `dm_input_set`。
 - **自动测试**：Linux 原生 C 对照覆盖默认键位、组合按键、松键、移动、F5 技能、M 地图以及重启读盘；静态检查三端入口，Apple Objective-C 语法检查，Android 键盘 UI 类 SDK Java 语法检查。
-- **待实机验证**：iPad 键盘能否稳定成为 first responder、Android 键盘系统截获、原游戏按键消费、控制页事件可见性、技能与药水实际效果、配置文件在各平台重启后是否正确载入；左中右鼠标按键的自由重新映射尚未实现。
+- **待实机验证**：iPad 键盘能否稳定成为 first responder、Android 键盘系统截获、原游戏按键消费、控制页事件可见性、技能与药水实际效果、配置文件在各平台重启后是否正确载入；iOS/Android 的鼠标左、中、右键已可重映射为「主点击 / 次要使用 / 切地图」三种角色（不是无限制任意动作），还需设备事件验证；Mac 的物理鼠标仍采用现有默认功能。

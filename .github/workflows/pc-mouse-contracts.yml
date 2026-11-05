@@ -42,6 +42,8 @@ jobs:
               static native int nativeKbAction(int hid);
               static native boolean nativeKbBind(int hid, int action);
               static native void nativeKbDefaults();
+              static native int nativeMouseBinding(int physical);
+              static native boolean nativeMouseBind(int physical,int logical);
           }
           STUB
           javac -cp "$jar" -d /tmp/dmkb-classes \

@@ -27,6 +27,7 @@ int main(int argc,char **argv) {
         snprintf(save_dir,sizeof save_dir,"%s/save",argv[1]);
         assert(dm_kbmap_action(0x0d)==15);
         assert(dm_kbmap_action(0x0e)==1);
+        assert(dm_kbmap_mouse_action(0)==1);
         return 0;
     }
     strcpy(root,"/tmp/dmkbXXXXXX");assert(mkdtemp(root));
@@ -49,6 +50,9 @@ int main(int argc,char **argv) {
     dm_kbmap_key_event(0x10,1);assert(maps==1);
     dm_kbmap_key_event(0x10,0);
     assert(dm_kbmap_bind(0x0d,15));
+    assert(dm_kbmap_bind_mouse(0,1));
+    assert(dm_kbmap_mouse_action(0)==1);
+    assert(!dm_kbmap_bind_mouse(0,3));
     assert(dm_kbmap_action(0x0d)==15);
     assert(!dm_kbmap_bind(256,1));
     assert(!dm_kbmap_bind(2,99));
@@ -66,6 +70,7 @@ int main(int argc,char **argv) {
     dm_kbmap_controls_event("PanelManager","ClosePanel","SettingsPanel");
     assert(!dm_kbmap_controls_visible());
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
+    assert(dm_kbmap_mouse_action(0)==0);
     remove(fn);rmdir(save_dir);rmdir(root);
     puts("portable keyboard bindings: PASS");
     return 0;

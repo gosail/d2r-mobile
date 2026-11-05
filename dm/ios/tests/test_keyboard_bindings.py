@@ -32,6 +32,10 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('[self kbSettingsSync]',ui)
         self.assertIn('dm_kbmap_bind(usage,(unsigned)action)',ui)
         self.assertIn('KeyboardSettings.show(this)',android)
+        self.assertIn('dm_kbmap_bind_mouse(physical,role)',ui)
+        self.assertIn('DmActivity.nativeMouseBind(physical,which)',editor)
+        self.assertIn('nativeMouseBinding(int physical)',android)
+        self.assertIn('DM_MOUSE_MIDDLE_UP',src("host/dm_external_mouse.c"))
         self.assertIn('DmActivity.nativeKbBind(KEYS[idx],ACTIONS[which])',editor)
     def test_local_non_pc_config(self):
         c=src("host/dm_kbmap.c")

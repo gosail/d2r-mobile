@@ -536,6 +536,10 @@ static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, in
 // w_go(), w_interact(), or synthesize a controller button. The game itself owns
 // the quality-coloured names of dropped items; highlight their existing label.
 static _Atomic uint64_t g_hover_request;
+// The game's native controller target selector reads this ID. No nameplate
+// or healthbar is drawn by the host; original UI renders selected targets.
+static _Atomic uint32_t g_native_hover_mon_id;
+uint32_t dm_world_hover_monster_id(void) { return atomic_load(&g_native_hover_mon_id); }
 static pthread_mutex_t g_hover_mu = PTHREAD_MUTEX_INITIALIZER;
 static dm_world_hover_view g_hover_view;
 void dm_world_hover_move(float x, float y) {
@@ -545,6 +549,7 @@ void dm_world_hover_move(float x, float y) {
 }
 void dm_world_hover_end(void) {
     atomic_store(&g_hover_request, 0);
+    atomic_store(&g_native_hover_mon_id, 0);
     pthread_mutex_lock(&g_hover_mu);
     memset(&g_hover_view, 0, sizeof g_hover_view);
     pthread_mutex_unlock(&g_hover_mu);
@@ -563,6 +568,7 @@ static void w_hover_step(uint8_t *b) {
     if (req == last_req && frame >= last_frame && frame - last_frame < 2) return;
     last_req = req; last_frame = frame;
     dm_world_hover_view view = {0};
+    uint32_t native_mon_id=0;
     if ((req >> 63) && dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused()) {
         int W=0,H=0; dm_screen_real(&W,&H);
         if (W > 0 && H > 0) {
@@ -590,6 +596,7 @@ if (cat == 5 || cat == 1 || cat == 0xa) {
                         else if (cat != 5) snprintf(view.title,sizeof view.title,"Monster #%u",cls);
                         else view.kind=0; // NPC without a known name stays hidden.
                         if (view.kind==3) {
+                            native_mon_id=*(uint32_t *)(unit+8);
                             // Original client stat getter, also used by diag.c
                             // for the currently selected monster's resistances.
                             int (*stat)(uint64_t,int,int)=(void *)(b+0x5b9290);
@@ -646,8 +653,13 @@ if (cat == 5 || cat == 1 || cat == 0xa) {
     // A new pointer event or exit can arrive while the hit-test is running.
     // Never publish the result of a superseded position (even if it was an NPC).
     pthread_mutex_lock(&g_hover_mu);
-    if (atomic_load(&g_hover_request) != req) memset(&g_hover_view,0,sizeof g_hover_view);
-    else g_hover_view=view;
+    if (atomic_load(&g_hover_request) != req) {
+        memset(&g_hover_view,0,sizeof g_hover_view);
+        atomic_store(&g_native_hover_mon_id,0);
+    } else {
+        g_hover_view=view;
+        atomic_store(&g_native_hover_mon_id,native_mon_id);
+    }
     pthread_mutex_unlock(&g_hover_mu);
 }
 

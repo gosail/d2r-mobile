@@ -2,6 +2,7 @@
 // Tapping a target in the game world = interacting with it (implementation and rationale in dm_world.c)
 #pragma once
 #include <stddef.h>
+#include <stdint.h>
 // Read-only mouse hover result. kind: 0 none, 1 NPC (localized title),
 // 2 ground item (original rarity-coloured label outline), 3 hostile monster
 // (localized title when its player-derived NameStr key is available).
@@ -15,6 +16,7 @@ typedef struct {
 void dm_world_hover_move(float x, float y); // real pointer only, no button press
 void dm_world_hover_end(void);
 int dm_world_hover_read(dm_world_hover_view *out); // safe from UIKit/AppKit thread
+uint32_t dm_world_hover_monster_id(void); // native target selector; 0 = none
 // Mouse-only world actions. Touch never calls either; game thread consumes them.
 unsigned dm_world_click(float nx, float ny);
 void dm_world_walk(float nx, float ny);

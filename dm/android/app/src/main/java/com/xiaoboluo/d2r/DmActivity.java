@@ -93,7 +93,6 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private SurfaceView view;
     private FrameLayout gameFrame;
     private TouchOverlay touchOverlay;
-    private MouseHoverOverlay mouseHoverOverlay;
     private boolean started;
     private boolean secondaryMouseDown;
     boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
@@ -123,8 +122,6 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         view.getHolder().addCallback(this);
         gameFrame = new FrameLayout(this);
         gameFrame.addView(view, new FrameLayout.LayoutParams(-1, -1));
-        mouseHoverOverlay = new MouseHoverOverlay(this);
-        gameFrame.addView(mouseHoverOverlay, new FrameLayout.LayoutParams(-1, -1));
         setContentView(gameFrame);
         immersive();
     }

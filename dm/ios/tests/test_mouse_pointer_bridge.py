@@ -25,10 +25,15 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("dm_external_mouse_event(DM_MOUSE_HOVER_END", front)
         self.assertIn("if (e->op == DM_MOUSE_LEAVE) { mouse_clear(); continue; }", backend)
 
-    def test_world_name_labels_are_not_clipped_to_bottom_ui(self):
-        front = self.read("ios/Sources/front_ios.m")
-        self.assertIn("CALayer *hoverHost=g_full && self.superview ? self.superview.layer : self.layer;", front)
-        self.assertIn("wr=[self convertRect:wr toView:self.superview]", front)
+    def test_native_target_info_replaces_custom_hover_layers(self):
+        ios = self.read("ios/Sources/front_ios.m")
+        mac = self.read("host/front_mac.m")
+        android = self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java")
+        target = self.read("host/hle_target.c")
+        self.assertNotIn("worldHoverSync", ios)
+        self.assertNotIn("hoverTimer", mac)
+        self.assertNotIn("new MouseHoverOverlay", android)
+        self.assertIn("dm_world_hover_monster_id()", target)
 
     def test_physical_mouse_uses_hud_and_panel_gestures(self):
         front = self.read("ios/Sources/front_ios.m")
@@ -44,7 +49,8 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("cat != 5 && cat != 1 && cat != 0xa", world)
         self.assertIn("view.kind=cat==5 ? 1 : 3;", world)
         self.assertIn("mouse_hover_valid && !mouse_down", mouse)
-        self.assertIn("h.kind!=1 && h.kind!=3", front)
+        self.assertIn("mouse_hover_valid && !mouse_down", mouse)
+        self.assertNotIn("worldHoverSync", front)
 
     def test_prepared_ci_build_without_npc_source_header(self):
         world = self.read("host/dm_world.c")

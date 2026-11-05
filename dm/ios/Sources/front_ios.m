@@ -137,7 +137,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     UIView *_rsCover;   // 一键重开期间的黑屏（宿主 dm_cursor.c 经 g_dm_restart_cover_hook 开关）：盖在窗口最上层（整屏，含真全屏的留边），不露主菜单，吞掉这段时间的触点 | Black screen during one-tap restart (toggled by the host's dm_cursor.c via g_dm_restart_cover_hook): covers the top of the window (whole screen, including the true-fullscreen margins), does not reveal the main menu, and swallows touch points during this period
     int _navigation;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
-    CATextLayer *_hoverName; CALayer *_hoverLoot; CALayer *_hoverHpTrack,*_hoverHpFill; BOOL _mouseSecondaryDown;
+    BOOL _mouseSecondaryDown;
     // Real mouse clicks on visible touch controls or a UI panel reuse the
     // existing native touch gesture machine; 3D clicks use PC mouse routing.
     NSMutableSet<UITouch *> *_pointerAsTouch;
@@ -499,7 +499,8 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     { static int ln=-1, lc; if(n!=ln && lc<40) { ln=n; lc++; LOG("画面外怪物指针：%d 个", n); } }
 }
 - (void)tickTouchControls:(double)now {
-    [self worldHoverSync];
+    // Original controller UI renders the selected monster and its status.
+    // No separate UIKit monster/loot tooltip is composited over the game.
     [self mapGoalSync];
     [self mapHeadingSync];
     [self threatsSync];
@@ -579,74 +580,6 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
 }
 // PC-style hover: NPCs use the game's localized name; dropped items keep their
 // original quality-coloured label and get a focus outline. Do not create a touch.
-- (void)worldHoverSync {
-    dm_world_hover_view h={0};
-    int show=!_navigation && !_feMode && dm_world_hover_read(&h);
-    // iPad full screen uses a bottom 16:9 UI view over a taller 3D canvas;
-    // host NPC labels on the canvas so they can appear above that UI view.
-    CALayer *hoverHost=g_full && self.superview ? self.superview.layer : self.layer;
-    if (!_hoverName) {
-        _hoverName=[CATextLayer layer]; _hoverName.alignmentMode=kCAAlignmentCenter;
-        _hoverName.fontSize=19; _hoverName.contentsScale=UIScreen.mainScreen.scale;
-        _hoverName.foregroundColor=[UIColor colorWithRed:.84 green:.77 blue:.58 alpha:1].CGColor;
-        _hoverName.backgroundColor=[UIColor colorWithWhite:0 alpha:.75].CGColor;
-        _hoverName.borderColor=[UIColor colorWithRed:.65 green:.54 blue:.33 alpha:.85].CGColor;
-        _hoverName.borderWidth=1; _hoverName.cornerRadius=4;
-        [hoverHost addSublayer:_hoverName];
-        _hoverLoot=[CALayer layer]; _hoverLoot.borderWidth=2; _hoverLoot.cornerRadius=3;
-        _hoverLoot.borderColor=[UIColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
-        [hoverHost addSublayer:_hoverLoot];
-        _hoverHpTrack=[CALayer layer]; _hoverHpTrack.backgroundColor=[UIColor colorWithWhite:.2 alpha:.9].CGColor;
-        _hoverHpTrack.cornerRadius=3; [hoverHost addSublayer:_hoverHpTrack];
-        _hoverHpFill=[CALayer layer]; _hoverHpFill.backgroundColor=[UIColor colorWithRed:.85 green:.2 blue:.18 alpha:1].CGColor;
-        _hoverHpFill.cornerRadius=3; [hoverHost addSublayer:_hoverHpFill];
-        _hoverName.wrapped=YES;
-    }
-    [CATransaction begin]; [CATransaction setDisableActions:YES];
-    if (_hoverName.superlayer!=hoverHost) {
-        [hoverHost addSublayer:_hoverName];
-        [hoverHost addSublayer:_hoverLoot];
-        [hoverHost addSublayer:_hoverHpTrack];
-        [hoverHost addSublayer:_hoverHpFill];
-    }
-    _hoverHpTrack.hidden=_hoverHpFill.hidden=!show || h.kind!=3 || h.hp_max<=0;
-    _hoverName.hidden=!show || (h.kind!=1 && h.kind!=3);
-    _hoverName.foregroundColor=(h.kind==3 ? [UIColor colorWithRed:1 green:.78 blue:.74 alpha:1] :
-        [UIColor colorWithRed:.84 green:.77 blue:.58 alpha:1]).CGColor;
-    _hoverName.borderColor=(h.kind==3 ? [UIColor colorWithRed:.83 green:.21 blue:.2 alpha:.9] :
-        [UIColor colorWithRed:.65 green:.54 blue:.33 alpha:.85]).CGColor;
-    _hoverLoot.hidden=!show || h.kind!=2;
-    if (show) {
-        CGRect wr=world_rect(self);
-        if (hoverHost!=self.layer) wr=[self convertRect:wr toView:self.superview];
-        if (h.kind==1 || h.kind==3) {
-            NSString *s=[NSString stringWithUTF8String:h.title];
-            if (!s.length) _hoverName.hidden=YES;
-            else {
-                BOOL monster=h.kind==3;
-                NSString *detail=monster && h.details[0] ? [NSString stringWithUTF8String:h.details] : @"";
-                NSString *label=detail.length ? [NSString stringWithFormat:@"%@\n%@",s,detail] : s;
-                CGFloat width=monster?fmin(350,hoverHost.bounds.size.width-8):fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[UIFont systemFontOfSize:19]}].width+22));
-                CGFloat height=monster?(detail.length?62:36):28;
-                CGFloat px=wr.origin.x+h.x*wr.size.width-width/2;
-                CGFloat py=wr.origin.y+h.y*wr.size.height-height-3;
-                _hoverName.fontSize=monster?16:19;
-                _hoverName.string=label;
-                _hoverName.frame=CGRectMake(fmax(0,fmin(hoverHost.bounds.size.width-width,px)),py,width,height);
-                if(monster && h.hp_max>0) {
-                    CGFloat x=_hoverName.frame.origin.x+6, y=_hoverName.frame.origin.y+height+1, bw=width-12;
-                    CGFloat ratio=fmax(0,fmin(1,(CGFloat)h.hp/h.hp_max));
-                    _hoverHpTrack.frame=CGRectMake(x,y,bw,6);
-                    _hoverHpFill.frame=CGRectMake(x,y,bw*ratio,6);
-                }
-            }
-        } else if (h.kind==2) {
-            _hoverLoot.frame=CGRectMake(wr.origin.x+h.x*wr.size.width-3, wr.origin.y+h.y*wr.size.height-2,
-                                        h.w*wr.size.width+6,h.h*wr.size.height+4);
-        }
-    }
-    [CATransaction commit];
-}
 // UIKit pointer events use separate world/UI coordinates; never create a fake finger.
 - (void)dmMouseEvent:(int)op point:(CGPoint)p arg:(int)arg {
     CGSize b=self.bounds.size; CGRect wr=world_rect(self);

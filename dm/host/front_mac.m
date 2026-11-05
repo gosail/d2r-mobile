@@ -221,62 +221,8 @@ void front_run(void (*guest)(void)) {
         [win center];
         g_live = getenv("DM_APP") || getenv("DM_TOUCH_LIVE"); if (g_live) dm_touch_host_live_enable();
 
-        // World hover on macOS shares the hit-test/presentation model with iPad.
-        CATextLayer *hoverName=[CATextLayer layer];
-        hoverName.alignmentMode=kCAAlignmentCenter; hoverName.fontSize=18;
-        hoverName.contentsScale=win.backingScaleFactor;
-        hoverName.foregroundColor=[NSColor colorWithRed:.84 green:.77 blue:.58 alpha:1].CGColor;
-        hoverName.backgroundColor=[NSColor colorWithWhite:0 alpha:.75].CGColor;
-        hoverName.borderColor=[NSColor colorWithRed:.65 green:.54 blue:.33 alpha:.85].CGColor;
-        hoverName.borderWidth=1; hoverName.cornerRadius=4;
-        [v.layer addSublayer:hoverName];
-        CALayer *hoverLoot=[CALayer layer]; hoverLoot.borderWidth=2; hoverLoot.cornerRadius=3;
-        hoverLoot.borderColor=[NSColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
-        [v.layer addSublayer:hoverLoot];
-        hoverName.wrapped=YES;
-        CALayer *hoverHpTrack=[CALayer layer]; hoverHpTrack.backgroundColor=[NSColor colorWithWhite:.2 alpha:.9].CGColor;
-        hoverHpTrack.cornerRadius=3; [v.layer addSublayer:hoverHpTrack];
-        CALayer *hoverHpFill=[CALayer layer]; hoverHpFill.backgroundColor=[NSColor colorWithRed:.85 green:.2 blue:.18 alpha:1].CGColor;
-        hoverHpFill.cornerRadius=3; [v.layer addSublayer:hoverHpFill];
-        NSTimer *hoverTimer=[NSTimer timerWithTimeInterval:1.0/30 repeats:YES block:^(NSTimer *tm) {
-            (void)tm;
-            dm_world_hover_view h={0}; int show=g_live && NSApp.isActive && win.isKeyWindow && dm_touch_host_world_active() && dm_world_hover_read(&h);
-            [CATransaction begin]; [CATransaction setDisableActions:YES];
-            hoverName.hidden=!show || (h.kind!=1 && h.kind!=3);
-            hoverName.foregroundColor=(h.kind==3?[NSColor colorWithRed:1 green:.76 blue:.7 alpha:1]:
-                [NSColor colorWithRed:.84 green:.77 blue:.58 alpha:1]).CGColor;
-            hoverHpTrack.hidden=hoverHpFill.hidden=!show || h.kind!=3 || h.hp_max<=0;
-            hoverLoot.hidden=!show || h.kind!=2;
-            if (show) {
-                NSRect gr=game_rect();
-                if (h.kind==1 || h.kind==3) {
-                    NSString *s=[NSString stringWithUTF8String:h.title];
-                    if (!s.length) hoverName.hidden=YES;
-                    else {
-                        BOOL monster=h.kind==3;
-                        NSString *details=monster && h.details[0]?[NSString stringWithUTF8String:h.details]:@"";
-                        CGFloat width=monster?fmin(350,v.bounds.size.width-8):fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:18]}].width+22));
-                        CGFloat height=monster?(details.length?62:36):28;
-                        CGFloat x=gr.origin.x+h.x*gr.size.width-width/2;
-                        CGFloat y=gr.origin.y+(1-h.y)*gr.size.height+3;
-                        hoverName.fontSize=monster?16:18;
-                        hoverName.string=details.length?[NSString stringWithFormat:@"%@\n%@",s,details]:s;
-                        hoverName.frame=CGRectMake(fmax(0,fmin(v.bounds.size.width-width,x)),y,width,height);
-                        if(monster && h.hp_max>0) {
-                            CGFloat bx=hoverName.frame.origin.x+6, bw=width-12;
-                            CGFloat ratio=fmax(0,fmin(1,(CGFloat)h.hp/h.hp_max));
-                            hoverHpTrack.frame=CGRectMake(bx,y-7,bw,6);
-                            hoverHpFill.frame=CGRectMake(bx,y-7,bw*ratio,6);
-                        }
-                    }
-                } else if (h.kind==2) {
-                    hoverLoot.frame=CGRectMake(gr.origin.x+h.x*gr.size.width-3,
-                        gr.origin.y+(1-h.y-h.h)*gr.size.height-2,h.w*gr.size.width+6,h.h*gr.size.height+4);
-                }
-            }
-            [CATransaction commit];
-        }];
-        [NSRunLoop.mainRunLoop addTimer:hoverTimer forMode:NSRunLoopCommonModes];
+        // The original game UI owns monster bars, names and item labels.
+        // Mouse hover selects native candidates; never add a host-drawn HUD.
 
         if (g_live) {
             win.acceptsMouseMovedEvents = YES;

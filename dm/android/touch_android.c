@@ -8,6 +8,7 @@
 #include "../host/dm_custom.h"
 #include "../host/dm_world.h"
 #include "../host/dm_external_mouse.h"
+#include "../host/dm_kbmap.h"
 #include "../host/dm_uiscreen.h"
 #include "../ios/Sources/dm_touch_native_art.h"
 #include <pthread.h>
@@ -32,7 +33,7 @@ static int hud_blocked;
 static touch_event queue[256];
 static unsigned head, tail;
 static int ready, focused = 1, cancel, resizing, ui_drag;
-static int mouse_touch_on;
+static int mouse_touch_on, mouse_touch_up_op;
 /* 窗口 dp（整屏，dm_android_touch_resize）与游戏视图矩形 dp（相对窗口左上角，dm_android_touch_view）；width/height 是视图尺寸，也就是 dm_tc 的坐标空间。
    没收到视图矩形时视图 = 整屏。 | Window dp (whole screen, dm_android_touch_resize) and the game view rectangle in dp (from the window's top-left corner,
    dm_android_touch_view); width/height is the view size, i.e. dm_tc's coordinate space. The view is the whole window until a view rectangle arrives. */
@@ -219,16 +220,21 @@ void dm_android_mouse_event(int op, float xdp, float ydp, int arg) {
     // dm_tc pick/drop state machine that a finger uses. World clicks stay
     // on the external mouse bridge (PC-style click-to-walk/attack).
     const int mouse_slot=DM_TC_MAX_TOUCH-1; // Java reserves this slot.
-    if (op==DM_MOUSE_DOWN && !mouse_touch_on &&
+    int primary=(op==DM_MOUSE_DOWN && dm_kbmap_mouse_action(0)==0) ||
+                (op==DM_MOUSE_RIGHT_DOWN && dm_kbmap_mouse_action(1)==0) ||
+                (op==DM_MOUSE_MIDDLE_DOWN && dm_kbmap_mouse_action(2)==0);
+    if (primary && !mouse_touch_on &&
         (tc.navigation_mode ||
          (dm_tc_hit(&tc.layout,local_x,local_y)>=0 &&
           (tc.enabled_targets & (1u<<dm_tc_hit(&tc.layout,local_x,local_y)))))) {
         mouse_touch_on=1;
+        mouse_touch_up_op=op==DM_MOUSE_DOWN?DM_MOUSE_UP:
+                          op==DM_MOUSE_RIGHT_DOWN?DM_MOUSE_RIGHT_UP:DM_MOUSE_MIDDLE_UP;
         if(tail-head<256) queue[tail++%256]=(touch_event){0,mouse_slot,1,local_x,local_y,now_ns()/1e9};
         else { cancel=1;head=tail=0;mouse_touch_on=0; }
         dm_external_mouse_event(DM_MOUSE_HOVER_END,0,0,0,0,0);
-    } else if(mouse_touch_on && (op==DM_MOUSE_DRAG || op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE)) {
-        int phase=op==DM_MOUSE_DRAG?1:op==DM_MOUSE_UP?2:3;
+    } else if(mouse_touch_on && (op==DM_MOUSE_DRAG || op==mouse_touch_up_op || op==DM_MOUSE_LEAVE)) {
+        int phase=op==DM_MOUSE_DRAG?1:op==mouse_touch_up_op?2:3;
         if(tail-head<256) queue[tail++%256]=(touch_event){phase,mouse_slot,1,local_x,local_y,now_ns()/1e9};
         else { cancel=1;head=tail=0; }
         if(phase>=2) mouse_touch_on=0;

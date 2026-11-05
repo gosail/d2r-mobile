@@ -37,7 +37,7 @@ class PointerWorldRender(unittest.TestCase):
         self.assertIn("new MouseHoverOverlay(this)", activity)
         self.assertIn("gameFrame.addView(mouseHoverOverlay", activity)
         self.assertIn("nativeMouseHover(h)", overlay)
-        self.assertIn("(int)h[0] == 4", overlay)
+        self.assertIn("(int)h[0] >= 1 && (int)h[0] <= 4", overlay)
         self.assertIn("h[5]/h[6]", overlay)
 
     def test_apple_hovers_are_painted(self):
@@ -48,6 +48,8 @@ class PointerWorldRender(unittest.TestCase):
         self.assertIn("g_mouse_outline", mac)
         self.assertIn("mouse_hover_draw();", mac)
         self.assertIn("dm_world_hover_read(&h)", mac)
+        self.assertIn('h.kind>=1 && h.kind<=4',ios)
+        self.assertIn('h.kind>=1 && h.kind<=4',mac)
 
     def test_held_items_do_not_snap_back(self):
         cursor=source("host/dm_cursor.c")

@@ -7,7 +7,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from touch_layout import _settings_tabs
+from touch_layout import _settings_tabs, pad_settings
 
 class ControlsTabs(unittest.TestCase):
     def test_control_between_game_settings_and_custom(self):
@@ -29,6 +29,9 @@ class ControlsTabs(unittest.TestCase):
         self.assertEqual(out["tabMessages"][-2:], [
             "SettingsPanelMessage:CheckChanges:KeyBindingMenu",
             "SettingsPanelMessage:CheckChanges:VideoOptionsPanel"])
+        # The controller tab layout must show the same Controls-before-Custom
+        # ordering; a simple Video-label replacement would put Custom first.
+        self.assertEqual(json.loads(pad_settings(src)), out)
 
 if __name__ == "__main__":
     unittest.main()

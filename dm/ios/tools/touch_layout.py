@@ -1350,7 +1350,10 @@ PRESENT['controller/console/videooptionspanelhd.json'] = _custom_page
 # 手柄版选项页：原版页签条不动，只把第一项「视频」换成「自定义」——它打开的视频页就是上面那份自定义页（两种模式同一份内容）
 # Controller options page: the original tab bar is untouched, only the first item "Video" is replaced by "Custom"; the video page it opens is the Custom
 # page above (same content in both modes)
-def pad_settings(s): return _sub1(s, '"@OptionsMenuVideo"', '"@KeyBindingTypeCustom"')   # 原版串：自定义 / Custom（跟游戏语言走） | original string: "Custom" in Chinese / English (follows the game language)
+def pad_settings(s):
+    # Gamepad and touch use identical tab order: Settings -> Controls -> Custom.
+    # Preserve the actual KeyBindingMenu controller action in both layouts.
+    return _settings_tabs(s)[0]
 def pad_custom_page(s): return _custom_page(s)[0]
 # 挂进 PRESENT：build_ingame 对同一份文件（往选项页插「应用 / 默认 / 放弃」）会先套这里的变换再插按钮，不会出两份覆盖互相盖掉
 # Hooked into PRESENT: for the same file (inserting 「应用 / 默认 / 放弃」(Apply / Default / Discard) into the options page) build_ingame applies the transform here first and then inserts the buttons, so two overlays that overwrite each other are not produced

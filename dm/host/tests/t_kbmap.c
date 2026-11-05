@@ -99,11 +99,32 @@ int main(int argc,char **argv) {
     assert(!dm_kbmap_bind(0x0d,15));
     { FILE *f2=fopen(bobkey,"rb");assert(f2);assert(fgets(line,sizeof line,f2));fclose(f2);assert(!strcmp(line,"LEGACY_BINARY\n")); }
     dm_kbmap_select_character("../bad");assert(dm_kbmap_action(0x0d)==0);
+    // A foreign native .key appearing in the work tree may not be
+    // overwritten by the pre-commit sync.
+    { FILE *w=fopen(fw,"wb");assert(w);fputs("FOREIGN_WORK\n",w);fclose(w); }
+    dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
+    dm_kbmap_pre_commit(work_dir);
+    { FILE *w=fopen(fw,"rb");assert(w);assert(fgets(line,sizeof line,w));fclose(w);assert(!strcmp(line,"FOREIGN_WORK\n")); }
+    remove(fw); // restore a writable mobile-owned work file
+    // Old global sw_keyboard.txt is only a read-only migration source.
+    char oldglob[1200],charlie[1200],charliew[1200],charliekey[1200];
+    snprintf(oldglob,sizeof oldglob,"%s/sw_keyboard.txt",root);
+    { FILE *g=fopen(oldglob,"wb");assert(g);fputs("D2RMobileKeyboard=1\n0d=15\n",g);fclose(g); }
+    snprintf(charlie,sizeof charlie,"%s/Charlie",save_dir);assert(!mkdir(charlie,0700));
+    snprintf(charliew,sizeof charliew,"%s/Charlie",work_dir);assert(!mkdir(charliew,0700));
+    snprintf(charliekey,sizeof charliekey,"%s/Charlie/Charlie.key",save_dir);
+    dm_kbmap_select_character("Charlie");
+    assert(dm_kbmap_action(0x0d)==15);
+    assert(dm_kbmap_bind(0x0e,7));
+    { FILE *g=fopen(oldglob,"rb");assert(g);assert(fgets(line,sizeof line,g));fclose(g);assert(!strcmp(line,"D2RMobileKeyboard=1\n")); }
+    assert(access(charliekey,F_OK)==0);
     dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
     assert(dm_kbmap_mouse_action(0)==0);
+    char cw[1200];snprintf(cw,sizeof cw,"%s/Charlie/Charlie.key",work_dir);
     remove(fn);remove(fw);remove(ctl);remove(bobkey);
-    rmdir(alice);rmdir(alice_work);rmdir(bob);rmdir(bob_work);
+    remove(charliekey);remove(cw);remove(oldglob);
+    rmdir(alice);rmdir(alice_work);rmdir(bob);rmdir(bob_work);rmdir(charlie);rmdir(charliew);
     rmdir(save_dir);rmdir(work_dir);rmdir(root);
     puts("portable keyboard bindings: PASS");
     return 0;

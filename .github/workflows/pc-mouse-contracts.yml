@@ -25,6 +25,11 @@ jobs:
           python -m unittest discover -v -s dm/ios/tests -p test_controls_tab.py
           python -m unittest discover -v -s dm/ios/tests -p test_mouse_pc_parity.py
           python -m unittest discover -v -s dm/ios/tests -p test_mouse_world_render.py
+          python -m unittest discover -v -s dm/ios/tests -p test_keyboard_bindings.py
+      - name: Compile and run portable keyboard mapping unit test
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
+          /tmp/dm_test_keyboard
 
   apple-syntax:
     runs-on: macos-15

@@ -1,5 +1,5 @@
-// Human-readable controls editor; backed by the same sw_keyboard.txt
-// native serializer as iPad. The original gamepad KeyBindingMenu remains intact.
+// Human-readable controls editor; backed by each character's .key file
+// native serializer as iPad. The original gamepad KeyBindingMenu/.ctl remains intact.
 package com.xiaoboluo.d2r;
 
 import android.app.Activity;

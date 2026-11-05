@@ -21,6 +21,8 @@ class PointerWorldRender(unittest.TestCase):
         self.assertIn("view.tier=rank", world)
         self.assertIn("dm_threat_tier", world)
         self.assertIn("view.kind=4", world)
+        self.assertIn("view.w=fminf(1-view.x,wide/W)",world)
+        self.assertNotIn('Monster #%u',world)
 
     def test_hover_is_passive(self):
         world = source("host/dm_world.c")

@@ -67,6 +67,8 @@ class PhysicalMouseParity(unittest.TestCase):
         self.assertIn("dm_world_mouse_release(); g_lm.owned", mac)
         self.assertIn("dm_world_mouse_release();", portable)
         self.assertIn("A dead/disappeared monster ends the hold without walking", world)
+        self.assertIn("mouse_repeat==2 ? mouse_tap_x : mouse_x", portable)
+        self.assertIn("g_lm.repeat==2 ? g_lm.tap_x : g_lm.x",mac)
 
     def test_item_stays_held_until_explicit_drop(self):
         cursor = self.get("host/dm_cursor.c")

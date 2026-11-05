@@ -29,6 +29,8 @@ void dm_cursor_set(int x, int y);
 // it reaches the game in the same sample as the keys. If the front-end main thread writes the cursor global directly at an arbitrary time, the game writes it back from its own controller cursor state before processing A, and A lands at the old cursor
 void dm_cursor_set_screen(float x, float y, float screen_w, float screen_h);
 void dm_cursor_clear(void);
+// Host-published state for native OS pointer icons; safe on UI threads.
+int dm_mouse_pointer_hint(void); // 0 arrow, 1 grab, 2 grabbing
 // Game-thread-safe queued right-click item use, coordinates in UI space.
 void dm_ui_mouse_right_use(float nx, float ny);
 int dm_ui_mouse_hover_now(float nx, float ny);   // 游戏线程：Mac 无按键悬停，只更新自由光标；不点击、不吸附邻格 | Game thread: Mac button-free hover, updates the free cursor without clicking or snapping to nearby cells

@@ -22,6 +22,7 @@ import android.text.Spanned;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
 import android.view.InputDevice;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.SurfaceHolder;
@@ -58,6 +59,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native void nativeRefresh(float hz);
     static native void nativeTouch(int n, int[] ids, float[] xs, float[] ys);
     static native void nativeMouseEvent(int op, float xDp, float yDp, int arg);
+    static native int nativeMousePointerHint();
     static native String nativeMouseHover(float[] out);
     static native void nativeMouseWorldRect(int widthPx, int heightPx, int[] out);
     static native void nativeFocus(int ev);
@@ -183,6 +185,15 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         float x=(e.getRawX()-location[0])/d, y=(e.getRawY()-location[1])/d;
         int wheel=op==7 ? Float.compare(e.getAxisValue(MotionEvent.AXIS_VSCROLL),0) : 0;
         nativeMouseEvent(op,x,y,wheel);
+        // Use Android system cursor icons, never an extra host-drawn tooltip
+        // or fake item sprite. The guest renders the held item itself.
+        int hint=nativeMousePointerHint();
+        int kind=hint==2?PointerIcon.TYPE_GRABBING:
+                 hint==1?PointerIcon.TYPE_GRAB:PointerIcon.TYPE_ARROW;
+        PointerIcon pointer=PointerIcon.getSystemIcon(this,kind);
+        if (view!=null) view.setPointerIcon(pointer);
+        if (touchOverlay!=null) touchOverlay.setPointerIcon(pointer);
+        gameFrame.setPointerIcon(pointer);
         return true;
     }
     @Override public boolean dispatchGenericMotionEvent(MotionEvent e) {

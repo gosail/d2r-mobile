@@ -74,6 +74,16 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("gate_obs_set(OBS_TARGET_RANK, target_rank_obs)", target)
         self.assertNotIn("new MouseHoverOverlay", self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
 
+    def test_native_system_pointer_feedback_no_custom_item_sprite(self):
+        c = self.read("host/dm_cursor.c")
+        mac = self.read("host/front_mac.m")
+        ios = self.read("ios/Sources/front_ios.m")
+        java = self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java")
+        self.assertIn("int dm_mouse_pointer_hint(void)", c)
+        self.assertIn("NSCursor.closedHandCursor", mac)
+        self.assertIn("UIPointerStyle hiddenPointerStyle", ios)
+        self.assertIn("PointerIcon.TYPE_GRABBING", java)
+
     def test_prepared_ci_build_without_npc_source_header(self):
         world = self.read("host/dm_world.c")
         self.assertIn('#if __has_include("dm_hover_names.h")', world)

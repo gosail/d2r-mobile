@@ -25,6 +25,7 @@
 #include "touch_android.h"
 #include "front_android.h"
 #include "../host/dm_world.h"
+#include "../host/dm_cursor.h"
 #include "../host/dm_uiscreen.h"
 #include "lifecycle_dispatch.h"
 #include "overlay_validate.h"
@@ -429,6 +430,9 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeTouch(JNIEnv *env
     dm_touch_set(t, n);
 }
 
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMousePointerHint(JNIEnv *env,jclass cls) {
+    (void)env; (void)cls; return dm_mouse_pointer_hint();
+}
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv *env,jclass cls,jint op,jfloat x,jfloat y,jint arg) {
     (void)env; (void)cls; dm_android_mouse_event(op,x,y,arg);
 }

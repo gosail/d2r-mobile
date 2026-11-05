@@ -13,6 +13,7 @@
 #include "dm_input.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
+#include "dm_cursor.h"
 #include "touch_mac.h"
 #import "../ios/Sources/dm_rift_hud.h"
 void mtl_set_ui_rect_fn(void (*fn)(double *y, double *h));
@@ -251,6 +252,11 @@ void front_run(void (*guest)(void)) {
         [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp | NSEventMaskMouseMoved | NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;
             BOOL hover = e.type == NSEventTypeMouseMoved || e.type == NSEventTypeMouseExited;
+            if (g_live) {
+                int hint=dm_mouse_pointer_hint();
+                [[hint==2 ? NSCursor.closedHandCursor : hint==1 ? NSCursor.openHandCursor :
+                    NSCursor.arrowCursor] set];
+            }
             if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停输入：类型 %ld", (long)e.type);
             if (hover && !g_live) return e;
             if (e.type == NSEventTypeMouseExited) { dm_touch_host_live(3, -1, -1); return e; }

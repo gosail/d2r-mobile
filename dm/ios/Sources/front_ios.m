@@ -65,7 +65,7 @@ static BOOL touch_control_log_enabled(void) {
 // x / y = normalized coordinates on the output picture [0, 1) (origin at top left) -- the host converts according to the coordinate system of the game's current profile (docked 1952x900 / handheld 1568x720;
 // overheating switches profiles, so pixels are not fixed in the front end; the host converts using the game's 1280x720 panel coordinates). dm_touch / dm_touch_set are declared in front.h and implemented in hle_touch.c.
 
-@interface DmMetalView : UIView
+@interface DmMetalView : UIView <UIPointerInteractionDelegate>
 - (void)cancelControls;
 - (void)tickTouchControls:(double)now;
 - (void)navigationMode:(int)navigation;   // 0 游戏态 1 导航态 2 导航态且死亡弹窗开着（不给手柄圆钮） | 0 game mode, 1 navigation mode, 2 navigation mode with the death popup open (no round controller buttons)
@@ -141,6 +141,8 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     // Real mouse clicks on visible touch controls or a UI panel reuse the
     // existing native touch gesture machine; 3D clicks use PC mouse routing.
     NSMutableSet<UITouch *> *_pointerAsTouch;
+    UIPointerInteraction *_nativePointerInteraction;
+    int _nativePointerHint;
       // 镜头实验：小地图 / 全屏地图上人物朝向的指针（mapHeadingSync） | camera experiment: the facing pointer on the minimap / fullscreen map (mapHeadingSync)
     CALayer *_mgLabel[DM_MAP_GOAL_MAX], *_mgMark[DM_MAP_GOAL_MAX];   // 小地图任务终点：每个终点一个名牌 / 符号层 + 一个灰十字层（mapGoalSync） | Minimap quest goals: one nameplate / symbol layer + one grey cross layer per goal (mapGoalSync)
     NSMutableDictionary<NSString *,id> *_mgImg;   // NSNull = 文件不存在（不再每帧读盘重试） | NSNull = file missing (no per-frame disk retry)
@@ -160,6 +162,10 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     _rsCover=[[DmSwallowView alloc] initWithFrame:self.bounds]; _rsCover.backgroundColor=UIColor.blackColor; _rsCover.hidden=YES; _rsCover.userInteractionEnabled=YES;   // 开的时候挂到窗口上（restartCover） | Attached to the window when turned on (restartCover)
     { extern void (*g_dm_restart_cover_hook)(int); g_dm_restart_cover_hook=restart_cover_hook; }
     _navigation=0; [self navigationMode:atomic_load(&g_touch_navigation)];
+    if (@available(iOS 13.4,*)) {
+        _nativePointerInteraction=[[UIPointerInteraction alloc] initWithDelegate:self];
+        [self addInteraction:_nativePointerInteraction];
+    }
     return self;
 }
 - (void)safeAreaInsetsDidChange { [super safeAreaInsetsDidChange]; [self setNeedsLayout]; }
@@ -498,7 +504,23 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     [CATransaction commit];
     { static int ln=-1, lc; if(n!=ln && lc<40) { ln=n; lc++; LOG("画面外怪物指针：%d 个", n); } }
 }
+- (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region {
+    (void)interaction; (void)region;
+    int hint=dm_mouse_pointer_hint();
+    // The held item is already rendered by the guest at its native cursor.
+    if (hint==2) return [UIPointerStyle hiddenPointerStyle];
+    if (hint==1) return [UIPointerStyle styleWithShape:
+        [UIPointerShape shapeWithRoundedRect:CGRectMake(-10,-10,20,20)] constrainedAxes:0];
+    return [UIPointerStyle systemPointerStyle];
+}
 - (void)tickTouchControls:(double)now {
+    if (@available(iOS 13.4,*)) {
+        int hint=dm_mouse_pointer_hint();
+        if (_nativePointerHint!=hint) {
+            _nativePointerHint=hint;
+            [_nativePointerInteraction invalidate];
+        }
+    }
     // Original controller UI renders the selected monster and its status.
     // No separate UIKit monster/loot tooltip is composited over the game.
     [self mapGoalSync];

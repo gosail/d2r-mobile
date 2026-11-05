@@ -30,5 +30,13 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("CALayer *hoverHost=g_full && self.superview ? self.superview.layer : self.layer;", front)
         self.assertIn("wr=[self convertRect:wr toView:self.superview]", front)
 
+    def test_prepared_ci_build_without_npc_source_header(self):
+        world = self.read("host/dm_world.c")
+        self.assertIn('#if __has_include("dm_hover_names.h")', world)
+        self.assertIn('case 148: return "Akara";', world)
+        self.assertIn('case 154: return "Charsi";', world)
+        self.assertIn('case 511: return "Larzuk";', world)
+        self.assertIn('default: return NULL;', world)
+
 if __name__ == "__main__":
     unittest.main()

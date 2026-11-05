@@ -42,10 +42,64 @@ static const char *dm_hover_name_key(uint32_t cls) {
     return cls<MAX_CLASSES && keys[cls][0] ? keys[cls] : NULL;
 }
 #elif defined(__APPLE__)
-#include "dm_hover_names.h" // generated from the player's own monstats.txt
+// Local builds generate the full key table from the player's monstats.txt.
+// Prepared-input CI can restore cached resources without that generated header.
+// Its absence must not break compilation or disable ordinary town-NPC hover.
+// Entries below are public monstats NameStr *keys*, not translated game strings.
+#if __has_include("dm_hover_names.h")
+#include "dm_hover_names.h"
 static const char *dm_hover_name_key(uint32_t cls) {
     return cls<sizeof dm_hover_mon_names/sizeof dm_hover_mon_names[0] ? dm_hover_mon_names[cls] : NULL;
 }
+#else
+static const char *dm_hover_name_key(uint32_t cls) {
+    switch (cls) {
+    case 146: return "DeckardCain";
+    case 147: return "Gheed";
+    case 148: return "Akara";
+    case 150: return "Kashya";
+    case 154: return "Charsi";
+    case 155: return "Warriv";
+    case 175: return "Warriv";
+    case 176: return "Atma";
+    case 177: return "Drognan";
+    case 178: return "Fara";
+    case 198: return "Greiz";
+    case 199: return "Elzix";
+    case 200: return "Geglash";
+    case 201: return "Jerhyn";
+    case 202: return "Lysander";
+    case 210: return "Meshif";
+    case 244: return "DeckardCain";
+    case 245: return "DeckardCain";
+    case 246: return "DeckardCain";
+    case 251: return "tyrael";
+    case 252: return "asheara";
+    case 253: return "hratli";
+    case 254: return "alkor";
+    case 255: return "ormus";
+    case 257: return "halbu";
+    case 264: return "meshif";
+    case 265: return "DeckardCain";
+    case 266: return "navi";
+    case 297: return "Natalya";
+    case 331: return "Kaelan";
+    case 367: return "tyrael";
+    case 405: return "Jamella";
+    case 406: return "Izual";
+    case 408: return "Malachai";
+    case 511: return "Larzuk";
+    case 512: return "Drehya";
+    case 513: return "Malah";
+    case 514: return "Nihlathak Town";
+    case 515: return "Qual-Kehk";
+    case 520: return "DeckardCain";
+    case 521: return "tyrael";
+    case 527: return "Drehya";
+    default: return NULL;
+    }
+}
+#endif
 #else
 // Non-Apple ports without the player-derived name table keep their existing UI.
 static const char *dm_hover_name_key(uint32_t cls) { (void)cls; return NULL; }

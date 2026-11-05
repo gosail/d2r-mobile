@@ -287,11 +287,12 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
           dm_tc_set_joy_block(&g_touch.state, 1);
           if (!in || g_touch.state.navigation_mode || dm_game_paused()) { if (g_lm.down) dm_world_mouse_release(); g_lm.down = g_lm.repeat = 0; g_lm.tap_seq = 0; }
           if (g_lm.tap_seq) { int r = dm_world_tap_result(g_lm.tap_seq); if (r >= 0) {
-              g_lm.repeat = r == 0 || r == 6; g_lm.last = tk;
+              g_lm.repeat = r == 6 ? 2 : r == 0 ? 1 : 0; g_lm.last = tk; // 2 = monster locked, ignore subsequent pointer position
               if (r == 0) dm_world_walk(g_lm.tap_x, g_lm.tap_y);
               g_lm.tap_seq = 0;
           } }
-          if (g_lm.down && g_lm.repeat && tk != g_lm.last && dm_ui_item_at_now(g_lm.x, g_lm.y) == 3) {
+          if (g_lm.down && g_lm.repeat && tk != g_lm.last &&
+              (g_lm.repeat == 2 || dm_ui_item_at_now(g_lm.x, g_lm.y) == 3)) {
               g_lm.last = tk; dm_world_walk(g_lm.x, ui_y_to_screen(g_lm.y));
           } }
     }

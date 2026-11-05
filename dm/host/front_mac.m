@@ -254,8 +254,9 @@ void front_run(void (*guest)(void)) {
             BOOL hover = e.type == NSEventTypeMouseMoved || e.type == NSEventTypeMouseExited;
             if (g_live) {
                 int hint=dm_mouse_pointer_hint();
-                [[hint==2 ? NSCursor.closedHandCursor : hint==1 ? NSCursor.openHandCursor :
-                    NSCursor.arrowCursor] set];
+                NSCursor *cursor=hint==2 ? NSCursor.closedHandCursor :
+                                 hint==1 ? NSCursor.openHandCursor : NSCursor.arrowCursor;
+                [cursor set];
             }
             if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停输入：类型 %ld", (long)e.type);
             if (hover && !g_live) return e;

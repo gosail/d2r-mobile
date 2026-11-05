@@ -82,7 +82,15 @@ static void load_locked(void) {
     char fn[1152];
     if (!filename(fn,sizeof fn)) return;
     loaded=1;
-    FILE *f=fopen(fn,"rb");if(!f)return;
+    FILE *f=fopen(fn,"rb");
+    if(!f) {
+        // One-time, read-only compatibility with this project's previous
+        // global keyboard file. A changed binding is written per hero.
+        char old[1152];const char *root=dm_save_commitdir();
+        int len=root?snprintf(old,sizeof old,"%s/../sw_keyboard.txt",root):0;
+        if(len>0 && (size_t)len<sizeof old)f=fopen(old,"rb");
+        if(!f)return;
+    }
     char line[128];
     if(!fgets(line,sizeof line,f) || strcmp(line,"D2RMobileKeyboard=1\n")) {
         // A pre-existing native/PC .key belongs to its owner; never truncate.
@@ -150,11 +158,21 @@ void dm_kbmap_pre_commit(const char *workdir) {
                 char dst[1152],tmp[1176];
                 if(filename_at(dst,sizeof dst,workdir) &&
                    snprintf(tmp,sizeof tmp,"%s.tmp",dst)>0) {
-                    FILE *out=fopen(tmp,"wb");
-                    int ok=out && fwrite(buf,1,n,out)==n;
-                    if(out && fclose(out))ok=0;
-                    if(ok)ok=rename(tmp,dst)==0;
-                    if(!ok)remove(tmp);
+                    // A guest-native .key may have appeared in the transaction
+                    // work tree. Preserve its bytes rather than destroying it.
+                    int safe=1;FILE *existing=fopen(dst,"rb");
+                    if(existing) {
+                        char mark[128];safe=fgets(mark,sizeof mark,existing) &&
+                            !strcmp(mark,"D2RMobileKeyboard=1\n");
+                        fclose(existing);
+                    }
+                    if(safe) {
+                        FILE *out=fopen(tmp,"wb");
+                        int ok=out && fwrite(buf,1,n,out)==n;
+                        if(out && fclose(out))ok=0;
+                        if(ok)ok=rename(tmp,dst)==0;
+                        if(!ok)remove(tmp);
+                    }
                 }
             }
         }

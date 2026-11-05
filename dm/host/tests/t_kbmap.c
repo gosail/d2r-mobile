@@ -11,11 +11,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/wait.h>
-static char root[1024],save_dir[1100];
+static char root[1024],save_dir[1100],work_dir[1100];
 static uint64_t buttons;
 static int32_t left_x,left_y;
 static unsigned maps;
 const char *dm_save_commitdir(void) {return save_dir;}
+const char *dm_save_workdir(void) {return work_dir;}
 void dm_kb_clear(void) {buttons=0;left_x=left_y=0;}
 void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
     (void)rx;(void)ry;buttons=b;left_x=lx;left_y=ly;
@@ -26,6 +27,8 @@ int dm_uiscreen_panel(void) {return 0;}
 int main(int argc,char **argv) {
     if(argc==2) {
         snprintf(save_dir,sizeof save_dir,"%s/save",argv[1]);
+        snprintf(work_dir,sizeof work_dir,"%s/save.work",argv[1]);
+        dm_kbmap_select_character("Alice");
         assert(dm_kbmap_action(0x0d)==15);
         assert(dm_kbmap_action(0x0e)==1);
         assert(dm_kbmap_mouse_action(0)==1);
@@ -33,6 +36,13 @@ int main(int argc,char **argv) {
     }
     strcpy(root,"/tmp/dmkbXXXXXX");assert(mkdtemp(root));
     snprintf(save_dir,sizeof save_dir,"%s/save",root);assert(!mkdir(save_dir,0700));
+    snprintf(work_dir,sizeof work_dir,"%s/save.work",root);assert(!mkdir(work_dir,0700));
+    char alice[1200],alice_work[1200],bob[1200],bob_work[1200];
+    snprintf(alice,sizeof alice,"%s/Alice",save_dir);assert(!mkdir(alice,0700));
+    snprintf(alice_work,sizeof alice_work,"%s/Alice",work_dir);assert(!mkdir(alice_work,0700));
+    snprintf(bob,sizeof bob,"%s/Bob",save_dir);assert(!mkdir(bob,0700));
+    snprintf(bob_work,sizeof bob_work,"%s/Bob",work_dir);assert(!mkdir(bob_work,0700));
+    dm_kbmap_select_character("Alice");
     assert(dm_kbmap_action(0x1a)==DM_KB_MOVE_UP);
     assert(dm_kbmap_action(0x0d)==0);
     dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
@@ -57,9 +67,21 @@ int main(int argc,char **argv) {
     assert(dm_kbmap_action(0x0d)==15);
     assert(!dm_kbmap_bind(256,1));
     assert(!dm_kbmap_bind(2,99));
-    char fn[1200];snprintf(fn,sizeof fn,"%s/sw_keyboard.txt",root);
+    char fn[1200],fw[1200],ctl[1200];
+    snprintf(fn,sizeof fn,"%s/Alice/Alice.key",save_dir);
+    snprintf(fw,sizeof fw,"%s/Alice/Alice.key",work_dir);
+    snprintf(ctl,sizeof ctl,"%s/Alice/Alice.ctl",save_dir);
+    { FILE *c=fopen(ctl,"wb");assert(c);assert(fwrite("NATIVE_CTL",1,10,c)==10);fclose(c); }
     FILE *f=fopen(fn,"r");assert(f);char line[128];assert(fgets(line,sizeof line,f));
     assert(!strcmp(line,"D2RMobileKeyboard=1\n"));fclose(f);
+    f=fopen(fw,"rb");assert(f);assert(fgets(line,sizeof line,f));assert(!strcmp(line,"D2RMobileKeyboard=1\n"));fclose(f);
+    // Game saving swaps work -> committed; the pre-commit hook must restore
+    // latest keyboard changes without touching the game-owned .ctl.
+    { FILE *wf=fopen(fw,"wb");assert(wf);fputs("D2RMobileKeyboard=1\n",wf);fclose(wf); }
+    dm_kbmap_pre_commit(work_dir);
+    f=fopen(fw,"rb");assert(f);size_t bytes=fread(line,1,sizeof(line)-1,f);line[bytes]=0;fclose(f);
+    assert(strstr(line,"0d=15"));
+    f=fopen(ctl,"rb");assert(f);assert(fread(line,1,10,f)==10);fclose(f);assert(!memcmp(line,"NATIVE_CTL",10));
     pid_t pid=fork();assert(pid>=0);
     if(!pid){execl(argv[0],argv[0],root,(char*)0);_exit(127);}
     int status;assert(waitpid(pid,&status,0)==pid);assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);
@@ -70,9 +92,19 @@ int main(int argc,char **argv) {
     dm_kbmap_controls_event("SettingsPanelMessage","CheckChanges","KeyBindingMenu");
     dm_kbmap_controls_event("PanelManager","ClosePanel","SettingsPanel");
     assert(!dm_kbmap_controls_visible());
+    // Switch characters: no global bindings leak into another hero.
+    char bobkey[1200];snprintf(bobkey,sizeof bobkey,"%s/Bob/Bob.key",save_dir);
+    { FILE *f2=fopen(bobkey,"wb");assert(f2);fputs("LEGACY_BINARY\n",f2);fclose(f2); }
+    dm_kbmap_select_character("Bob");assert(dm_kbmap_action(0x0d)==0);
+    assert(!dm_kbmap_bind(0x0d,15));
+    { FILE *f2=fopen(bobkey,"rb");assert(f2);assert(fgets(line,sizeof line,f2));fclose(f2);assert(!strcmp(line,"LEGACY_BINARY\n")); }
+    dm_kbmap_select_character("../bad");assert(dm_kbmap_action(0x0d)==0);
+    dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
     assert(dm_kbmap_mouse_action(0)==0);
-    remove(fn);rmdir(save_dir);rmdir(root);
+    remove(fn);remove(fw);remove(ctl);remove(bobkey);
+    rmdir(alice);rmdir(alice_work);rmdir(bob);rmdir(bob_work);
+    rmdir(save_dir);rmdir(work_dir);rmdir(root);
     puts("portable keyboard bindings: PASS");
     return 0;
 }

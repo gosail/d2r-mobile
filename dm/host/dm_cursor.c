@@ -175,6 +175,7 @@ static _Atomic int g_sn_new;   // 新一次按下（dm_ui_item_query 置）：�
 static int sn_on; static _Atomic uint64_t g_snap;   // 就近吸附中；g_snap = 吸附记录（请求点 x | y<<16 | 落点 x<<32 | y<<48），长按据此分「贴着物品边」与「落在空格中间」 | Nearest snap in effect; g_snap = snap record (request point x | y<<16 | landing point x<<32 | y<<48); long-press uses it to tell 'next to an item's edge' from 'in the middle of an empty cell'
 static _Atomic int g_free_pub;
 static _Atomic int g_mouse_item_hover;
+static _Atomic int g_mouse_finger_override;
 // Device-native cursor hint: 0 ordinary, 1 hovered inventory item, 2 held item.
 int dm_mouse_pointer_hint(void) {
     if (dm_hud_held()) return 2;
@@ -199,10 +200,13 @@ int dm_ui_mouse_hover_now(float nx, float ny) {
         // The native cursor (and held item sprite) follows the mouse between
         // clicks. Hover never issues a synthetic drop or a second A press.
         atomic_store(&g_mouse_item_hover,0);
+        atomic_store(&g_mouse_finger_override,0);
         int ok=dm_ui_hover_now(x,y);
         if (ok) dm_cursor_clear(); // stale touch pointer must not snap back
         return ok;
     }
+    // A fresh real-pointer hover reclaims focus after finger takeover.
+    atomic_store(&g_mouse_finger_override,0);
     int ok = dm_ui_hover_now(x, y);
     if (ok) dm_cursor_clear();
     dm_cursor_item_info hover_item={0};
@@ -316,12 +320,18 @@ void dm_ui_hand_idle(int idle) { atomic_store(&g_hand_idle, idle != 0); }
 // Only an explicit switch back to finger control clears this ownership. The
 // latch also clears when the game's real held-item slot becomes empty.
 static _Atomic int g_mouse_holding_owner;
-void dm_ui_mouse_ownership_release(void) { atomic_store(&g_mouse_holding_owner,0); }
+void dm_ui_mouse_ownership_release(void) {
+    atomic_store(&g_mouse_holding_owner,0);
+    // The mouse-leave event may not have reached the guest input thread yet;
+    // inhibit its stale active flag until a *new* physical hover arrives.
+    atomic_store(&g_mouse_finger_override,1);
+}
 static int physical_mouse_owns_item(void) {
 #if TARGET_OS_OSX
     int dm_touch_host_is_live(void);
     if (dm_touch_host_is_live()) return 1;
 #endif
+    if (atomic_load(&g_mouse_finger_override)) return 0;
     if (dm_external_mouse_active()) {
         atomic_store(&g_mouse_holding_owner,1);
         return 1;

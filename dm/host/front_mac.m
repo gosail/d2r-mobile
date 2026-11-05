@@ -32,6 +32,7 @@ static NSView *g_view;
 // Mouse-only overlay above Metal. It consumes no clicks and uses the same
 // guest-owned target snapshot as iPad/Android. AppKit layers use bottom-left Y.
 static NSRect game_rect(void); // used by the passive hover overlay below
+static void mac_controls_sync(void);
 static CAShapeLayer *g_mouse_outline;
 static CALayer *g_mouse_back,*g_mouse_hp_bg,*g_mouse_hp_fill;
 static CATextLayer *g_mouse_label;
@@ -86,6 +87,7 @@ static void mouse_hover_draw(void) {
         }
     }
     [CATransaction commit];
+    mac_controls_sync();
 }
 // 真全屏（App 形态，屏幕比 16:9 窄——16:10 的 MacBook，「不能全屏」：全屏后上下各 56 点黑边）：照 iPad 那套（front_ios.m、dm_uiscreen.c）——
 // 启动时按屏幕比例（全屏时的内容区：屏幕扣掉刘海安全区）定游戏分辨率，局内 3D 铺满、界面按 16:9 贴底（开大面板居中），前端各页与读取画面游戏自己按 16:9 出、上下留边。
@@ -347,6 +349,155 @@ static void mac_mouse_physical(NSView *view,NSEvent *event,int physical,int phas
             mac_primary_pointer(view,event,2);mac_mouse_primary_owner=-1;
         } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,0);
     }
+}
+
+// In-page device switch. The native KeyBindingMenu/character .ctl remains
+// the Controller page; Keyboard & Mouse is our own per-character .key editor.
+// The original Key 1/Key 2 are controller *alternate slots*, not file types.
+typedef struct { unsigned usage; const char *name; } mac_key_row;
+static const mac_key_row mac_key_rows[]={
+    {0x1a,"W"},{0x04,"A"},{0x16,"S"},{0x07,"D"},
+    {0x0d,"J"},{0x0e,"K"},{0x18,"U"},{0x0c,"I"},
+    {0x09,"F"},{0x0a,"G"},{0x14,"Q"},{0x08,"E"},{0x1d,"Z"},{0x06,"C"},
+    {0x28,"Enter"},{0x29,"Esc"},{0x2b,"Tab"},{0x2c,"Space"},{0x2e,"="},
+    {0x50,"Left"},{0x52,"Up"},{0x4f,"Right"},{0x51,"Down"},
+    {0x1e,"1"},{0x1f,"2"},{0x20,"3"},{0x21,"4"},
+    {0x3a,"F1"},{0x3b,"F2"},{0x3c,"F3"},{0x3d,"F4"},
+    {0x3e,"F5"},{0x3f,"F6"},{0x40,"F7"},{0x41,"F8"},{0x10,"M"}
+};
+static const unsigned mac_actions[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+    16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
+static const char *const mac_action_names[]={
+    "A / Confirm","B / Back","X","Y","Left Stick","Right Stick",
+    "L","R","ZL","ZR","Menu (+)","Menu (-)",
+    "Potion 1","Potion 2","Potion 3","Potion 4",
+    "Move Up","Move Left","Move Down","Move Right",
+    "Enter / Confirm","Escape / Back","Toggle Map",
+    "Skill 1","Skill 2","Skill 3","Skill 4",
+    "Skill 5","Skill 6","Skill 7","Skill 8","Unbound"
+};
+static NSButton *g_mac_keyboard_tab,*g_mac_pad_tab;
+static NSView *g_mac_keyboard_panel;
+static NSScrollView *g_mac_keyboard_scroll;
+static int g_mac_keyboard_mode;
+@interface DmMacFlippedView : NSView @end
+@implementation DmMacFlippedView
+- (BOOL)isFlipped {return YES;}
+@end
+@interface DmMacKeyboardEditor : NSObject
+- (void)chooseDevice:(id)sender;
+- (void)chooseBinding:(id)sender;
+- (void)refresh;
+@end
+@implementation DmMacKeyboardEditor
+- (void)chooseDevice:(id)sender {
+    g_mac_keyboard_mode=sender==g_mac_keyboard_tab;
+    if(g_mac_keyboard_panel)g_mac_keyboard_panel.hidden=!g_mac_keyboard_mode;
+    if(g_mac_keyboard_mode)[self refresh];
+}
+- (void)refresh {
+    if(!g_mac_keyboard_scroll)return;
+    NSView *old=g_mac_keyboard_scroll.documentView;
+    if(old)[old removeFromSuperview];
+    CGFloat w=MAX(230,g_mac_keyboard_scroll.contentSize.width-14),rh=36;
+    NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
+    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,(n+4)*rh+12)];
+    for(NSUInteger i=0;i<n+4;i++) {
+        NSString *title;
+        if(i<n) {
+            unsigned usage=mac_key_rows[i].usage;int action=dm_kbmap_action(usage);const char *name="Unbound";
+            for(unsigned k=0;k<sizeof(mac_actions)/sizeof(mac_actions[0]);k++)
+                if(mac_actions[k]==(unsigned)action){name=mac_action_names[k];break;}
+            title=[NSString stringWithFormat:@"%s   →   %s",mac_key_rows[i].name,name];
+        } else if(i<n+3) {
+            unsigned physical=(unsigned)(i-n),role=dm_kbmap_mouse_action(physical);
+            const char *const buttons[]={"鼠标左键 / Left","鼠标右键 / Right","鼠标中键 / Middle"};
+            const char *const roles[]={"主点击 / Primary","次要使用 / Secondary","切换地图 / Map"};
+            title=[NSString stringWithFormat:@"%s   →   %s",buttons[physical],roles[role>=0&&role<3?role:0]];
+        } else title=@"恢复此角色默认键鼠设置 / Reset defaults";
+        NSButton *b=[NSButton buttonWithTitle:title target:self action:@selector(chooseBinding:)];
+        b.tag=i;b.frame=NSMakeRect(8,i*rh+2,w-16,rh-4);
+        b.alignment=NSTextAlignmentLeft;
+        [rows addSubview:b];
+    }
+    g_mac_keyboard_scroll.documentView=rows;
+}
+- (void)chooseBinding:(NSButton *)button {
+    NSUInteger i=(NSUInteger)button.tag;
+    NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
+    if(i==n+3) {
+        NSAlert *confirm=[NSAlert new];
+        confirm.messageText=@"恢复此角色默认键位和鼠标按钮？";
+        [confirm addButtonWithTitle:@"恢复"];[confirm addButtonWithTitle:@"取消"];
+        if([confirm runModal]==NSAlertFirstButtonReturn) {
+            dm_kbmap_restore_defaults();[self refresh];
+        }
+        return;
+    }
+    NSPopUpButton *picker=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,350,32) pullsDown:NO];
+    NSString *label;
+    if(i<n) {
+        label=[NSString stringWithUTF8String:mac_key_rows[i].name];
+        for(unsigned j=0;j<sizeof(mac_actions)/sizeof(mac_actions[0]);j++) {
+            [picker addItemWithTitle:[NSString stringWithUTF8String:mac_action_names[j]]];
+            picker.lastItem.tag=mac_actions[j];
+            if(dm_kbmap_action(mac_key_rows[i].usage)==(int)mac_actions[j])
+                [picker selectItemAtIndex:j];
+        }
+    } else {
+        unsigned physical=(unsigned)(i-n);
+        label=@[@"鼠标左键 / Left",@"鼠标右键 / Right",@"鼠标中键 / Middle"][physical];
+        for(NSString *action in @[@"主点击 / Primary",@"次要使用 / Secondary",@"切换地图 / Map"])
+            [picker addItemWithTitle:action];
+        [picker selectItemAtIndex:dm_kbmap_mouse_action(physical)];
+    }
+    NSAlert *dialog=[NSAlert new];dialog.messageText=label;
+    dialog.informativeText=@"键鼠按键映射（保存在当前角色 .key）";
+    dialog.accessoryView=picker;
+    [dialog addButtonWithTitle:@"保存"];[dialog addButtonWithTitle:@"取消"];
+    if([dialog runModal]==NSAlertFirstButtonReturn) {
+        int ok=i<n?dm_kbmap_bind(mac_key_rows[i].usage,(unsigned)picker.selectedItem.tag):
+            dm_kbmap_bind_mouse((unsigned)(i-n),(unsigned)picker.indexOfSelectedItem);
+        if(!ok) {
+            NSAlert *error=[NSAlert new];error.messageText=@"无法保存此角色的 .key";
+            error.informativeText=@"请先选定角色，或检查是否存在其他格式的 .key 文件。";
+            [error addButtonWithTitle:@"确定"];[error runModal];
+        } else [self refresh];
+    }
+}
+@end
+static DmMacKeyboardEditor *g_mac_keyboard_editor;
+static void mac_controls_sync(void) {
+    if(!g_live || !g_view)return;
+    BOOL visible=dm_kbmap_controls_visible()!=0;
+    if(!visible && !g_mac_keyboard_tab)return;
+    if(!g_mac_keyboard_editor)g_mac_keyboard_editor=[DmMacKeyboardEditor new];
+    if(!g_mac_keyboard_tab) {
+        g_mac_keyboard_tab=[NSButton buttonWithTitle:@"键鼠 / Keyboard & Mouse"
+            target:g_mac_keyboard_editor action:@selector(chooseDevice:)];
+        g_mac_pad_tab=[NSButton buttonWithTitle:@"手柄 / Controller"
+            target:g_mac_keyboard_editor action:@selector(chooseDevice:)];
+        [g_view addSubview:g_mac_keyboard_tab];[g_view addSubview:g_mac_pad_tab];
+        g_mac_keyboard_panel=[[NSView alloc] initWithFrame:NSZeroRect];
+        g_mac_keyboard_panel.wantsLayer=YES;
+        g_mac_keyboard_panel.layer.backgroundColor=[NSColor colorWithCalibratedWhite:.07 alpha:.97].CGColor;
+        g_mac_keyboard_panel.layer.cornerRadius=8;
+        g_mac_keyboard_scroll=[[NSScrollView alloc] initWithFrame:NSZeroRect];
+        g_mac_keyboard_scroll.hasVerticalScroller=YES;
+        [g_mac_keyboard_panel addSubview:g_mac_keyboard_scroll];
+        [g_view addSubview:g_mac_keyboard_panel];
+    }
+    NSRect b=g_view.bounds;CGFloat w=MIN(b.size.width*.73,810);
+    CGFloat h=MIN(b.size.height*.70,690);
+    CGFloat x=(b.size.width-w)/2;
+    g_mac_keyboard_tab.frame=NSMakeRect(x,b.size.height*.90,w*.5,35);
+    g_mac_pad_tab.frame=NSMakeRect(x+w*.5,b.size.height*.90,w*.5,35);
+    g_mac_keyboard_panel.frame=NSMakeRect(x,b.size.height*.16,w,h);
+    g_mac_keyboard_scroll.frame=NSInsetRect(g_mac_keyboard_panel.bounds,8,8);
+    g_mac_keyboard_tab.hidden=g_mac_pad_tab.hidden=!visible;
+    g_mac_keyboard_panel.hidden=!visible || !g_mac_keyboard_mode;
+    if(visible && g_mac_keyboard_mode && !g_mac_keyboard_scroll.documentView)
+        [g_mac_keyboard_editor refresh];
 }
 
 typedef struct { void (*fn)(void); } guest_arg;

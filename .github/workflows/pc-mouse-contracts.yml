@@ -1,0 +1,27 @@
+name: PC mouse/controls static contracts
+
+on:
+  pull_request:
+    paths:
+      - "dm/host/**"
+      - "dm/ios/**"
+      - "dm/android/**"
+      - ".github/workflows/pc-mouse-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Keyboard/controller options and runtime mouse contracts
+        run: |
+          python -m unittest discover -v -s dm/ios/tests -p test_controls_tab.py
+          python -m unittest discover -v -s dm/ios/tests -p test_mouse_pc_parity.py
+          python -m unittest discover -v -s dm/ios/tests -p test_mouse_world_render.py

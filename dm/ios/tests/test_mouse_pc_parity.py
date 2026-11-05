@@ -35,6 +35,8 @@ class PhysicalMouseParity(unittest.TestCase):
         self.assertIn("dm_world_mouse_map_toggle()", shared)
         self.assertIn("dm_ui_map_full(!dm_ui_map_is_full())", world)
         self.assertIn("_mouseMiddleDown", ios)
+        self.assertIn("DM_MOUSE_MIDDLE_DOWN point:p", ios)
+        self.assertIn("_mouseMiddleDown=NO", ios)
         self.assertIn("BUTTON_TERTIARY", android)
         self.assertIn("NSEventMaskOtherMouseDown", mac)
 

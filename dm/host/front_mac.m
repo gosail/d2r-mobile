@@ -30,6 +30,7 @@ static NSWindow *g_win;
 static NSView *g_view;
 // Mouse-only overlay above Metal. It consumes no clicks and uses the same
 // guest-owned target snapshot as iPad/Android. AppKit layers use bottom-left Y.
+static NSRect game_rect(void); // used by the passive hover overlay below
 static CAShapeLayer *g_mouse_outline;
 static CALayer *g_mouse_back,*g_mouse_hp_bg,*g_mouse_hp_fill;
 static CATextLayer *g_mouse_label;

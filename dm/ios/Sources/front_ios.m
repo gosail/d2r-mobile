@@ -140,7 +140,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     CALayer *_mouseHoverBacking, *_mouseHoverHpBg, *_mouseHoverHpFill;
     CAShapeLayer *_mouseHoverOutline;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
-    BOOL _mouseSecondaryDown;
+    BOOL _mouseSecondaryDown, _mouseMiddleDown;
     // Real mouse clicks on visible touch controls or a UI panel reuse the
     // existing native touch gesture machine; 3D clicks use PC mouse routing.
     NSMutableSet<UITouch *> *_pointerAsTouch;
@@ -726,6 +726,19 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                 CGPoint p=[t locationInView:self];
                 BOOL asTouch=[_pointerAsTouch containsObject:t];
                 BOOL secondary=(event.buttonMask & UIEventButtonMaskSecondary)!=0;
+                // UIEventButtonMaskMiddle is bit 2 on iOS 13.4+.
+                // A middle click is an action, not a touch-gesture begin; it
+                // must never be followed by a synthetic left-button release.
+                BOOL middle=(event.buttonMask & (UIEventButtonMask)(1u<<2))!=0;
+                if (op==DM_MOUSE_DOWN && middle) {
+                    _mouseMiddleDown=YES;
+                    [self dmMouseEvent:DM_MOUSE_MIDDLE_DOWN point:p arg:0];
+                    continue;
+                }
+                if (_mouseMiddleDown) {
+                    if (op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE) _mouseMiddleDown=NO;
+                    continue;
+                }
                 if (op==DM_MOUSE_DOWN && !secondary &&
                     (_navigation || [self dmMouseHitsTouchControl:p])) {
                     if (!_pointerAsTouch) _pointerAsTouch=[NSMutableSet set];

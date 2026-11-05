@@ -198,6 +198,23 @@ static NSString *kbActionLabel(int action) {
     pick.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
     [self.window.rootViewController presentViewController:pick animated:YES completion:nil];
 }
+- (void)kbMouseChoose:(unsigned)physical {
+    NSArray<NSString *> *titles=@[@"Primary click / 左键交互",
+        @"Secondary use / 右键使用",@"Toggle map / 切换地图"];
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:
+        (physical==0?@"Mouse Left / 鼠标左键":physical==1?@"Mouse Right / 鼠标右键":@"Mouse Middle / 鼠标中键")
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for(unsigned role=0;role<3;role++)
+        [sheet addAction:[UIAlertAction actionWithTitle:titles[role] style:UIAlertActionStyleDefault
+          handler:^(UIAlertAction *a) {
+            (void)a;
+            if(dm_kbmap_bind_mouse(physical,role)) [self kbSettingsOpen];
+        }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"取消":@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView=_kbSettingsButton;
+    sheet.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
+    [self.window.rootViewController presentViewController:sheet animated:YES completion:nil];
+}
 - (void)kbSettingsOpen {
     static const unsigned char usages[]={
         0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
@@ -217,6 +234,16 @@ static NSString *kbActionLabel(int action) {
         NSString *caption=[NSString stringWithFormat:@"%@  →  %@",label,kbActionLabel(dm_kbmap_action(usage))];
         [list addAction:[UIAlertAction actionWithTitle:caption style:UIAlertActionStyleDefault
             handler:^(UIAlertAction *a) {(void)a;[self kbChooseUsage:usage label:label];}]];
+    }
+    NSArray<NSString *> *mouseNames=@[@"Mouse Left / 鼠标左键",@"Mouse Right / 鼠标右键",@"Mouse Middle / 鼠标中键"];
+    NSArray<NSString *> *mouseRoles=@[@"Primary click / 左键交互",
+        @"Secondary use / 右键使用",@"Toggle map / 切换地图"];
+    for(unsigned physical=0;physical<3;physical++) {
+        int role=dm_kbmap_mouse_action(physical);
+        NSString *label=[NSString stringWithFormat:@"%@  →  %@",mouseNames[physical],
+            mouseRoles[role>=0 && role<3?role:0]];
+        [list addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction *a){(void)a;[self kbMouseChoose:physical];}]];
     }
     [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复默认键位":@"Restore defaults")
         style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {

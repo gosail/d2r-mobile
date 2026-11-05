@@ -457,6 +457,15 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JN
     (*env)->SetIntArrayRegion(env,out,0,4,rect);
 }
 
+// Pointer roles share the local sw_keyboard.txt serializer.
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseBinding(JNIEnv *e,jclass c,jint physical) {
+    (void)e;(void)c;return physical<0?-1:dm_kbmap_mouse_action((unsigned)physical);
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseBind(JNIEnv *e,jclass c,jint physical,jint logical) {
+    (void)e;(void)c;return physical>=0 && logical>=0 &&
+        dm_kbmap_bind_mouse((unsigned)physical,(unsigned)logical);
+}
+
 // Local keyboard controls; used by the button on the native Controls tab.
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbControlsVisible(JNIEnv *e,jclass c) {
     (void)e;(void)c;return dm_kbmap_controls_visible();

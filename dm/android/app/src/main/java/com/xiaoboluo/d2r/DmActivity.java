@@ -95,6 +95,8 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native int nativeKbAction(int hidUsage);
     static native boolean nativeKbBind(int hidUsage, int action);
     static native void nativeKbDefaults();
+    static native int nativeMouseBinding(int physical);
+    static native boolean nativeMouseBind(int physical,int logical);
     static native void nativePadMode(int pad);
     static native void nativePadGlyph(int glyph);
 

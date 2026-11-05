@@ -24,6 +24,10 @@ final class KeyboardSettings {
         "←","↑","→","↓", "1","2","3","4",
         "F1","F2","F3","F4","F5","F6","F7","F8","M"
     };
+    private static final String[] MOUSE_NAMES={"Mouse Left / 鼠标左键",
+        "Mouse Right / 鼠标右键","Mouse Middle / 鼠标中键"};
+    private static final String[] MOUSE_ACTIONS={"Primary click / 左键交互",
+        "Secondary use / 右键使用","Toggle map / 切换地图"};
     private static final int[] ACTIONS={
         0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
         16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255
@@ -40,27 +44,42 @@ final class KeyboardSettings {
     };
     static void show(Activity activity) {
         final boolean zh=Locale.getDefault().getLanguage().equals("zh");
-        String[] rows=new String[KEYS.length+1];
+        String[] rows=new String[KEYS.length+4];
         for(int i=0;i<KEYS.length;i++) {
             int val=DmActivity.nativeKbAction(KEYS[i]), j=0;
             for(;j<ACTIONS.length-1 && ACTIONS[j]!=val;j++);
             rows[i]=KEY_NAMES[i]+"     →     "+ACTION_NAMES[j];
         }
-        rows[KEYS.length]=zh?"恢复默认键位":"Reset all bindings";
+        for(int i=0;i<3;i++) {
+            int role=DmActivity.nativeMouseBinding(i);
+            rows[KEYS.length+i]=MOUSE_NAMES[i]+"     →     "+MOUSE_ACTIONS[role>=0 && role<3?role:0];
+        }
+        rows[KEYS.length+3]=zh?"恢复默认键鼠设置":"Reset all bindings";
         new AlertDialog.Builder(activity)
             .setTitle(zh?"控制 · 键鼠":"Controls · Keyboard")
             .setItems(rows,(d,which)->{
-                if(which==KEYS.length) {
+                if(which==KEYS.length+3) {
                     new AlertDialog.Builder(activity)
                         .setMessage(zh?"恢复全部键鼠默认键位？":"Reset all keyboard bindings?")
                         .setPositiveButton(zh?"恢复":"Reset",(w,n)->{
                             DmActivity.nativeKbDefaults();show(activity);
                         })
                         .setNegativeButton(zh?"取消":"Cancel",null).show();
-                } else choose(activity,which);
+                } else if(which>=KEYS.length) chooseMouse(activity,which-KEYS.length);
+                else choose(activity,which);
             })
             .setNegativeButton(zh?"关闭":"Close",null)
             .show();
+    }
+    private static void chooseMouse(Activity activity,int physical) {
+        boolean zh=Locale.getDefault().getLanguage().equals("zh");
+        new AlertDialog.Builder(activity)
+            .setTitle(MOUSE_NAMES[physical])
+            .setItems(MOUSE_ACTIONS,(d,which)->{
+                if(DmActivity.nativeMouseBind(physical,which))show(activity);
+                else Toast.makeText(activity,zh?"无法保存鼠标功能":"Cannot save mouse binding",Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton(zh?"取消":"Cancel",null).show();
     }
     private static void choose(Activity activity,int idx) {
         boolean zh=Locale.getDefault().getLanguage().equals("zh");

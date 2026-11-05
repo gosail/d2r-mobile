@@ -45,6 +45,10 @@ static mount_t g_mnt[MAX_MOUNT];   // commit 非空 = 事务式存档挂载 | co
 static int g_nmnt;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_path_lock = PTHREAD_MUTEX_INITIALIZER;
+// Public sidecar writer lock. Taking this before the keyboard map's own
+// mutex preserves the same order as the Commit path (path -> map).
+void dm_fs_profile_lock(void) { pthread_mutex_lock(&g_path_lock); }
+void dm_fs_profile_unlock(void) { pthread_mutex_unlock(&g_path_lock); }
 static void path_unlock(pthread_mutex_t **m) { pthread_mutex_unlock(*m); }
 #define PATH_LOCK() pthread_mutex_t *path_guard __attribute__((cleanup(path_unlock))) = &g_path_lock; pthread_mutex_lock(path_guard)
 static uint8_t g_fmode[65536];              // fd → 打开方式 | fd → open mode

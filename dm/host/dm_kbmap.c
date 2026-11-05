@@ -16,6 +16,8 @@
 const char *dm_save_commitdir(void);
 const char *dm_save_workdir(void);
 void dm_kb_clear(void);
+// Serialize profile writes with h_fs_Commit's directory swap.
+void dm_fs_profile_lock(void),dm_fs_profile_unlock(void);
 static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char map[256],def[256],down[256],active[256];
 static unsigned char mouse_map[3]={0,1,2};
@@ -188,15 +190,19 @@ int dm_kbmap_action(unsigned usage) {
 }
 int dm_kbmap_bind(unsigned usage,unsigned action) {
     if(usage>=256 || !valid(action))return 0;
+    dm_fs_profile_lock();
     pthread_mutex_lock(&km_mu);load_locked();
     unsigned char before=map[usage];map[usage]=(unsigned char)action;
     int ok=save_locked();if(!ok)map[usage]=before;
-    pthread_mutex_unlock(&km_mu);return ok;
+    pthread_mutex_unlock(&km_mu);
+    dm_fs_profile_unlock();return ok;
 }
 void dm_kbmap_restore_defaults(void) {
+    dm_fs_profile_lock();
     pthread_mutex_lock(&km_mu);load_locked();
     memcpy(map,def,256);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;save_locked();
     pthread_mutex_unlock(&km_mu);
+    dm_fs_profile_unlock();
 }
 void dm_kbmap_reset(void) {
     pthread_mutex_lock(&km_mu);memset(down,0,256);memset(active,0,256);
@@ -254,8 +260,10 @@ int dm_kbmap_mouse_action(unsigned physical) {
 }
 int dm_kbmap_bind_mouse(unsigned physical,unsigned action) {
     if(physical>=3 || action>=3)return 0;
+    dm_fs_profile_lock();
     pthread_mutex_lock(&km_mu);load_locked();
     unsigned char before=mouse_map[physical];mouse_map[physical]=(unsigned char)action;
     int ok=save_locked();if(!ok)mouse_map[physical]=before;
-    pthread_mutex_unlock(&km_mu);return ok;
+    pthread_mutex_unlock(&km_mu);
+    dm_fs_profile_unlock();return ok;
 }

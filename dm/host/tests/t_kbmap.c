@@ -15,6 +15,8 @@ static char root[1024],save_dir[1100],work_dir[1100];
 static uint64_t buttons;
 static int32_t left_x,left_y;
 static unsigned maps;
+void dm_fs_profile_lock(void) {}
+void dm_fs_profile_unlock(void) {}
 const char *dm_save_commitdir(void) {return save_dir;}
 const char *dm_save_workdir(void) {return work_dir;}
 void dm_kb_clear(void) {buttons=0;left_x=left_y=0;}

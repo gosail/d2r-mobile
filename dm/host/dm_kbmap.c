@@ -6,6 +6,7 @@
 #include "dm_uiscreen.h"
 #include <pthread.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,4 +124,18 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
     }
     dm_kb_set(bits,(right-left)*32767,(up-dn)*32767,0,0);
     pthread_mutex_unlock(&km_mu);
+}
+
+// The original SettingsPanel action reports which child page is selected.
+// Only offer the keyboard editor while KeyBindingMenu is the active child.
+static _Atomic int controls_visible;
+int dm_kbmap_controls_visible(void) {return atomic_load(&controls_visible);}
+void dm_kbmap_controls_event(const char *cat,const char *action,const char *arg) {
+    if(!cat || !action) return;
+    if(!strcmp(cat,"SettingsPanelMessage") && !strcmp(action,"CheckChanges")) {
+        atomic_store(&controls_visible,arg && !strcmp(arg,"KeyBindingMenu"));
+    } else if(!strcmp(cat,"PanelManager") && (!strcmp(action,"ClosePanel") || !strcmp(action,"UnloadPanel"))
+              && arg && (!strcmp(arg,"SettingsPanel") || !strcmp(arg,"KeyBindingMenu"))) {
+        atomic_store(&controls_visible,0);
+    }
 }

@@ -3138,6 +3138,8 @@ void dm_ui_on_uimsg(const char *cat, const char *act, const char *arg) {
     if (!strcmp(cat, "PanelManager")) ui_panel_note(act, arg ? arg : "");
     if (!strcmp(cat, "ChroniclePanelMessage") && !strcmp(act, "ToggleChildPanel") && arg && arg[0]) { int c = 0; while (c < 8 && g_chr_child[c][0] && strcmp(g_chr_child[c], arg)) c++; if (c < 8 && !g_chr_child[c][0]) strlcpy(g_chr_child[c], arg, sizeof g_chr_child[c]); }
     if (!strcmp(cat, "PanelManager") && arg && !strcmp(arg, "ChroniclePanel") && (!strcmp(act, "ClosePanel") || !strcmp(act, "UnloadPanel"))) atomic_store(&g_chr_closed, 1);
+    { void dm_kbmap_controls_event(const char *,const char *,const char *);
+      dm_kbmap_controls_event(cat,act,arg); }
     dm_custom_on_uimsg(cat, act, arg ? arg : "");
     if (act && !strcmp(act, "ControllerActionEnd")) atomic_store(&g_a_wait, 0);   // 等到「手柄动作结束」：拿起是在确认键松开被游戏处理时才发的（只等到「开始」就挪光标，背包 → 箱子的拿起包没发） | wait until "controller action end": the pick-up is only sent when the release of the confirm button is processed by the game (if the cursor is moved after waiting only for "start", the pick-up packet for inventory → stash is not sent)
     if (strcmp(cat, "InputMessage") && strcmp(cat, "MonsterHealth") && strcmp(cat, "PartyPanelMessage")) DM_LAT("ui %s %s %s", cat, act, arg ? arg : "");

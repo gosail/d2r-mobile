@@ -9,3 +9,7 @@ int dm_kbmap_bind(unsigned usage,unsigned action);
 void dm_kbmap_restore_defaults(void);
 void dm_kbmap_key_event(unsigned usage,int down);
 void dm_kbmap_reset(void);
+
+// UI source: original Controls tab, independent from controller mapping data.
+int dm_kbmap_controls_visible(void);
+void dm_kbmap_controls_event(const char *category,const char *action,const char *arg);

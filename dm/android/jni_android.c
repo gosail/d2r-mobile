@@ -14,6 +14,7 @@
 //   <internal dir>/save, temp        saves and temporary files
 #include "../host/dm.h"
 #include "../host/dm_input.h"
+#include "../host/dm_kbmap.h"
 #include "../host/front.h"
 #include "../host/hle.h"
 #include <android/log.h>
@@ -454,6 +455,19 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JN
     front_android_view_rect(w,h,rect);
     if (front_android_full() && dm_uiscreen_ingame()) { rect[0]=0; rect[1]=0; rect[2]=w; rect[3]=h; }
     (*env)->SetIntArrayRegion(env,out,0,4,rect);
+}
+
+// Physical keyboard is separate from the touch and gamepad input channels.
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardEvent(JNIEnv *env,jclass cls,jint usage,jboolean down) {
+    (void)env;(void)cls;
+    if(usage>=0 && usage<256) {
+        dm_kbmap_key_event((unsigned)usage,down!=0);
+        if(down && dm_kbmap_action((unsigned)usage)!=DM_KB_UNBOUND)
+            dm_padmode_request_glyph(DM_GLYPH_KBD);
+    }
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardReset(JNIEnv *env,jclass cls) {
+    (void)env;(void)cls;dm_kbmap_reset();
 }
 
 // 实体手柄（Java PadInput.java）→ 宿主手柄状态。与触屏的虚拟手柄分开存，游戏取手柄时按键取或、摇杆触屏优先（hle_hid.c 的 fill）。

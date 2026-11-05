@@ -2,6 +2,7 @@
 // not synthesize UITouch/MotionEvent finger input or change controller mode.
 // macOS keeps its already tested live mouse path in touch_mac.c.
 #include "dm_external_mouse.h"
+#include "dm_kbmap.h"
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -34,13 +35,40 @@ static uint64_t mouse_last_walk;
 static mouse_event mouse_last_hover;
 static int mouse_hover_valid;
 static int mouse_right_item;
+static int g_mouse_physical_role[3]={0,1,2};
+static int g_mouse_physical_down[3];
 
 int dm_external_mouse_active(void) { return atomic_load(&mouse_active); }
 void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int arg) {
-    if (op < DM_MOUSE_DOWN || op > DM_MOUSE_MIDDLE_DOWN) return;
+    if (op < DM_MOUSE_DOWN || op > DM_MOUSE_MIDDLE_UP) return;
     if (!isfinite(ux) || !isfinite(uy) || !isfinite(wx) || !isfinite(wy)) op = DM_MOUSE_LEAVE;
-    mouse_event e = {op, arg, ux, uy, wx, wy};
     pthread_mutex_lock(&mouse_mu);
+    // Translate physical button roles once at press time; release uses the
+    // latched action even if the user rebinds while holding the button.
+    int button=-1,press=0,release=0;
+    if(op==DM_MOUSE_DOWN){button=0;press=1;}
+    else if(op==DM_MOUSE_RIGHT_DOWN){button=1;press=1;}
+    else if(op==DM_MOUSE_MIDDLE_DOWN){button=2;press=1;}
+    else if(op==DM_MOUSE_UP){button=0;release=1;}
+    else if(op==DM_MOUSE_RIGHT_UP){button=1;release=1;}
+    else if(op==DM_MOUSE_MIDDLE_UP){button=2;release=1;}
+    if(op==DM_MOUSE_LEAVE) memset(g_mouse_physical_down,0,sizeof g_mouse_physical_down);
+    if(button>=0) {
+        if(press) {
+            g_mouse_physical_role[button]=dm_kbmap_mouse_action((unsigned)button);
+            g_mouse_physical_down[button]=1;
+        } else if(!g_mouse_physical_down[button]) {
+            pthread_mutex_unlock(&mouse_mu);return;
+        } else g_mouse_physical_down[button]=0;
+        int role=g_mouse_physical_role[button];
+        if(role<0 || role>2){pthread_mutex_unlock(&mouse_mu);return;}
+        if(press)op=role==0?DM_MOUSE_DOWN:role==1?DM_MOUSE_RIGHT_DOWN:DM_MOUSE_MIDDLE_DOWN;
+        else {
+            if(role==2){pthread_mutex_unlock(&mouse_mu);return;}
+            op=role==0?DM_MOUSE_UP:DM_MOUSE_RIGHT_UP;
+        }
+    }
+    mouse_event e = {op, arg, ux, uy, wx, wy};
     // Hover/drag storms never crowd out a button release. Preserve every
     // down/up edge even when the display thread is slower than the mouse.
     if ((op == DM_MOUSE_HOVER || op == DM_MOUSE_DRAG) && mouse_tail != mouse_head &&

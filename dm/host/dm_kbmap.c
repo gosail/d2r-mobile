@@ -14,6 +14,7 @@
 const char *dm_save_commitdir(void);
 static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char map[256],def[256],down[256],active[256];
+static unsigned char mouse_map[3]={0,1,2};
 static int inited,loaded;
 static void defaults(unsigned char *m) {
     memset(m,DM_KB_UNBOUND,256);
@@ -56,6 +57,10 @@ static void load_locked(void) {
     if(!fgets(line,sizeof line,f) || strcmp(line,"D2RMobileKeyboard=1\n")) {fclose(f);return;}
     while(fgets(line,sizeof line,f)) {
         unsigned usage=0,action=0;char extra=0;
+        if(sscanf(line,"mouse%u=%u %c",&usage,&action,&extra)==2) {
+            if(usage<3 && action<3) mouse_map[usage]=(unsigned char)action;
+            continue;
+        }
         if(sscanf(line,"%x=%u %c",&usage,&action,&extra)==2 && usage<256 && valid(action))
             map[usage]=(unsigned char)action;
     }
@@ -69,6 +74,8 @@ static int save_locked(void) {
     int ok=fputs("D2RMobileKeyboard=1\n",f)>=0;
     for(unsigned i=0;ok && i<256;i++)if(map[i]!=def[i])
         ok=fprintf(f,"%02x=%u\n",i,(unsigned)map[i])>0;
+    for(unsigned i=0;ok && i<3;i++)if(mouse_map[i]!=i)
+        ok=fprintf(f,"mouse%u=%u\n",i,(unsigned)mouse_map[i])>0;
     if(fclose(f))ok=0;
     if(ok)ok=rename(tmp,fn)==0;
     if(!ok)remove(tmp);
@@ -88,7 +95,7 @@ int dm_kbmap_bind(unsigned usage,unsigned action) {
 }
 void dm_kbmap_restore_defaults(void) {
     pthread_mutex_lock(&km_mu);load_locked();
-    memcpy(map,def,256);save_locked();
+    memcpy(map,def,256);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;save_locked();
     pthread_mutex_unlock(&km_mu);
 }
 void dm_kbmap_reset(void) {
@@ -138,4 +145,17 @@ void dm_kbmap_controls_event(const char *cat,const char *action,const char *arg)
               && arg && (!strcmp(arg,"SettingsPanel") || !strcmp(arg,"KeyBindingMenu"))) {
         atomic_store(&controls_visible,0);
     }
+}
+
+int dm_kbmap_mouse_action(unsigned physical) {
+    if(physical>=3)return -1;
+    pthread_mutex_lock(&km_mu);load_locked();
+    int a=mouse_map[physical];pthread_mutex_unlock(&km_mu);return a;
+}
+int dm_kbmap_bind_mouse(unsigned physical,unsigned action) {
+    if(physical>=3 || action>=3)return 0;
+    pthread_mutex_lock(&km_mu);load_locked();
+    unsigned char before=mouse_map[physical];mouse_map[physical]=(unsigned char)action;
+    int ok=save_locked();if(!ok)mouse_map[physical]=before;
+    pthread_mutex_unlock(&km_mu);return ok;
 }

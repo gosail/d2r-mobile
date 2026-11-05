@@ -137,7 +137,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     UIView *_rsCover;   // 一键重开期间的黑屏（宿主 dm_cursor.c 经 g_dm_restart_cover_hook 开关）：盖在窗口最上层（整屏，含真全屏的留边），不露主菜单，吞掉这段时间的触点 | Black screen during one-tap restart (toggled by the host's dm_cursor.c via g_dm_restart_cover_hook): covers the top of the window (whole screen, including the true-fullscreen margins), does not reveal the main menu, and swallows touch points during this period
     int _navigation;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
-    CATextLayer *_hoverName; CALayer *_hoverLoot; BOOL _mouseSecondaryDown;
+    CATextLayer *_hoverName; CALayer *_hoverLoot; CALayer *_hoverHpTrack,*_hoverHpFill; BOOL _mouseSecondaryDown;
     // Real mouse clicks on visible touch controls or a UI panel reuse the
     // existing native touch gesture machine; 3D clicks use PC mouse routing.
     NSMutableSet<UITouch *> *_pointerAsTouch;
@@ -596,12 +596,20 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
         _hoverLoot=[CALayer layer]; _hoverLoot.borderWidth=2; _hoverLoot.cornerRadius=3;
         _hoverLoot.borderColor=[UIColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
         [hoverHost addSublayer:_hoverLoot];
+        _hoverHpTrack=[CALayer layer]; _hoverHpTrack.backgroundColor=[UIColor colorWithWhite:.2 alpha:.9].CGColor;
+        _hoverHpTrack.cornerRadius=3; [hoverHost addSublayer:_hoverHpTrack];
+        _hoverHpFill=[CALayer layer]; _hoverHpFill.backgroundColor=[UIColor colorWithRed:.85 green:.2 blue:.18 alpha:1].CGColor;
+        _hoverHpFill.cornerRadius=3; [hoverHost addSublayer:_hoverHpFill];
+        _hoverName.wrapped=YES;
     }
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     if (_hoverName.superlayer!=hoverHost) {
         [hoverHost addSublayer:_hoverName];
         [hoverHost addSublayer:_hoverLoot];
+        [hoverHost addSublayer:_hoverHpTrack];
+        [hoverHost addSublayer:_hoverHpFill];
     }
+    _hoverHpTrack.hidden=_hoverHpFill.hidden=!show || h.kind!=3 || h.hp_max<=0;
     _hoverName.hidden=!show || (h.kind!=1 && h.kind!=3);
     _hoverName.foregroundColor=(h.kind==3 ? [UIColor colorWithRed:1 green:.78 blue:.74 alpha:1] :
         [UIColor colorWithRed:.84 green:.77 blue:.58 alpha:1]).CGColor;
@@ -615,11 +623,22 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
             NSString *s=[NSString stringWithUTF8String:h.title];
             if (!s.length) _hoverName.hidden=YES;
             else {
-                CGFloat width=fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[UIFont systemFontOfSize:19]}].width+22));
+                BOOL monster=h.kind==3;
+                NSString *detail=monster && h.details[0] ? [NSString stringWithUTF8String:h.details] : @"";
+                NSString *label=detail.length ? [NSString stringWithFormat:@"%@\n%@",s,detail] : s;
+                CGFloat width=monster?fmin(350,hoverHost.bounds.size.width-8):fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[UIFont systemFontOfSize:19]}].width+22));
+                CGFloat height=monster?(detail.length?62:36):28;
                 CGFloat px=wr.origin.x+h.x*wr.size.width-width/2;
-                CGFloat py=wr.origin.y+h.y*wr.size.height-31;
-                _hoverName.string=s;
-                _hoverName.frame=CGRectMake(fmax(0,fmin(hoverHost.bounds.size.width-width,px)),py,width,28);
+                CGFloat py=wr.origin.y+h.y*wr.size.height-height-3;
+                _hoverName.fontSize=monster?16:19;
+                _hoverName.string=label;
+                _hoverName.frame=CGRectMake(fmax(0,fmin(hoverHost.bounds.size.width-width,px)),py,width,height);
+                if(monster && h.hp_max>0) {
+                    CGFloat x=_hoverName.frame.origin.x+6, y=_hoverName.frame.origin.y+height+1, bw=width-12;
+                    CGFloat ratio=fmax(0,fmin(1,(CGFloat)h.hp/h.hp_max));
+                    _hoverHpTrack.frame=CGRectMake(x,y,bw,6);
+                    _hoverHpFill.frame=CGRectMake(x,y,bw*ratio,6);
+                }
             }
         } else if (h.kind==2) {
             _hoverLoot.frame=CGRectMake(wr.origin.x+h.x*wr.size.width-3, wr.origin.y+h.y*wr.size.height-2,

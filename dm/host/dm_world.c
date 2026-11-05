@@ -351,6 +351,8 @@ static int w_arrive(uint64_t pl, uint64_t u, int px, int py, int ox, int oy, con
 // Walking reuses the route planning above and the segment-by-segment "run to point"; arrived = within 1 tile of the target tile; a target tile that cannot be stood on (inside a wall, in water) = walk to the nearest reachable tile and stop; no movement for 1 second: re-plan once, then stop if still not moving; stop after 15 seconds without arriving.
 // As soon as the stick (including keyboard W A S D) moves, it yields to the stick: a walk in progress is cancelled and new requests within 0.3 s are not accepted.
 static _Atomic uint64_t g_walk;
+static _Atomic unsigned g_mouse_map_toggle;
+void dm_world_mouse_map_toggle(void) { atomic_fetch_add(&g_mouse_map_toggle,1); }
 void dm_world_walk(float nx, float ny) { if (nx < 0) nx = 0; if (nx > 1) nx = 1; if (ny < 0) ny = 0; if (ny > 1) ny = 1; atomic_store(&g_walk, 1ull << 32 | (uint64_t)(uint32_t)(nx * 65535) << 16 | (uint32_t)(ny * 65535)); }   // 任意线程：排一笔，主线程取手柄处执行；后一笔覆盖前一笔 | any thread: queue one request, executed where the main thread reads the gamepad; a later request overwrites an earlier one
 int dm_world_walking(void) { return g_go.on && g_go.type == W_GROUND; }
 void dm_world_mouse_stop(void) { // guest input thread only
@@ -587,6 +589,41 @@ if (cat == 5 || cat == 1 || cat == 0xa) {
                         if (name && *name) strlcpy(view.title,name,sizeof view.title);
                         else if (cat != 5) snprintf(view.title,sizeof view.title,"Monster #%u",cls);
                         else view.kind=0; // NPC without a known name stays hidden.
+                        if (view.kind==3) {
+                            // Original client stat getter, also used by diag.c
+                            // for the currently selected monster's resistances.
+                            int (*stat)(uint64_t,int,int)=(void *)(b+0x5b9290);
+                            int hp=stat(unit,6,0), maxhp=stat(unit,7,0);
+                            if (maxhp>0 && hp>=0) {
+                                view.hp_max=maxhp>>8; view.hp=hp>>8;
+                                if (view.hp>view.hp_max) view.hp=view.hp_max;
+                            }
+                            uint64_t md=*(uint64_t *)(unit+0x10);
+                            uint8_t flags=md ? *(uint8_t *)(md+0x1a) : 0;
+                            view.tier=(flags&0x0a)?2:(flags&0x04)?1:0;
+                            // Boss class ids from the existing dm_threat_tier
+                            // implementation in hle_target.c; no guessed fields.
+                            static const uint16_t bosses[]={156,211,229,242,243,250,256,267,333,365,526,544,546,547,548,549,550,559,570,704,705,706,707,708,709,745,746,747};
+                            for (unsigned z=0;z<sizeof bosses/sizeof bosses[0];z++)
+                                if(cls==bosses[z]) { view.tier=3; break; }
+                            static const int stat_id[]={36,37,39,41,43,45};
+                            static const char *const resist[]={"Physical","Magic","Fire","Lightning","Cold","Poison"};
+                            for (int z=0;z<6;z++) if (stat(unit,stat_id[z],0)>=100)
+                                view.immune_mask|=1u<<z;
+                            const char *tier=view.tier==3?"Boss":view.tier==2?"Unique":view.tier==1?"Champion":"";
+                            size_t n=0;
+                            if(*tier) n=(size_t)snprintf(view.details,sizeof view.details,"%s",tier);
+                            if(view.immune_mask && n<sizeof view.details) {
+                                int k=snprintf(view.details+n,sizeof view.details-n,"%sImmune: ",n?" · ":"");
+                                if(k>0 && (size_t)k<sizeof view.details-n) n+=(size_t)k;
+                                for(int z=0;z<6 && n<sizeof view.details;z++)
+                                    if(view.immune_mask&(1u<<z)) {
+                                        k=snprintf(view.details+n,sizeof view.details-n,"%s%s",
+                                            (view.immune_mask&((1u<<z)-1))?", ":"",resist[z]);
+                                        if(k>0 && (size_t)k<sizeof view.details-n) n+=(size_t)k;
+                                    }
+                            }
+                        }
                     }
                 }
             } else if (unit && *(uint32_t *)unit == 4 && label) {
@@ -1033,6 +1070,12 @@ void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at th
     dm_external_mouse_step();
 #endif
     w_tap_step(b);
+    // Middle click acts on the game thread only. Ignore in modal panels.
+    if (atomic_exchange(&g_mouse_map_toggle,0)&1u) {
+        int dm_ui_map_is_full(void), dm_ui_map_full(int), dm_game_paused(void);
+        if (dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused())
+            dm_ui_map_full(!dm_ui_map_is_full());
+    }
 #if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
     { uint64_t dm_stick_last_ns(void); uint64_t v = dm_stick_last_ns(); if (v != g_gnd_stick_seen) { g_gnd_stick_seen = v; g_gnd_stick_at = w_now_ns(); } }
     w_walk_step(b);

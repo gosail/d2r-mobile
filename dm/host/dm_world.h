@@ -6,7 +6,12 @@
 // 2 ground item (original rarity-coloured label outline), 3 hostile monster
 // (localized title when its player-derived NameStr key is available).
 // All coordinates are fractions of the actual rendered world, origin upper left.
-typedef struct { int kind; float x, y, w, h; char title[160]; } dm_world_hover_view;
+typedef struct {
+    int kind; float x, y, w, h;
+    char title[160], details[160];
+    int hp, hp_max, tier; // Monster only; tier 0 ordinary,1 champion,2 unique,3 boss.
+    uint32_t immune_mask; // bit order physical, magic, fire, lightning, cold, poison.
+} dm_world_hover_view;
 void dm_world_hover_move(float x, float y); // real pointer only, no button press
 void dm_world_hover_end(void);
 int dm_world_hover_read(dm_world_hover_view *out); // safe from UIKit/AppKit thread
@@ -14,6 +19,7 @@ int dm_world_hover_read(dm_world_hover_view *out); // safe from UIKit/AppKit thr
 unsigned dm_world_click(float nx, float ny);
 void dm_world_walk(float nx, float ny);
 void dm_world_mouse_stop(void);
+void dm_world_mouse_map_toggle(void); // enqueue physical middle-click; game thread applies.
 unsigned dm_world_tap(float nx, float ny);   // 任意线程：排一笔点按（出图画面归一化坐标 [0,1]）；主线程取手柄处解析目标并发令，没有目标什么都不发。返回序号 | any thread: queue one tap (coordinates normalized to the rendered picture, [0,1]); the main thread resolves the target and sends the command at the controller-poll point, and sends nothing when there is no target. Returns the sequence number
 int dm_world_tap_result(unsigned seq);       // -1 还没执行；0 没有目标；1 物品（拾取）2 NPC（对话）3 物件（使用）4 出口 5 尸体（取回） | -1 not executed yet; 0 no target; 1 item (pick up) 2 NPC (talk) 3 object (use) 4 exit 5 corpse (retrieve)
 int dm_world_has_target(void);               // 任意线程：按主键会去交互的目标是否存在（游戏手柄版自己的选择） | any thread: whether a target that the primary button would interact with exists (the game's own controller-version selection)

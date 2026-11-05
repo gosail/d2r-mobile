@@ -14,7 +14,7 @@ final class MouseHoverOverlay extends View {
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint outline = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final float[] h = new float[5];
+    private final float[] h = new float[9];
     private final int[] rect = new int[4];
 
     MouseHoverOverlay(DmActivity activity) {
@@ -37,13 +37,34 @@ final class MouseHoverOverlay extends View {
         DmActivity.nativeMouseWorldRect(getWidth(), getHeight(), rect);
         float ox = rect[0], oy = rect[1], w = rect[2], ht = rect[3];
         if (w > 0 && ht > 0) {
-            if ((int)h[0] == 1 && !name.isEmpty()) {
-                float size = text.measureText(name), px = ox + h[1] * w;
+            if (((int)h[0] == 1 || (int)h[0]==3) && !name.isEmpty()) {
+                boolean monster=(int)h[0]==3;
+                String[] parts=name.split("\\n",2);
+                String detail=parts.length>1?parts[1]:"";
                 float d = getResources().getDisplayMetrics().density;
-                float left = Math.max(ox, Math.min(ox + w - size - 22 * d, px - size / 2 - 11 * d));
-                float top = oy + h[2] * ht - 32 * d;
-                canvas.drawRoundRect(new RectF(left, top, left + size + 22 * d, top + 29 * d), 4 * d, 4 * d, fill);
-                canvas.drawText(name, left + 11 * d, top + 21 * d, text);
+                float size=monster?Math.max(text.measureText(parts[0]),text.measureText(detail)):text.measureText(parts[0]);
+                float bw=Math.min(ox+w-8*d,Math.max(90*d,size+22*d));
+                float px=ox+h[1]*w;
+                float left=Math.max(ox,Math.min(ox+w-bw,px-bw/2));
+                float height=monster?(detail.isEmpty()?42*d:60*d):29*d;
+                float top=oy+h[2]*ht-height-3*d;
+                canvas.drawRoundRect(new RectF(left,top,left+bw,top+height),4*d,4*d,fill);
+                text.setColor(monster?Color.rgb(255,169,147):Color.rgb(214,196,148));
+                canvas.drawText(parts[0],left+11*d,top+21*d,text);
+                if(monster && !detail.isEmpty()) {
+                    text.setTextSize(13*d);
+                    canvas.drawText(detail,left+8*d,top+42*d,text);
+                    text.setTextSize(18*d);
+                }
+                text.setColor(Color.rgb(214,196,148));
+                if(monster && h[6]>0) {
+                    Paint hp=new Paint(Paint.ANTI_ALIAS_FLAG);
+                    hp.setColor(Color.DKGRAY);
+                    canvas.drawRoundRect(new RectF(left+6*d,top+height-9*d,left+bw-6*d,top+height-4*d),2*d,2*d,hp);
+                    hp.setColor(Color.rgb(215,55,48));
+                    float fraction=Math.max(0,Math.min(1,h[5]/h[6]));
+                    canvas.drawRoundRect(new RectF(left+6*d,top+height-9*d,left+6*d+(bw-12*d)*fraction,top+height-4*d),2*d,2*d,hp);
+                }
             } else if ((int)h[0] == 2) {
                 float d = getResources().getDisplayMetrics().density;
                 RectF box = new RectF(ox + h[1] * w - 3 * d, oy + h[2] * ht - 2 * d,

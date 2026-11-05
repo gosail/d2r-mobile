@@ -603,7 +603,7 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
         double elapsed = now_s - done.start_time_s;
         /* 商人货架上的货长按 = 原版的「按住 Y 大量购买」（提示条原文；宿主读数：约 1.3 秒）：背包里有没满的卷轴书 / 同类叠时买满，没有就和买 1 份一样；买多少、钱够不够都由游戏定，这里只替玩家按键 | Long press on goods on the vendor shelf = the original game's 「按住 Y 大量购买」(Hold Y to buy in bulk) (button legend text; host reading: about 1.3 seconds): when the inventory has a non-full scroll tome / stack of the same kind it buys until full, otherwise it is the same as buying 1; how many to buy and whether there is enough gold are decided by the game, and here we only press the key for the player */
         if (done.pointer_long && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && s->pointer_shop) pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 1.3);
-        else if (done.pointer_long && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && !s->pointer_lock) ++s->long_press_seq;   /* 长按在松手时才算（按住没动）：按住到点就算的话，「按住停一下再拖」的药水会先被放进腰带（mini 药拖腰带脚本里多出 2 次） | Long press counts only at release (held without moving): if it counted as soon as the hold time was reached, a potion that is "held for a moment and then dragged" would first be put into the belt (2 extra occurrences in the potion-drag-to-belt script on the second Mac) */
+        else if (done.pointer_long && !done.mouse_item && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && !s->pointer_lock) ++s->long_press_seq;   /* 长按在松手时才算（按住没动）：按住到点就算的话，「按住停一下再拖」的药水会先被放进腰带（mini 药拖腰带脚本里多出 2 次） | Long press counts only at release (held without moving): if it counted as soon as the hold time was reached, a potion that is "held for a moment and then dragged" would first be put into the belt (2 extra occurrences in the potion-drag-to-belt script on the second Mac) */
         if (done.locked_drag) { }   /* 单件槽占用时拖别的物品：不发任何键 | Dragging another item while the single-item slot is occupied: send no key */
         else if (done.shop_drag) { ++s->shop_drop_seq; }   /* 买不买由前端按落点定；这里不发任何键 | Whether to buy is decided by the front end from the drop point; no key is sent here */
         else if (done.pointer_dragged) {
@@ -614,7 +614,7 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
             else if (s->pointer_release_item == 8) {   /* 松在单件任务槽上：按原版走法重做——先放回原格，再对它按住 Y（原版的「放进槽」）。只把物品拿在手上停在槽上方不算进槽：槽会显示它，但点确认不成交（本机 实测没有成交包） | Released on the single-item quest slot: redo it the original game's way -- first put it back in its original cell, then hold Y on it (the original game's "put into slot"). Merely holding the item and hovering over the slot does not count as entering the slot: the slot shows it, but tapping confirm does not complete the transaction (measured on the local machine: no transaction packet) */
                 pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2); pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 1.3); }
             else pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);                                                          /* 面板里的空白处：放回原处 | Blank area inside the panel: put it back where it was */
-        } else if (!done.ui_drag && !done.pointer_long && elapsed < DM_TC_POINTER_TAP_S && distance <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {   /* 拖出去又拖回原处不算点按 | Dragging out and back to the original spot does not count as a tap */
+        } else if (!done.ui_drag && (done.mouse_item || !done.pointer_long) && (done.mouse_item || elapsed < DM_TC_POINTER_TAP_S) && distance <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {   /* 拖出去又拖回原处不算点按 | Dragging out and back to the original spot does not count as a tap */
             /* 单件任务槽面板开着时，手上那件就是「槽里那件」：点背包格仍是放回去，点别处按没拿着处理——确认 / 关闭按钮要能点，点面板外 = 关面板（不是把槽里那件丢到地上） | While the single-item quest slot panel is open, the held item is "the one in the slot": tapping an inventory cell still puts it back, tapping elsewhere is handled as if nothing were held -- the confirm / close buttons must be tappable, and tapping outside the panel = close the panel (not drop the slot's item on the ground) */
             if (s->pointer_lock) { s->pointer_x = done.aim_origin_x; s->pointer_y = done.aim_origin_y; }   /* 单件槽占用时点别的物品：只移光标出说明，单击 / 双击都不动它 | Tapping another item while the single-item slot is occupied: only move the cursor to show the tooltip; neither single nor double tap moves it */
             else if (s->holding && s->pointer_item != 0 && !(atomic_load(&g_imbue_open) && s->pointer_item != 1)) { if (s->pointer_item == 1) pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);
@@ -721,7 +721,7 @@ void dm_tc_tick(dm_tc_state *s, double now_s) {
     }
     if (s->pointer_slot < 0 || s->pointer_slot >= DM_TC_MAX_TOUCH) return;
     dm_tc_finger *f = &s->finger[s->pointer_slot];
-    if (!f->active || f->pointer_dragged || f->pointer_long) return;
+    if (!f->active || f->mouse_item || f->pointer_dragged || f->pointer_long) return;
     if (s->mouse_click_mode && s->pointer_item != 1) return;
     if (now_s - f->start_time_s >= DM_TC_POINTER_HOLD_S &&
         hypotf(f->x-f->aim_origin_x, f->y-f->aim_origin_y) <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {

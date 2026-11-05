@@ -434,11 +434,14 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv
 }
 JNIEXPORT jstring JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseHover(JNIEnv *env,jclass cls,jfloatArray out) {
     (void)cls; dm_world_hover_view h={0}; dm_world_hover_read(&h);
-    if (out && (*env)->GetArrayLength(env,out)>=5) {
-        float v[5]={(float)h.kind,h.x,h.y,h.w,h.h};
-        (*env)->SetFloatArrayRegion(env,out,0,5,v);
+    if (out && (*env)->GetArrayLength(env,out)>=9) {
+        float v[9]={(float)h.kind,h.x,h.y,h.w,h.h,(float)h.hp,(float)h.hp_max,(float)h.tier,(float)h.immune_mask};
+        (*env)->SetFloatArrayRegion(env,out,0,9,v);
     }
-    return (*env)->NewStringUTF(env,h.title);
+    char label[sizeof(h.title)+sizeof(h.details)+4];
+    if(h.kind==3 && h.details[0]) snprintf(label,sizeof label,"%s\n%s",h.title,h.details);
+    else snprintf(label,sizeof label,"%s",h.title);
+    return (*env)->NewStringUTF(env,label);
 }
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JNIEnv *env,jclass cls,jint w,jint h,jintArray out) {
     (void)cls;

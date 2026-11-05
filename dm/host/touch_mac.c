@@ -59,6 +59,7 @@ static struct { _Atomic unsigned head, tail; struct { int op; float nx, ny; } q[
 // 悬停只留最新位置，不占点击队列；位 63 = 待处理，位 62 = 已离开画面。游戏线程才读界面树。
 // Coalesce hover positions outside the click queue; bit 63 = pending, bit 62 = outside the picture. Only the game thread reads UI widgets.
 static _Atomic uint64_t g_live_hover;
+static int g_live_right_held,g_live_right_latch;
 // 世界手势从按下到抬起独占；点选答案只用于空地回退，不能让抬起再触发一次。
 // Own a world gesture from down through up; the pick result only supplies the ground fallback, never a second click on release.
 static struct { int owned, down, repeat; uint32_t last; float x, y; unsigned tap_seq; float tap_x, tap_y; } g_lm;
@@ -222,6 +223,18 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
         while ((h = atomic_load(&g_live.head)) != atomic_load(&g_live.tail)) {
             int op = g_live.q[h % 64].op; float nx = g_live.q[h % 64].nx, ny = g_live.q[h % 64].ny; if (op != 2) { px = nx; py = ny; }
             if (op == 0) memset(&g_lm, 0, sizeof g_lm);
+            // A physical right click uses the same safe item-use entry as
+            // iPad and Android. Elsewhere it remains the legacy B/back key.
+            if (op == 4) {
+                if (dm_uiscreen_panel() && dm_ui_item_at_now(px,py)==1) {
+                    dm_ui_mouse_right_use(px,py);
+                } else { g_live_right_held=1; g_live_right_latch=1; }
+                atomic_store(&g_live.head,h+1); continue;
+            }
+            if (op == 5) {
+                g_live_right_held=0;
+                atomic_store(&g_live.head,h+1); continue;
+            }
             if (g_lm.owned) {
                 g_lm.x = px; g_lm.y = py;
                 if (op == 2) g_lm.owned = g_lm.down = 0;
@@ -287,6 +300,8 @@ void dm_touch_host_step(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *l
         }
     }
     if (g_live_btn) { if ((int32_t)(g_live_btn_until - touch_cur_tick()) > 0) *buttons |= g_live_btn; else g_live_btn = 0; }
+    if (g_live_right_held || g_live_right_latch) *buttons |= DM_BTN_B;
+    g_live_right_latch=0;
     if (!g_touch.enabled || !g_touch.started) return;
     uint32_t tick = touch_cur_tick();
     if (!g_touch.prefix && !g_touch.tick_set) { g_touch.to_game_tick = tick; g_touch.tick_set = 1; }

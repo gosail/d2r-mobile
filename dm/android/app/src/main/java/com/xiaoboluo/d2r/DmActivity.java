@@ -155,11 +155,14 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         switch (a) {
             case MotionEvent.ACTION_HOVER_ENTER:
             case MotionEvent.ACTION_HOVER_MOVE: op=3; break;
-            case MotionEvent.ACTION_HOVER_EXIT:
+            case MotionEvent.ACTION_HOVER_EXIT: op=8; break;
             case MotionEvent.ACTION_CANCEL: op=4; break;
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_BUTTON_PRESS:
-                if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
+                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0 ||
+                    (a==MotionEvent.ACTION_DOWN && (e.getButtonState() & MotionEvent.BUTTON_TERTIARY)!=0)) {
+                    op=9;
+                } else if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
                     (a == MotionEvent.ACTION_DOWN && (e.getButtonState() & MotionEvent.BUTTON_SECONDARY) != 0)) {
                     op=5; secondaryMouseDown=true;
                 } else if (a == MotionEvent.ACTION_DOWN) op=0;
@@ -167,6 +170,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_BUTTON_RELEASE:
+                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0) return true;
                 if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
                     (a == MotionEvent.ACTION_UP && secondaryMouseDown)) {
                     op=6; secondaryMouseDown=false;

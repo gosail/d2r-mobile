@@ -233,23 +233,41 @@ void front_run(void (*guest)(void)) {
         CALayer *hoverLoot=[CALayer layer]; hoverLoot.borderWidth=2; hoverLoot.cornerRadius=3;
         hoverLoot.borderColor=[NSColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
         [v.layer addSublayer:hoverLoot];
+        hoverName.wrapped=YES;
+        CALayer *hoverHpTrack=[CALayer layer]; hoverHpTrack.backgroundColor=[NSColor colorWithWhite:.2 alpha:.9].CGColor;
+        hoverHpTrack.cornerRadius=3; [v.layer addSublayer:hoverHpTrack];
+        CALayer *hoverHpFill=[CALayer layer]; hoverHpFill.backgroundColor=[NSColor colorWithRed:.85 green:.2 blue:.18 alpha:1].CGColor;
+        hoverHpFill.cornerRadius=3; [v.layer addSublayer:hoverHpFill];
         NSTimer *hoverTimer=[NSTimer timerWithTimeInterval:1.0/30 repeats:YES block:^(NSTimer *tm) {
             (void)tm;
             dm_world_hover_view h={0}; int show=g_live && NSApp.isActive && win.isKeyWindow && dm_touch_host_world_active() && dm_world_hover_read(&h);
             [CATransaction begin]; [CATransaction setDisableActions:YES];
-            hoverName.hidden=!show || h.kind!=1;
+            hoverName.hidden=!show || (h.kind!=1 && h.kind!=3);
+            hoverName.foregroundColor=(h.kind==3?[NSColor colorWithRed:1 green:.76 blue:.7 alpha:1]:
+                [NSColor colorWithRed:.84 green:.77 blue:.58 alpha:1]).CGColor;
+            hoverHpTrack.hidden=hoverHpFill.hidden=!show || h.kind!=3 || h.hp_max<=0;
             hoverLoot.hidden=!show || h.kind!=2;
             if (show) {
                 NSRect gr=game_rect();
-                if (h.kind==1) {
+                if (h.kind==1 || h.kind==3) {
                     NSString *s=[NSString stringWithUTF8String:h.title];
                     if (!s.length) hoverName.hidden=YES;
                     else {
-                        CGFloat width=fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:18]}].width+22));
+                        BOOL monster=h.kind==3;
+                        NSString *details=monster && h.details[0]?[NSString stringWithUTF8String:h.details]:@"";
+                        CGFloat width=monster?fmin(350,v.bounds.size.width-8):fmin(350,fmax(90,[s sizeWithAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:18]}].width+22));
+                        CGFloat height=monster?(details.length?62:36):28;
                         CGFloat x=gr.origin.x+h.x*gr.size.width-width/2;
                         CGFloat y=gr.origin.y+(1-h.y)*gr.size.height+3;
-                        hoverName.string=s;
-                        hoverName.frame=CGRectMake(fmax(0,fmin(v.bounds.size.width-width,x)),y,width,28);
+                        hoverName.fontSize=monster?16:18;
+                        hoverName.string=details.length?[NSString stringWithFormat:@"%@\n%@",s,details]:s;
+                        hoverName.frame=CGRectMake(fmax(0,fmin(v.bounds.size.width-width,x)),y,width,height);
+                        if(monster && h.hp_max>0) {
+                            CGFloat bx=hoverName.frame.origin.x+6, bw=width-12;
+                            CGFloat ratio=fmax(0,fmin(1,(CGFloat)h.hp/h.hp_max));
+                            hoverHpTrack.frame=CGRectMake(bx,y-7,bw,6);
+                            hoverHpFill.frame=CGRectMake(bx,y-7,bw*ratio,6);
+                        }
                     }
                 } else if (h.kind==2) {
                     hoverLoot.frame=CGRectMake(gr.origin.x+h.x*gr.size.width-3,

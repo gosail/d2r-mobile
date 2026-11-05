@@ -1476,7 +1476,13 @@ static void ui_target_pump(module_t *m, uint64_t fr) {   // 主线程，每帧 |
     else { dm_item_target_cancel(); LOG("界面鉴定：点在空格上，退出鉴定态"); }
 }
 static _Atomic int g_use_req;
+static _Atomic uint64_t g_mouse_right_use_xy;
 void dm_ui_use_item(void) { atomic_store(&g_use_req, 1); }
+void dm_ui_mouse_right_use(float nx, float ny) {
+    if (!(nx>=0 && nx<=1 && ny>=0 && ny<=1)) return;
+    uint64_t x=(uint32_t)(nx*65535.f+.5f),y=(uint32_t)(ny*65535.f+.5f);
+    atomic_store(&g_mouse_right_use_xy,(1ull<<63)|(x<<16)|y);
+}
 // 手指下有没有物品（长按 / 双击共用）：光标位置的物品，减去「手指粗」吸附拉过去的（往吸附方向只探四分之一格还够不着的算空格）
 // Whether there is an item under the finger (shared by long press / double tap): the item at the cursor position, minus those pulled in by the "finger thickness" snap (if probing just a quarter cell in the snap direction does not reach it, it counts as an empty cell)
 static int finger_item(dm_cursor_item_info *ci, const char *who) {
@@ -1492,8 +1498,18 @@ static int finger_item(dm_cursor_item_info *ci, const char *who) {
 }
 static int belt_widget(uint64_t w) { return w && g_iw_base && *(uint64_t *)(*(uint64_t *)w + 0x28) == g_iw_base + 0x3911d8; }   // 物品栏里的原版腰带控件（消息处理 main+0x3911d8） | The original game's belt widget in the inventory panel (message handler main+0x3911d8)
 static void ui_use_pump(void) {   // 主线程 | Main thread
-    if (!atomic_exchange(&g_use_req, 0)) return;
+    uint64_t right=atomic_exchange(&g_mouse_right_use_xy,0);
+    int requested=atomic_exchange(&g_use_req,0);
+    if (!requested && !right) return;
     dm_cursor_item_info ci;
+    if (right) {
+        float nx=((right>>16)&0xffff)/65535.f, ny=(right&0xffff)/65535.f;
+        int kind=dm_ui_item_at_now(nx,ny);
+        // Never buy from the vendor, discard an item or act on a stale focus
+        // just because an adjacent clickable widget owns the right-button hit.
+        if (kind!=1 || !dm_ui_mouse_hover_now(nx,ny) ||
+            !dm_cursor_item(&ci) || ci.container==DM_ITEM_AT_SHOP) return;
+    }
     // 物品栏里腰带的空格上双击 = 一键补满（原先是长按，改成双击）；有药的格照旧走下面
     // Double tap on an empty belt cell in the inventory panel = one-tap refill (used to be long press, changed to double tap); cells holding a potion go through the code below as before
     if (belt_widget(dm_wref_get(&g_slot)) && !finger_item(&ci, "双击")) { dm_belt_fill(); LOG("界面双击：腰带空格 → 一键补满"); return; }

@@ -33,10 +33,11 @@ static float mouse_x, mouse_y, mouse_tap_x, mouse_tap_y;
 static uint64_t mouse_last_walk;
 static mouse_event mouse_last_hover;
 static int mouse_hover_valid;
+static int mouse_right_item;
 
 int dm_external_mouse_active(void) { return atomic_load(&mouse_active); }
 void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int arg) {
-    if (op < DM_MOUSE_DOWN || op > DM_MOUSE_HOVER_END) return;
+    if (op < DM_MOUSE_DOWN || op > DM_MOUSE_MIDDLE_DOWN) return;
     if (!isfinite(ux) || !isfinite(uy) || !isfinite(wx) || !isfinite(wy)) op = DM_MOUSE_LEAVE;
     mouse_event e = {op, arg, ux, uy, wx, wy};
     pthread_mutex_lock(&mouse_mu);
@@ -61,7 +62,7 @@ static void mouse_clear(void) {
     atomic_store(&mouse_scroll, 0);
     atomic_store(&mouse_hud_button, 0);
     dm_world_hover_end();
-    mouse_hover_valid=0;
+    mouse_hover_valid=0; mouse_right_item=0;
 }
 static int mouse_world_ok(void) {
     return dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused();
@@ -96,10 +97,20 @@ void dm_external_mouse_step(void) {
         if (e->op == DM_MOUSE_HOVER_END) {
             mouse_hover_valid=0; dm_world_hover_end(); continue;
         }
-        if (e->op == DM_MOUSE_RIGHT_DOWN) {
-            atomic_store(&mouse_right, 1); atomic_store(&mouse_right_latch, 1); continue;
+        if (e->op == DM_MOUSE_MIDDLE_DOWN) {
+            dm_world_mouse_map_toggle(); continue;
         }
-        if (e->op == DM_MOUSE_RIGHT_UP) { atomic_store(&mouse_right, 0); continue; }
+        if (e->op == DM_MOUSE_RIGHT_DOWN) {
+            mouse_right_item=0;
+            if (dm_uiscreen_panel() && e->ux>=0 && e->ux<=1 &&
+                e->uy>=0 && e->uy<=1 && dm_ui_item_at_now(e->ux,e->uy)==1) {
+                mouse_right_item=1; atomic_store(&mouse_right,0);
+                atomic_store(&mouse_right_latch,0);
+                dm_ui_mouse_right_use(e->ux,e->uy); continue;
+            }
+            atomic_store(&mouse_right,1); atomic_store(&mouse_right_latch,1); continue;
+        }
+        if (e->op == DM_MOUSE_RIGHT_UP) { mouse_right_item=0; atomic_store(&mouse_right,0); continue; }
         if (e->op == DM_MOUSE_WHEEL) {
             if (e->arg) {
                 atomic_store(&mouse_scroll, e->arg > 0 ? 1 : -1);

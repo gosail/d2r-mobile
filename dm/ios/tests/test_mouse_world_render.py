@@ -55,6 +55,9 @@ class PointerWorldRender(unittest.TestCase):
         android=source("android/touch_android.c")
         self.assertIn("if (ok) dm_cursor_clear()", cursor)
         self.assertIn("physical_mouse_owns_item()", cursor)
+        self.assertIn("g_mouse_holding_owner", cursor)
+        self.assertIn("dm_ui_mouse_ownership_release()", ios)
+        self.assertIn("dm_ui_mouse_ownership_release()", android)
         self.assertIn("_controls.pointer_valid=0", ios)
         self.assertIn("!mouse_touch_on && tc.pointer_slot==DM_TC_NONE", android)
 

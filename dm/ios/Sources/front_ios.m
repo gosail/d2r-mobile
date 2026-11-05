@@ -780,7 +780,7 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     // interactions; only real fingers should cancel the pointer or change mode.
     BOOL realFinger=NO;
     for(UITouch *t in ts) if(t.type!=UITouchTypeIndirectPointer) { realFinger=YES; break; }
-    if(realFinger) dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0);
+    if(realFinger) { dm_ui_mouse_ownership_release(); dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0); }
     [self sweepEndedSlots];
     // 手柄模式下碰屏幕 = 回触屏模式（dm_gamepad.m），这一下只做这一件事：此刻屏上是手柄版界面，触屏控件还没显示出来（布局重载要几十帧），
     // 照常往下走的话，落点正好在看不见的回城钮 / 技能钮位置就会直接回城、放技能，面板态还会对手柄版面板发点击。

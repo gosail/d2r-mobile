@@ -312,18 +312,27 @@ static _Atomic uint64_t g_set_back_at;
 // touch mode is handled by the guard as usual.
 static _Atomic int g_hand_idle; static uint64_t g_pick_t; static int g_pick_id;
 void dm_ui_hand_idle(int idle) { atomic_store(&g_hand_idle, idle != 0); }
+// A mouse-picked item must survive pointer exit / temporary app focus loss.
+// Only an explicit switch back to finger control clears this ownership. The
+// latch also clears when the game's real held-item slot becomes empty.
+static _Atomic int g_mouse_holding_owner;
+void dm_ui_mouse_ownership_release(void) { atomic_store(&g_mouse_holding_owner,0); }
 static int physical_mouse_owns_item(void) {
 #if TARGET_OS_OSX
     int dm_touch_host_is_live(void);
     if (dm_touch_host_is_live()) return 1;
 #endif
-    return dm_external_mouse_active();
+    if (dm_external_mouse_active()) {
+        atomic_store(&g_mouse_holding_owner,1);
+        return 1;
+    }
+    return atomic_load(&g_mouse_holding_owner);
 }
 static void hand_guard(module_t *m) {
     dm_hud_info hi; dm_hud_get(&hi); int h = hi.valid ? hi.holding : 0; uint64_t now = now_ns();
     static int last, failed, off = -1; static uint64_t since; if (off < 0) { const char *e = getenv("DM_TEST_HAND_GUARD"); off = e && !strcmp(e, "0"); }   // 测试开关 DM_TEST_HAND_GUARD=0：关掉守门（单测合成钮兜底用） | Test switch DM_TEST_HAND_GUARD=0: turn the guard off (used by the unit test for the transmute button fallback)
     if (h && h != last) g_pick_id = now - g_pick_t < 1500000000ull ? h : 0;   // 手上换成这件：是不是刚空手按 A 拿起的 | The hand now holds this item: was it just picked up by pressing A with an empty hand
-    last = h; if (!h) failed = 0;
+    last = h; if (!h) { failed = 0; atomic_store(&g_mouse_holding_owner,0); }
     int dm_padmode_current(void);
     if (off || !h || h == failed || physical_mouse_owns_item() || !atomic_load(&g_hand_idle) || dm_padmode_current() || g_rt.active || g_naq || dm_held_pending() || dm_ui_targeting() || (dm_ui_panel_state() & DM_PS_IMBUE)) { since = 0; return; }
     if (!since) { since = now; return; }

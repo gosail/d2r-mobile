@@ -596,40 +596,10 @@ if (cat == 5 || cat == 1 || cat == 0xa) {
                         else if (cat != 5) snprintf(view.title,sizeof view.title,"Monster #%u",cls);
                         else view.kind=0; // NPC without a known name stays hidden.
                         if (view.kind==3) {
+                            // The game's own selected-target HUD supplies its
+                            // health, affixes and resistances. Only publish the
+                            // hovered unit ID for the native target selector.
                             native_mon_id=*(uint32_t *)(unit+8);
-                            // Original client stat getter, also used by diag.c
-                            // for the currently selected monster's resistances.
-                            int (*stat)(uint64_t,int,int)=(void *)(b+0x5b9290);
-                            int hp=stat(unit,6,0), maxhp=stat(unit,7,0);
-                            if (maxhp>0 && hp>=0) {
-                                view.hp_max=maxhp>>8; view.hp=hp>>8;
-                                if (view.hp>view.hp_max) view.hp=view.hp_max;
-                            }
-                            uint64_t md=*(uint64_t *)(unit+0x10);
-                            uint8_t flags=md ? *(uint8_t *)(md+0x1a) : 0;
-                            view.tier=(flags&0x0a)?2:(flags&0x04)?1:0;
-                            // Boss class ids from the existing dm_threat_tier
-                            // implementation in hle_target.c; no guessed fields.
-                            static const uint16_t bosses[]={156,211,229,242,243,250,256,267,333,365,526,544,546,547,548,549,550,559,570,704,705,706,707,708,709,745,746,747};
-                            for (unsigned z=0;z<sizeof bosses/sizeof bosses[0];z++)
-                                if(cls==bosses[z]) { view.tier=3; break; }
-                            static const int stat_id[]={36,37,39,41,43,45};
-                            static const char *const resist[]={"Physical","Magic","Fire","Lightning","Cold","Poison"};
-                            for (int z=0;z<6;z++) if (stat(unit,stat_id[z],0)>=100)
-                                view.immune_mask|=1u<<z;
-                            const char *tier=view.tier==3?"Boss":view.tier==2?"Unique":view.tier==1?"Champion":"";
-                            size_t n=0;
-                            if(*tier) n=(size_t)snprintf(view.details,sizeof view.details,"%s",tier);
-                            if(view.immune_mask && n<sizeof view.details) {
-                                int k=snprintf(view.details+n,sizeof view.details-n,"%sImmune: ",n?" · ":"");
-                                if(k>0 && (size_t)k<sizeof view.details-n) n+=(size_t)k;
-                                for(int z=0;z<6 && n<sizeof view.details;z++)
-                                    if(view.immune_mask&(1u<<z)) {
-                                        k=snprintf(view.details+n,sizeof view.details-n,"%s%s",
-                                            (view.immune_mask&((1u<<z)-1))?", ":"",resist[z]);
-                                        if(k>0 && (size_t)k<sizeof view.details-n) n+=(size_t)k;
-                                    }
-                            }
                         }
                     }
                 }

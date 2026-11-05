@@ -133,6 +133,9 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     dm_tc_state _controls;
     DmTouchOverlay *_overlay;
     UIButton *_kbSettingsButton;
+    UISegmentedControl *_kbDeviceTabs;
+    UIView *_kbKeyboardPanel;
+    UIScrollView *_kbBindingScroll;
     UIView *_info;   // 信息层：秘境任务条、小地图任务终点。不是触屏控件，手柄模式也要显示（只在前端页面藏），所以不挂在 _overlay 上 | info layer: the Rift objective bar and the minimap quest goal. These are not touch controls and must show in controller mode too (hidden only on front-end pages), so they are not attached to _overlay
     NSHashTable<UITouch *> *_swallow;   // 手柄模式下落下的手指：只用来切回触屏模式，整根（按下 / 移动 / 抬起）不交给手势层和界面点击 | Fingers that landed in controller mode: used only to switch back to touch mode; the whole touch (down / move / up) is not passed to the gesture layer or UI clicks
     BOOL _padMode, _feMode;   // 手柄模式 / 前端页面：两者任一成立就藏触屏控件层 | Controller mode / front-end page: the touch controls layer is hidden if either holds
@@ -189,13 +192,13 @@ static NSString *kbActionLabel(int action) {
                   message:@"Could not write sw_keyboard.txt" preferredStyle:UIAlertControllerStyleAlert];
                 [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
                 [self.window.rootViewController presentViewController:error animated:YES completion:nil];
-            } else [self kbSettingsOpen];
+            } else [self kbSettingsRefresh];
           }]];
     }
     [pick addAction:[UIAlertAction actionWithTitle:dm_lang_zh()?@"取消":@"Cancel"
         style:UIAlertActionStyleCancel handler:nil]];
-    pick.popoverPresentationController.sourceView=_kbSettingsButton;
-    pick.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
+    pick.popoverPresentationController.sourceView=_kbDeviceTabs;
+    pick.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
     [self.window.rootViewController presentViewController:pick animated:YES completion:nil];
 }
 - (void)kbMouseChoose:(unsigned)physical {
@@ -208,11 +211,11 @@ static NSString *kbActionLabel(int action) {
         [sheet addAction:[UIAlertAction actionWithTitle:titles[role] style:UIAlertActionStyleDefault
           handler:^(UIAlertAction *a) {
             (void)a;
-            if(dm_kbmap_bind_mouse(physical,role)) [self kbSettingsOpen];
+            if(dm_kbmap_bind_mouse(physical,role)) [self kbSettingsRefresh];
         }]];
     [sheet addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"取消":@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView=_kbSettingsButton;
-    sheet.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
+    sheet.popoverPresentationController.sourceView=_kbDeviceTabs;
+    sheet.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
     [self.window.rootViewController presentViewController:sheet animated:YES completion:nil];
 }
 - (void)kbSettingsOpen {
@@ -255,20 +258,106 @@ static NSString *kbActionLabel(int action) {
     list.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
     [self.window.rootViewController presentViewController:list animated:YES completion:nil];
 }
+// These are actual device categories, independent from the native Key 1/Key 2
+// controller *slots*. Keyboard uses our local .key, Controller leaves the
+// game's original KeyBindingMenu/.ctl in place.
+- (void)kbSettingsRefresh {
+    if(!_kbBindingScroll)return;
+    for(UIView *v in [_kbBindingScroll.subviews copy])[v removeFromSuperview];
+    static const unsigned char usages[]={
+        0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
+        0x28,0x29,0x2b,0x2c,0x2e,0x50,0x52,0x4f,0x51,0x1e,0x1f,0x20,0x21,
+        0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x10
+    };
+    NSArray<NSString *> *keys=@[@"W",@"A",@"S",@"D",@"J",@"K",@"U",@"I",@"F",@"G",
+        @"Q",@"E",@"Z",@"C",@"Enter",@"Esc",@"Tab",@"Space",@"=",
+        @"←",@"↑",@"→",@"↓",@"1",@"2",@"3",@"4",
+        @"F1",@"F2",@"F3",@"F4",@"F5",@"F6",@"F7",@"F8",@"M"];
+    NSArray<NSString *> *mouse=@[@"鼠标左键 / Left",@"鼠标右键 / Right",@"鼠标中键 / Middle"];
+    NSArray<NSString *> *roles=@[@"主点击 / Primary",@"次要使用 / Secondary",@"切换地图 / Map"];
+    CGFloat w=_kbBindingScroll.bounds.size.width, rowHeight=46, y=0;
+    if(w<10)return;
+    for(NSUInteger i=0;i<keys.count+4;i++) {
+        UIButton *row=[UIButton buttonWithType:UIButtonTypeSystem];
+        row.frame=CGRectMake(8,y+3,w-16,rowHeight-6);
+        row.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
+        row.contentEdgeInsets=UIEdgeInsetsMake(0,12,0,8,0);
+        row.backgroundColor=[UIColor colorWithWhite:.20 alpha:.94];
+        row.layer.cornerRadius=6; row.titleLabel.font=[UIFont systemFontOfSize:15];
+        NSString *title;
+        if(i<keys.count)title=[NSString stringWithFormat:@"%@     →     %@",keys[i],kbActionLabel(dm_kbmap_action(usages[i]))];
+        else if(i<keys.count+3) {
+            unsigned phys=(unsigned)(i-keys.count);
+            int role=dm_kbmap_mouse_action(phys);
+            title=[NSString stringWithFormat:@"%@     →     %@",mouse[phys],roles[role>=0 && role<3?role:0]];
+        } else title=dm_lang_zh()?@"恢复此角色的默认键鼠配置":@"Reset this character's keyboard/mouse";
+        [row setTitle:title forState:UIControlStateNormal];
+        [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        row.tag=(NSInteger)i;
+        [row addTarget:self action:@selector(kbBindingTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [_kbBindingScroll addSubview:row];y+=rowHeight;
+    }
+    _kbBindingScroll.contentSize=CGSizeMake(w,y+6);
+}
+- (void)kbBindingTapped:(UIButton *)row {
+    static const unsigned char usages[]={
+        0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
+        0x28,0x29,0x2b,0x2c,0x2e,0x50,0x52,0x4f,0x51,0x1e,0x1f,0x20,0x21,
+        0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x10
+    };
+    NSArray<NSString *> *labels=@[@"W",@"A",@"S",@"D",@"J",@"K",@"U",@"I",@"F",@"G",
+        @"Q",@"E",@"Z",@"C",@"Enter",@"Esc",@"Tab",@"Space",@"=",
+        @"←",@"↑",@"→",@"↓",@"1",@"2",@"3",@"4",
+        @"F1",@"F2",@"F3",@"F4",@"F5",@"F6",@"F7",@"F8",@"M"];
+    NSInteger i=row.tag;
+    if(i<(NSInteger)labels.count)[self kbChooseUsage:usages[i] label:labels[i]];
+    else if(i<(NSInteger)labels.count+3)[self kbMouseChoose:(unsigned)(i-labels.count)];
+    else {
+        UIAlertController *confirm=[UIAlertController alertControllerWithTitle:
+            (dm_lang_zh()?@"恢复默认？":@"Restore defaults?")
+            message:nil preferredStyle:UIAlertControllerStyleAlert];
+        [confirm addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"取消":@"Cancel")
+            style:UIAlertActionStyleCancel handler:nil]];
+        [confirm addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复":@"Reset")
+            style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
+                (void)a;dm_kbmap_restore_defaults();[self kbSettingsRefresh];
+            }]];
+        [self.window.rootViewController presentViewController:confirm animated:YES completion:nil];
+    }
+}
+- (void)kbDeviceSwitched:(UISegmentedControl *)sender {
+    BOOL keyboard=sender.selectedSegmentIndex==0;
+    _kbKeyboardPanel.hidden=!keyboard;
+    if(keyboard)[self kbSettingsRefresh];
+}
 - (void)kbSettingsSync {
     BOOL visible=dm_kbmap_controls_visible()!=0 && !_feMode;
-    if(!visible && !_kbSettingsButton)return;
-    if(!_kbSettingsButton) {
-        _kbSettingsButton=[UIButton buttonWithType:UIButtonTypeSystem];
-        _kbSettingsButton.backgroundColor=[UIColor colorWithWhite:.10 alpha:.9];
-        _kbSettingsButton.layer.cornerRadius=9;
-        [_kbSettingsButton setTitle:(dm_lang_zh()?@"键鼠设置":@"Keyboard") forState:UIControlStateNormal];
-        [_kbSettingsButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        [_kbSettingsButton addTarget:self action:@selector(kbSettingsOpen) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:_kbSettingsButton];
+    if(!visible && !_kbDeviceTabs)return;
+    if(!_kbDeviceTabs) {
+        _kbDeviceTabs=[[UISegmentedControl alloc] initWithItems:@[
+            dm_lang_zh()?@"键鼠":@"Keyboard & Mouse",
+            dm_lang_zh()?@"手柄":@"Controller"]];
+        _kbDeviceTabs.selectedSegmentIndex=1; // preserve native bindings until selected
+        [_kbDeviceTabs addTarget:self action:@selector(kbDeviceSwitched:)
+            forControlEvents:UIControlEventValueChanged];
+        [self addSubview:_kbDeviceTabs];
+        _kbKeyboardPanel=[[UIView alloc] initWithFrame:CGRectZero];
+        _kbKeyboardPanel.backgroundColor=[UIColor colorWithWhite:.07 alpha:.96];
+        _kbKeyboardPanel.layer.cornerRadius=10;
+        _kbKeyboardPanel.clipsToBounds=YES;
+        [self addSubview:_kbKeyboardPanel];
+        _kbBindingScroll=[[UIScrollView alloc] initWithFrame:CGRectZero];
+        [_kbKeyboardPanel addSubview:_kbBindingScroll];
     }
-    _kbSettingsButton.frame=CGRectMake(MAX(0,self.bounds.size.width-128),20,118,42);
-    _kbSettingsButton.hidden=!visible;
+    CGFloat w=self.bounds.size.width,h=self.bounds.size.height;
+    CGFloat tw=MIN(340,w*.56f);
+    _kbDeviceTabs.frame=CGRectMake((w-tw)*.5f,MAX(8,h*.07f),tw,38);
+    _kbKeyboardPanel.frame=CGRectMake(w*.15f,h*.17f,w*.70f,h*.70f);
+    _kbBindingScroll.frame=_kbKeyboardPanel.bounds;
+    _kbDeviceTabs.hidden=!visible;
+    _kbKeyboardPanel.hidden=!visible || _kbDeviceTabs.selectedSegmentIndex!=0;
+    if(visible && _kbDeviceTabs.selectedSegmentIndex==0 && _kbBindingScroll.contentSize.height<10)
+        [self kbSettingsRefresh];
 }
 
 // iPad external keyboards report USB HID usages via UIKey.keyCode.

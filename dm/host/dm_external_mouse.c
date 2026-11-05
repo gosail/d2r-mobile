@@ -31,6 +31,8 @@ static int mouse_down, mouse_world, mouse_ui, mouse_eat, mouse_repeat;
 static unsigned mouse_seq;
 static float mouse_x, mouse_y, mouse_tap_x, mouse_tap_y;
 static uint64_t mouse_last_walk;
+static mouse_event mouse_last_hover;
+static int mouse_hover_valid;
 
 int dm_external_mouse_active(void) { return atomic_load(&mouse_active); }
 void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int arg) {
@@ -59,6 +61,7 @@ static void mouse_clear(void) {
     atomic_store(&mouse_scroll, 0);
     atomic_store(&mouse_hud_button, 0);
     dm_world_hover_end();
+    mouse_hover_valid=0;
 }
 static int mouse_world_ok(void) {
     return dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused();
@@ -90,7 +93,9 @@ void dm_external_mouse_step(void) {
         if (e->op == DM_MOUSE_LEAVE) { mouse_clear(); continue; }
         // UIKit can end hover recognition on a mouse press. Do not discard
         // the pending world click or terminate an active mouse drag.
-        if (e->op == DM_MOUSE_HOVER_END) { dm_world_hover_end(); continue; }
+        if (e->op == DM_MOUSE_HOVER_END) {
+            mouse_hover_valid=0; dm_world_hover_end(); continue;
+        }
         if (e->op == DM_MOUSE_RIGHT_DOWN) {
             atomic_store(&mouse_right, 1); atomic_store(&mouse_right_latch, 1); continue;
         }
@@ -102,7 +107,10 @@ void dm_external_mouse_step(void) {
             }
             continue;
         }
-        if (e->op == DM_MOUSE_HOVER) { mouse_hover_at(e); continue; }
+        if (e->op == DM_MOUSE_HOVER) {
+            mouse_last_hover=*e; mouse_hover_valid=1;
+            mouse_hover_at(e); continue;
+        }
         atomic_store(&mouse_active, 1);
         if (e->op == DM_MOUSE_DOWN) {
             // Start a new gesture; never let a previous held-click leak into it.
@@ -110,6 +118,7 @@ void dm_external_mouse_step(void) {
             mouse_down = 1; mouse_world = mouse_ui = mouse_eat = mouse_repeat = 0; mouse_seq = 0;
             mouse_x = mouse_tap_x = e->wx; mouse_y = mouse_tap_y = e->wy;
             dm_world_hover_end();
+            mouse_hover_valid=0;
             uint64_t legend = dm_padmode_legend_click(e->ux, e->uy), hud = 0;
             int hk = !legend && mouse_world_ok() ? dm_padmode_hud_click(e->ux, e->uy, &hud) : 0;
             if (legend || hk) {
@@ -138,6 +147,7 @@ void dm_external_mouse_step(void) {
             if (mouse_eat && atomic_load(&mouse_hud_until) == UINT64_MAX)
                 atomic_store(&mouse_hud_until, now_ns() + 100000000ull);
             mouse_down = mouse_world = mouse_ui = mouse_eat = 0;
+            mouse_last_hover=*e; mouse_hover_valid=1;
             mouse_hover_at(e);
         }
     }
@@ -145,6 +155,10 @@ void dm_external_mouse_step(void) {
         mouse_down = mouse_world = mouse_repeat = 0; mouse_seq = 0;
         dm_world_mouse_stop();
     }
+    // Re-evaluate stationary pointer hover across panel open/close, without
+    // inventing a finger touch or changing physical mouse-button state.
+    if (mouse_hover_valid && !mouse_down && atomic_load(&mouse_active))
+        mouse_hover_at(&mouse_last_hover);
     // The game's world-tap answer is published at the end of dm_world_pump.
     // A completed click on empty ground is enough to initiate a single walk;
     // holding the button keeps the target updated, as on macOS.

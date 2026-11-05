@@ -3,7 +3,8 @@
 #pragma once
 #include <stddef.h>
 // Read-only mouse hover result. kind: 0 none, 1 NPC (localized title),
-// 2 ground item (outline the original, quality-coloured item-name label).
+// 2 ground item (original rarity-coloured label outline), 3 hostile monster
+// (localized title when its player-derived NameStr key is available).
 // All coordinates are fractions of the actual rendered world, origin upper left.
 typedef struct { int kind; float x, y, w, h; char title[160]; } dm_world_hover_view;
 void dm_world_hover_move(float x, float y); // real pointer only, no button press

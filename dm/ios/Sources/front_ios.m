@@ -138,6 +138,9 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     int _navigation;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
     CATextLayer *_hoverName; CALayer *_hoverLoot; BOOL _mouseSecondaryDown;
+    // Real mouse clicks on visible touch controls or a UI panel reuse the
+    // existing native touch gesture machine; 3D clicks use PC mouse routing.
+    NSMutableSet<UITouch *> *_pointerAsTouch;
       // 镜头实验：小地图 / 全屏地图上人物朝向的指针（mapHeadingSync） | camera experiment: the facing pointer on the minimap / fullscreen map (mapHeadingSync)
     CALayer *_mgLabel[DM_MAP_GOAL_MAX], *_mgMark[DM_MAP_GOAL_MAX];   // 小地图任务终点：每个终点一个名牌 / 符号层 + 一个灰十字层（mapGoalSync） | Minimap quest goals: one nameplate / symbol layer + one grey cross layer per goal (mapGoalSync)
     NSMutableDictionary<NSString *,id> *_mgImg;   // NSNull = 文件不存在（不再每帧读盘重试） | NSNull = file missing (no per-frame disk retry)
@@ -599,12 +602,16 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
         [hoverHost addSublayer:_hoverName];
         [hoverHost addSublayer:_hoverLoot];
     }
-    _hoverName.hidden=!show || h.kind!=1;
+    _hoverName.hidden=!show || (h.kind!=1 && h.kind!=3);
+    _hoverName.foregroundColor=(h.kind==3 ? [UIColor colorWithRed:1 green:.78 blue:.74 alpha:1] :
+        [UIColor colorWithRed:.84 green:.77 blue:.58 alpha:1]).CGColor;
+    _hoverName.borderColor=(h.kind==3 ? [UIColor colorWithRed:.83 green:.21 blue:.2 alpha:.9] :
+        [UIColor colorWithRed:.65 green:.54 blue:.33 alpha:.85]).CGColor;
     _hoverLoot.hidden=!show || h.kind!=2;
     if (show) {
         CGRect wr=world_rect(self);
         if (hoverHost!=self.layer) wr=[self convertRect:wr toView:self.superview];
-        if (h.kind==1) {
+        if (h.kind==1 || h.kind==3) {
             NSString *s=[NSString stringWithUTF8String:h.title];
             if (!s.length) _hoverName.hidden=YES;
             else {
@@ -630,6 +637,9 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
         (float)((p.y-wr.origin.y)/wr.size.height),arg);
 }
 - (void)dmMouseHover:(UIHoverGestureRecognizer *)recognizer {
+    // Never reposition the cursor from a hover callback during an actual
+    // inventory/equipment drag owned by the native touch gesture machine.
+    if (_pointerAsTouch.count) return;
     UIGestureRecognizerState state=recognizer.state;
     if (state==UIGestureRecognizerStateEnded || state==UIGestureRecognizerStateCancelled || state==UIGestureRecognizerStateFailed) {
         dm_external_mouse_event(DM_MOUSE_HOVER_END,0,0,0,0,0); return;
@@ -645,20 +655,60 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     if (fabs(delta.y)>1) [self dmMouseEvent:DM_MOUSE_WHEEL point:[recognizer locationInView:self] arg:delta.y<0?1:-1];
     [recognizer setTranslation:CGPointZero inView:self];
 }
+// A click on a *visible* native HUD control uses its existing gesture logic.
+// In empty 3D space, the PC-style mouse path still handles click-to-walk.
+- (BOOL)dmMouseHitsTouchControl:(CGPoint)p {
+    if (_padMode || _overlay.hidden || _navigation) return NO;
+    if (dm_tc_hit(&_controls.layout,p.x,p.y)!=DM_TC_NONE) return YES;
+    const dm_tc_layout *l=&_controls.layout;
+    if (l->diff.r>0 && hypot(p.x-l->diff.x,p.y-l->diff.y)<=l->diff.r) return YES;
+    if (_controls.diff_open) for(int i=0;i<8;i++) {
+        const dm_tc_target *t=&l->pick[i];
+        if (t->r>0 && hypot(p.x-t->x,p.y-t->y)<=t->r) return YES;
+    }
+    if (_controls.belt_open && _controls.belt_rows>1) {
+        float u=l->height/1320.0f;
+        for(int row=1;row<_controls.belt_rows && row<4;row++)
+            for(int k=0;k<4;k++) {
+                const dm_tc_target *t=&l->target[DM_TC_BELT1+k];
+                if(fabs(p.x-t->x)<=60*u && fabs(p.y-(t->y-(165+162*(row-1))*u))<=53.75f*u) return YES;
+            }
+    }
+    return [self inMinimap:p];
+}
 - (NSSet<UITouch *> *)dmFilterPointerTouches:(NSSet<UITouch *> *)touches op:(int)op event:(UIEvent *)event {
     NSMutableSet<UITouch *> *fingers=nil;
     for (UITouch *t in touches) {
         if (@available(iOS 13.4, *)) {
             if (t.type==UITouchTypeIndirectPointer) {
+                CGPoint p=[t locationInView:self];
+                BOOL asTouch=[_pointerAsTouch containsObject:t];
+                BOOL secondary=(event.buttonMask & UIEventButtonMaskSecondary)!=0;
+                if (op==DM_MOUSE_DOWN && !secondary &&
+                    (_navigation || [self dmMouseHitsTouchControl:p])) {
+                    if (!_pointerAsTouch) _pointerAsTouch=[NSMutableSet set];
+                    [_pointerAsTouch addObject:t];
+                    asTouch=YES;
+                    dm_external_mouse_event(DM_MOUSE_HOVER_END,0,0,0,0,0);
+                }
+                if (asTouch) {
+                    if (!fingers) fingers=[NSMutableSet set];
+                    [fingers addObject:t];
+                    if (op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE) {
+                        [_pointerAsTouch removeObject:t];
+                        if (op==DM_MOUSE_UP) [self dmMouseEvent:DM_MOUSE_HOVER point:p arg:0];
+                    }
+                    continue;
+                }
                 int mouseOp=op;
-                if (op==DM_MOUSE_DOWN && (event.buttonMask & UIEventButtonMaskSecondary)) {
+                if (op==DM_MOUSE_DOWN && secondary) {
                     mouseOp=DM_MOUSE_RIGHT_DOWN; _mouseSecondaryDown=YES;
                 } else if (op==DM_MOUSE_UP && _mouseSecondaryDown) {
                     mouseOp=DM_MOUSE_RIGHT_UP; _mouseSecondaryDown=NO;
                 } else if (op==DM_MOUSE_LEAVE) _mouseSecondaryDown=NO;
                 static int clickLog;
-                if (clickLog++<16) LOG("iPad mouse click event %d: touchType=%ld buttonMask=%lu",mouseOp,(long)t.type,(unsigned long)event.buttonMask);
-                [self dmMouseEvent:mouseOp point:[t locationInView:self] arg:0];
+                if (clickLog++<16) LOG("iPad mouse world/secondary event %d: type=%ld mask=%lu",mouseOp,(long)t.type,(unsigned long)event.buttonMask);
+                [self dmMouseEvent:mouseOp point:p arg:0];
                 continue;
             }
         }
@@ -671,7 +721,11 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
 - (void)touchesBegan:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
     ts=[self dmFilterPointerTouches:ts op:DM_MOUSE_DOWN event:e];
     if (!ts.count) return;
-    dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0); // A real finger cancels an old hover.
+    // Indirect-pointer taps routed to the UI gesture machine remain mouse
+    // interactions; only real fingers should cancel the pointer or change mode.
+    BOOL realFinger=NO;
+    for(UITouch *t in ts) if(t.type!=UITouchTypeIndirectPointer) { realFinger=YES; break; }
+    if(realFinger) dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0);
     [self sweepEndedSlots];
     // 手柄模式下碰屏幕 = 回触屏模式（dm_gamepad.m），这一下只做这一件事：此刻屏上是手柄版界面，触屏控件还没显示出来（布局重载要几十帧），
     // 照常往下走的话，落点正好在看不见的回城钮 / 技能钮位置就会直接回城、放技能，面板态还会对手柄版面板发点击。
@@ -679,7 +733,7 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     // controller UI is on screen and the touch widgets are not shown yet (the layout reload takes a few dozen frames),
     // so if it went on as usual, a touch landing right on the invisible town portal button / skill button would directly cast town portal or a
     // skill, and in panel state a click would also be sent to the controller-layout panel.
-    { BOOL wasPad=_padMode; dm_gamepad_touched();
+    if(realFinger) { BOOL wasPad=_padMode; dm_gamepad_touched();
       int dm_padmode_busy(void);
       if(wasPad || dm_padmode_busy()) { if(!_swallow) _swallow=[NSHashTable weakObjectsHashTable]; for(UITouch *t in ts) [_swallow addObject:t]; if(wasPad) LOG("前端：手柄模式下碰屏 → 只切回触屏模式，这一下不执行"); return; } }   // 切换事务进行中落下的手指同样整根不执行（控件层还没露出来） | Fingers that land while a switch transaction is in progress are likewise ignored for their whole lifetime (the control layer has not been revealed yet)
     if(atomic_load(&g_touch_frontend)) { [self uiTouch:ts phase:0]; return; }

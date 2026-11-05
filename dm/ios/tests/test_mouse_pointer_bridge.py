@@ -30,6 +30,22 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("CALayer *hoverHost=g_full && self.superview ? self.superview.layer : self.layer;", front)
         self.assertIn("wr=[self convertRect:wr toView:self.superview]", front)
 
+    def test_physical_mouse_uses_hud_and_panel_gestures(self):
+        front = self.read("ios/Sources/front_ios.m")
+        self.assertIn("NSMutableSet<UITouch *> *_pointerAsTouch;", front)
+        self.assertIn("(_navigation || [self dmMouseHitsTouchControl:p])", front)
+        self.assertIn("if(realFinger) { BOOL wasPad=_padMode; dm_gamepad_touched();", front)
+        self.assertIn("if (_pointerAsTouch.count) return;", front)
+
+    def test_monster_hover_and_stationary_panel_hover(self):
+        world = self.read("host/dm_world.c")
+        mouse = self.read("host/dm_external_mouse.c")
+        front = self.read("ios/Sources/front_ios.m")
+        self.assertIn("cat != 5 && cat != 1 && cat != 0xa", world)
+        self.assertIn("view.kind=cat==5 ? 1 : 3;", world)
+        self.assertIn("mouse_hover_valid && !mouse_down", mouse)
+        self.assertIn("h.kind!=1 && h.kind!=3", front)
+
     def test_prepared_ci_build_without_npc_source_header(self):
         world = self.read("host/dm_world.c")
         self.assertIn('#if __has_include("dm_hover_names.h")', world)

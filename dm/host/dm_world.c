@@ -484,7 +484,7 @@ static uint64_t w_hit(uint8_t *b, float sx, float sy, float min, float *dist, in
             if (t == 4 && *(uint32_t *)(u + 0xc) != 3) continue;   // 物品只认在地上的 | items only count when on the ground
             if (!(((int (*)(uint64_t, int, int, int, int))(b + 0x464a70))(u, 0, 0, -1, -1) & 1)) continue;
             if (t == 0 && u == pl) continue;
-            int cat = ((int (*)(int, uint64_t, uint64_t))(b + 0x2f7b7c))(0x165, pl, u); if (t == 0 ? cat != 9 : t == 1 ? (cat != 5 && !W_MON_OK(cat)) : t == 2 ? cat != 2 : 0) continue;   // 类别 9 = 死亡状态的玩家单位（0x2f7c28–0x2f7c34：main+0x4667a0 对玩家类判模式 0x11）= 尸体，点它 = 取回装备（游戏点击入口对玩家类发 0x13） | category 9 = a player unit in the dead state (0x2f7c28–0x2f7c34: main+0x4667a0 checks mode 0x11 for the player type) = corpse, tapping it = retrieve equipment (the game's click entry sends 0x13 for the player type)
+            int cat = ((int (*)(int, uint64_t, uint64_t))(b + 0x2f7b7c))(0x165, pl, u); if (t == 0 ? cat != 9 : t == 1 ? (hover_only ? (cat != 5 && cat != 1 && cat != 0xa) : (cat != 5 && !W_MON_OK(cat))) : t == 2 ? cat != 2 : 0) continue;   // 类别 9 = 死亡状态的玩家单位（0x2f7c28–0x2f7c34：main+0x4667a0 对玩家类判模式 0x11）= 尸体，点它 = 取回装备（游戏点击入口对玩家类发 0x13） | category 9 = a player unit in the dead state (0x2f7c28–0x2f7c34: main+0x4667a0 checks mode 0x11 for the player type) = corpse, tapping it = retrieve equipment (the game's click entry sends 0x13 for the player type)
             if (hover_only && *by_label) continue; // Exact item-label hits outrank NPC body overlap.
             float f[2], h[2]; if (!w_project(b, scene, u, f, 0)) continue;
             if (t == 4 || !w_project(b, scene, u, h, 1)) { h[0] = f[0]; h[1] = f[1]; }
@@ -573,19 +573,20 @@ static void w_hover_step(uint8_t *b) {
                 uint32_t cls=*(uint32_t *)(unit+4);
                 uint64_t player=w_player();
                 int cat = player ? ((int (*)(int,uint64_t,uint64_t))(b+0x2f7b7c))(0x165,player,unit) : 0;
-if (cat == 5) {
-                    const char *key=dm_hover_name_key(cls);
+if (cat == 5 || cat == 1 || cat == 0xa) {
+                    const char *key=dm_hover_name_key(cls), *name=NULL;
                     if (key && *key) {
                         struct { const char *k; uint64_t n; } arg={key,strlen(key)};
-                        const char *name=dm_untag(((const char *(*)(void *))(b+0x7f5630))(&arg));
-                        if (name && *name) {
-                            float p[2]; uint64_t scene=*(uint64_t *)(b+0x2e2a698);
-                            if (scene && w_project(b,scene,unit,p,1)) {
-                                view.kind=1; view.x=fmaxf(0,fminf(1,p[0]/W));
-                                view.y=fmaxf(0,fminf(1,p[1]/H));
-                                strlcpy(view.title,name,sizeof view.title);
-                            }
-                        }
+                        name=dm_untag(((const char *(*)(void *))(b+0x7f5630))(&arg));
+                    }
+                    float p[2]; uint64_t scene=*(uint64_t *)(b+0x2e2a698);
+                    if (scene && w_project(b,scene,unit,p,1)) {
+                        view.kind=cat==5 ? 1 : 3;
+                        view.x=fmaxf(0,fminf(1,p[0]/W));
+                        view.y=fmaxf(0,fminf(1,p[1]/H));
+                        if (name && *name) strlcpy(view.title,name,sizeof view.title);
+                        else if (cat != 5) snprintf(view.title,sizeof view.title,"Monster #%u",cls);
+                        else view.kind=0; // NPC without a known name stays hidden.
                     }
                 }
             } else if (unit && *(uint32_t *)unit == 4 && label) {

@@ -579,6 +579,9 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
 - (void)worldHoverSync {
     dm_world_hover_view h={0};
     int show=!_navigation && !_feMode && dm_world_hover_read(&h);
+    // iPad full screen uses a bottom 16:9 UI view over a taller 3D canvas;
+    // host NPC labels on the canvas so they can appear above that UI view.
+    CALayer *hoverHost=g_full && self.superview ? self.superview.layer : self.layer;
     if (!_hoverName) {
         _hoverName=[CATextLayer layer]; _hoverName.alignmentMode=kCAAlignmentCenter;
         _hoverName.fontSize=19; _hoverName.contentsScale=UIScreen.mainScreen.scale;
@@ -586,16 +589,21 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
         _hoverName.backgroundColor=[UIColor colorWithWhite:0 alpha:.75].CGColor;
         _hoverName.borderColor=[UIColor colorWithRed:.65 green:.54 blue:.33 alpha:.85].CGColor;
         _hoverName.borderWidth=1; _hoverName.cornerRadius=4;
-        [self.layer addSublayer:_hoverName];
+        [hoverHost addSublayer:_hoverName];
         _hoverLoot=[CALayer layer]; _hoverLoot.borderWidth=2; _hoverLoot.cornerRadius=3;
         _hoverLoot.borderColor=[UIColor colorWithRed:1 green:.86 blue:.5 alpha:1].CGColor;
-        [self.layer addSublayer:_hoverLoot];
+        [hoverHost addSublayer:_hoverLoot];
     }
     [CATransaction begin]; [CATransaction setDisableActions:YES];
+    if (_hoverName.superlayer!=hoverHost) {
+        [hoverHost addSublayer:_hoverName];
+        [hoverHost addSublayer:_hoverLoot];
+    }
     _hoverName.hidden=!show || h.kind!=1;
     _hoverLoot.hidden=!show || h.kind!=2;
     if (show) {
         CGRect wr=world_rect(self);
+        if (hoverHost!=self.layer) wr=[self convertRect:wr toView:self.superview];
         if (h.kind==1) {
             NSString *s=[NSString stringWithUTF8String:h.title];
             if (!s.length) _hoverName.hidden=YES;
@@ -604,7 +612,7 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                 CGFloat px=wr.origin.x+h.x*wr.size.width-width/2;
                 CGFloat py=wr.origin.y+h.y*wr.size.height-31;
                 _hoverName.string=s;
-                _hoverName.frame=CGRectMake(fmax(0,fmin(self.bounds.size.width-width,px)),py,width,28);
+                _hoverName.frame=CGRectMake(fmax(0,fmin(hoverHost.bounds.size.width-width,px)),py,width,28);
             }
         } else if (h.kind==2) {
             _hoverLoot.frame=CGRectMake(wr.origin.x+h.x*wr.size.width-3, wr.origin.y+h.y*wr.size.height-2,
@@ -624,9 +632,11 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
 - (void)dmMouseHover:(UIHoverGestureRecognizer *)recognizer {
     UIGestureRecognizerState state=recognizer.state;
     if (state==UIGestureRecognizerStateEnded || state==UIGestureRecognizerStateCancelled || state==UIGestureRecognizerStateFailed) {
-        dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0); return;
+        dm_external_mouse_event(DM_MOUSE_HOVER_END,0,0,0,0,0); return;
     }
     if (state!=UIGestureRecognizerStateBegan && state!=UIGestureRecognizerStateChanged) return;
+    static int hoverLog;
+    if (hoverLog++<6) { CGPoint p=[recognizer locationInView:self]; LOG("iPad mouse hover event %d: %.1f,%.1f",(int)state,p.x,p.y); }
     [self dmMouseEvent:DM_MOUSE_HOVER point:[recognizer locationInView:self] arg:0];
 }
 - (void)dmMouseScroll:(UIPanGestureRecognizer *)recognizer {
@@ -646,6 +656,8 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
                 } else if (op==DM_MOUSE_UP && _mouseSecondaryDown) {
                     mouseOp=DM_MOUSE_RIGHT_UP; _mouseSecondaryDown=NO;
                 } else if (op==DM_MOUSE_LEAVE) _mouseSecondaryDown=NO;
+                static int clickLog;
+                if (clickLog++<16) LOG("iPad mouse click event %d: touchType=%ld buttonMask=%lu",mouseOp,(long)t.type,(unsigned long)event.buttonMask);
                 [self dmMouseEvent:mouseOp point:[t locationInView:self] arg:0];
                 continue;
             }

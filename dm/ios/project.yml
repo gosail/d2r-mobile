@@ -66,6 +66,7 @@ targets:
           - UIInterfaceOrientationLandscapeRight
           - UIInterfaceOrientationLandscapeLeft
         UIRequiresFullScreen: true
+        UIApplicationSupportsIndirectInputEvents: true   # iPadOS pointer clicks must be typed IndirectPointer, not fingers
         UIStatusBarHidden: true
         UIViewControllerBasedStatusBarAppearance: false
         LSApplicationCategoryType: public.app-category.role-playing-games   # 声明为游戏：iOS 游戏模式（压后台活动、保持续性能）只对游戏类目的 App 自动开（此前没声明类目） | Declare as a game: iOS Game Mode (suppresses background activity, preserves sustained performance) turns on automatically only for Apps in a game category (no category was declared before)

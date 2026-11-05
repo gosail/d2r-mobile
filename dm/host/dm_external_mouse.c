@@ -34,7 +34,7 @@ static uint64_t mouse_last_walk;
 
 int dm_external_mouse_active(void) { return atomic_load(&mouse_active); }
 void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int arg) {
-    if (op < DM_MOUSE_DOWN || op > DM_MOUSE_WHEEL) return;
+    if (op < DM_MOUSE_DOWN || op > DM_MOUSE_HOVER_END) return;
     if (!isfinite(ux) || !isfinite(uy) || !isfinite(wx) || !isfinite(wy)) op = DM_MOUSE_LEAVE;
     mouse_event e = {op, arg, ux, uy, wx, wy};
     pthread_mutex_lock(&mouse_mu);
@@ -88,6 +88,9 @@ void dm_external_mouse_step(void) {
     for (unsigned i = 0; i < n; i++) {
         mouse_event *e = &batch[i];
         if (e->op == DM_MOUSE_LEAVE) { mouse_clear(); continue; }
+        // UIKit can end hover recognition on a mouse press. Do not discard
+        // the pending world click or terminate an active mouse drag.
+        if (e->op == DM_MOUSE_HOVER_END) { dm_world_hover_end(); continue; }
         if (e->op == DM_MOUSE_RIGHT_DOWN) {
             atomic_store(&mouse_right, 1); atomic_store(&mouse_right_latch, 1); continue;
         }

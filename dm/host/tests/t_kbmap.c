@@ -16,6 +16,7 @@ static uint64_t buttons;
 static int32_t left_x,left_y;
 static unsigned maps;
 const char *dm_save_commitdir(void) {return save_dir;}
+void dm_kb_clear(void) {buttons=0;left_x=left_y=0;}
 void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
     (void)rx;(void)ry;buttons=b;left_x=lx;left_y=ly;
 }

@@ -100,7 +100,7 @@ void dm_kbmap_restore_defaults(void) {
 }
 void dm_kbmap_reset(void) {
     pthread_mutex_lock(&km_mu);memset(down,0,256);memset(active,0,256);
-    pthread_mutex_unlock(&km_mu);dm_kb_set(0,0,0,0,0);
+    pthread_mutex_unlock(&km_mu);dm_kb_clear();
 }
 void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;

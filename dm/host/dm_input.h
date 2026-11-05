@@ -45,3 +45,6 @@ extern void (*dm_pad_hook)(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t
 
 // Real keyboard has its own channel, merged with touch and physical pad.
 void dm_kb_set(uint64_t buttons,int32_t lx,int32_t ly,int32_t rx,int32_t ry);
+
+// Focus-loss reset also flushes pending keyboard press edges.
+void dm_kb_clear(void);

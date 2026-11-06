@@ -22,7 +22,7 @@ static const uint64_t slot_buttons[4] = {
     DM_BTN_B,DM_BTN_X,DM_BTN_Y,DM_BTN_R
 };
 int dm_pc_input_supported_action(uint32_t id) {
-    return id==0 || id==1 || id==4 || id==12 || id==44 || id==54 ||
+    return id==0 || id==1 || id==4 || id==5 || id==12 || id==44 || id==54 ||
            id==38 || id==39 || id==40 || id==45 ||
            id==7 || id==23 || id==24 || id==25 || id==26 ||
            id==35 || id==37 || id==56 || (id>=14 && id<=21);
@@ -41,6 +41,7 @@ static uint64_t command_bits(unsigned id) {
     case 25:return DM_BTN_DOWN;
     case 26:return DM_BTN_RIGHT;
     case 35:return DM_BTN_LS;
+    case 5:return dm_uiscreen_panel()?DM_BTN_A:0; // Enter: confirm only in UI panels
     case 38:return dm_uiscreen_panel()?DM_BTN_B:0; // close panels only when open // native controller RunButton prompt
     case 37:return DM_BTN_L;  // native controller show-items button
     case 56:return dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_B;

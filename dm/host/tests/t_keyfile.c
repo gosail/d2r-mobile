@@ -18,7 +18,7 @@ static void sample(uint8_t *b) {
         put16(p,i);put16(p+2,0xAB00u+i); // opaque field remains unmodified
         put16(p+4,s?0xffffu:(i==7?0x0100u:65u+i));
         put16(p+6,s?0u:1u);
-        put16(p+8,0xCD00u+i); // opaque tail remains unmodified
+        put16(p+8,0); // upper half of the native DWORD slot
     }
 }
 static void read_bytes(const char *name,uint8_t *out,size_t n) {

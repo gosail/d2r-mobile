@@ -47,7 +47,10 @@ class KeyboardContract(unittest.TestCase):
                         event_code.find('mac_modifier_changed(e);'),
                         "Settings editor must intercept modifiers before gameplay")
         self.assertIn('mac_modifier_changed(e);',event_code)
-        self.assertIn('action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0',src("host/front_mac.m"))
+        self.assertIn('dm_kbmap_key_event((unsigned)usage,down)',mac)
+        self.assertIn('action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0',src("host/dm_kbmap.c"))
+        self.assertNotIn('g_mac_keys_down',mac) # never maintain a competing Mac mapping
+        self.assertNotIn('dm_ui_item_at_now(ux,uy)',mac) # guest-thread only
         self.assertIn('controlsMouseCaptured',android)
         self.assertIn('gameMouseCaptured',android)
         self.assertIn('controlsTouchCaptured',android)

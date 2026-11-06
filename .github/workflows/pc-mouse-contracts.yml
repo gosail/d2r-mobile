@@ -48,6 +48,10 @@ jobs:
           cat > /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java <<'STUB'
           package com.xiaoboluo.d2r;
           class DmActivity {
+              static native int nativePcGet(int action,int slot);
+              static native int nativePcBind(int action,int slot,int vk);
+              static native int nativePcResetLegacy();
+              static native int nativePcVkFromHid(int usage);
               static native void nativeKeyboardEvent(int hid, boolean down);
               static native int nativeKbAction(int hid);
               static native boolean nativeKbBind(int hid, int action);
@@ -60,7 +64,8 @@ jobs:
           javac -cp "$jar" -d /tmp/dmkb-classes \
             /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java \
             dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardInput.java \
-            dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardSettings.java
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardSettings.java \
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/NativePcKeyboardSettings.java
 
   apple-syntax:
     runs-on: macos-15

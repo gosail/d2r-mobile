@@ -4,6 +4,7 @@
 #include "dm_external_mouse.h"
 #include "dm_kbmap.h"
 #include "dm_pc_input.h"
+#include "dm_pc_profile.h"
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -130,8 +131,9 @@ void dm_external_mouse_step(void) {
             mouse_hover_valid=0; dm_world_hover_end(); continue;
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
-            if(dm_kbmap_pc_mode())(void)dm_pc_input_mouse_special(0x100);
-            else dm_world_mouse_map_toggle();
+            int source=dm_kbmap_pc_mode()?dm_pc_profile_file_status():0;
+            if(source==1)(void)dm_pc_input_mouse_special(0x100);
+            else if(source==0)dm_world_mouse_map_toggle();
             continue;
         }
         if (e->op == DM_MOUSE_RIGHT_DOWN) {
@@ -148,8 +150,9 @@ void dm_external_mouse_step(void) {
         if (e->op == DM_MOUSE_RIGHT_UP) { mouse_right_item=0; atomic_store(&mouse_right,0); continue; }
         if (e->op == DM_MOUSE_WHEEL) {
             if (e->arg) {
-                int direction=dm_kbmap_pc_mode() ?
-                    dm_pc_input_wheel(e->arg) : (e->arg>0?1:-1);
+                int source=dm_kbmap_pc_mode()?dm_pc_profile_file_status():0;
+                int direction=source==1?dm_pc_input_wheel(e->arg):
+                    source==0?(e->arg>0?1:-1):0;
                 atomic_store(&mouse_scroll,direction);
                 atomic_store(&mouse_scroll_until, direction?
                     now_ns()+120000000ull:0);

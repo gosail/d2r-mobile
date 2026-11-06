@@ -13,6 +13,9 @@ enum { HEADER_BYTES=2, RECORD_BYTES=10, MAX_BYTES=1024*1024 };
 static uint16_t le16(const uint8_t *p) {
     return (uint16_t)((unsigned)p[0] | ((unsigned)p[1]<<8));
 }
+static uint32_t le32(const uint8_t *p) {
+    return (uint32_t)le16(p) | ((uint32_t)le16(p+2)<<16);
+}
 static void store16(uint8_t *p,uint16_t x) {
     p[0]=(uint8_t)x;p[1]=(uint8_t)(x>>8);
 }
@@ -31,12 +34,12 @@ static int validate(const uint8_t *raw,size_t len) {
     // Reject ambiguous/unknown layouts instead of guessing and corrupting them.
     for(size_t i=0;i<n;i++) {
         const uint8_t *p=raw+HEADER_BYTES+i*RECORD_BYTES;
-        uint16_t id=le16(p),flag=le16(p+6);
+        uint32_t id=le32(p);uint16_t flag=le16(p+6);
         if(flag>1)return DM_KEYFILE_UNSUPPORTED;
         unsigned matches=0,seen=0;
         for(size_t j=0;j<n;j++) {
             const uint8_t *q=raw+HEADER_BYTES+j*RECORD_BYTES;
-            if(le16(q)==id){matches++;seen|=1u<<le16(q+6);}
+            if(le32(q)==id){matches++;seen|=1u<<le16(q+6);}
         }
         if(matches!=2 || seen!=3)return DM_KEYFILE_INVALID;
     }
@@ -73,11 +76,11 @@ const uint8_t *dm_keyfile_data(const dm_keyfile *f,size_t *n) {
     if(n)*n=f?f->size:0;
     return f?f->raw:NULL;
 }
-static uint8_t *record(const dm_keyfile *f,uint16_t id,unsigned slot) {
+static uint8_t *record(const dm_keyfile *f,uint32_t id,unsigned slot) {
     if(!f || !f->raw || slot>1)return NULL;
     for(size_t i=0;i<f->records;i++) {
         uint8_t *p=f->raw+HEADER_BYTES+i*RECORD_BYTES;
-        if(le16(p)==id && le16(p+6)==(uint16_t)(slot?0:1))return p;
+        if(le32(p)==id && le16(p+6)==(uint16_t)(slot?0:1))return p;
     }
     return NULL;
 }

@@ -507,7 +507,8 @@ static NSString *mac_pc_vk_label(int vk) {
     for(unsigned id=0;id<57;id++) {
         uint16_t vk=0xffff;
         if(dm_pc_profile_get(id,0,&vk)!=DM_KEYFILE_OK){
-            NSAlert *fail=[NSAlert new];fail.messageText=@"Cannot open native .key";
+            NSAlert *fail=[NSAlert new];fail.messageText=@"The game has not created a supported .key";
+            fail.informativeText=@"Load the character and save its original keyboard settings. This editor does not create replacement files.";
             [fail runModal];return;
         }
         [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@",id,commands[id],mac_pc_vk_label(vk)]];
@@ -522,8 +523,6 @@ static NSString *mac_pc_vk_label(int vk) {
     [dialog addButtonWithTitle:@"Bind next key"];
     [dialog addButtonWithTitle:@"Cancel"];
     [dialog addButtonWithTitle:@"Clear binding"];
-    [dialog addButtonWithTitle:@"Restore Legacy defaults"];
-    [dialog addButtonWithTitle:@"Restore Resurrected skills"];
     NSModalResponse response=[dialog runModal];
     if(response==NSAlertFirstButtonReturn) {
         g_mac_pc_capture_id=(int)which.indexOfSelectedItem;
@@ -533,16 +532,6 @@ static NSString *mac_pc_vk_label(int vk) {
         if(dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,(unsigned)slot.indexOfSelectedItem,0xffff,NULL,NULL)!=DM_KEYFILE_OK ||
            !dm_kbmap_set_pc_mode(1)) {
             NSAlert *fail=[NSAlert new];fail.messageText=@"Could not clear binding";[fail runModal];
-        }
-        [self refresh];
-    } else if(response==NSAlertThirdButtonReturn+1) {
-        if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK || !dm_kbmap_set_pc_mode(1)){
-            NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Legacy defaults";[fail runModal];
-        }
-        [self refresh];
-    } else if(response==NSAlertThirdButtonReturn+2) {
-        if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK || !dm_kbmap_set_pc_mode(1)){
-            NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Resurrected skills";[fail runModal];
         }
         [self refresh];
     }
@@ -565,8 +554,8 @@ static NSString *mac_pc_vk_label(int vk) {
         if([confirm runModal]==NSAlertFirstButtonReturn) {
             if(dm_kbmap_restore_defaults_checked())[self refresh];
             else {
-                NSAlert *fail=[NSAlert new];fail.messageText=@"无法保存角色 .key";
-                fail.informativeText=@"请先选择角色或检查 .key 文件是否使用其他格式。";
+                NSAlert *fail=[NSAlert new];fail.messageText=@"无法保存角色 .kbm";
+                fail.informativeText=@"请先选择角色，检查手柄模拟配置文件是否可写。";
                 [fail addButtonWithTitle:@"确定"];[fail runModal];
             }
         }

@@ -109,6 +109,24 @@ int main(void) {
     assert(dm_keyfile_bind_checked(&def,14,1,0x80,NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_keyfile_lookup_vk(&def,0x80,&found,&slot)==DM_KEYFILE_OK && found==14 && slot==1);
     dm_keyfile_free(&def);
+    dm_keyfile modern={0};
+    assert(dm_keyfile_new_resurrected(&modern)==DM_KEYFILE_OK);
+    assert(modern.records==114 && !dm_keyfile_dirty(&modern));
+    for(uint32_t i=0;i<12;i++) {
+        uint32_t id=i<8?14+i:46+(i-8);
+        uint16_t expected=i<9?(uint16_t)('1'+i):i==9?'0':i==10?0xbd:0xbb;
+        assert(dm_keyfile_get(&modern,id,0,&vk)==DM_KEYFILE_OK);
+        assert(vk==expected);
+        assert(dm_keyfile_lookup_vk(&modern,expected,&found,&slot)==DM_KEYFILE_OK);
+        assert(found==id && slot==0);
+    }
+    for(uint32_t id=23;id<=26;id++) {
+        assert(dm_keyfile_get(&modern,id,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
+    }
+    assert(dm_keyfile_get(&modern,0,0,&vk)==DM_KEYFILE_OK && vk=='A');
+    assert(dm_keyfile_bind_checked(&modern,23,0,'1',&conflict,&conflict_slot)==DM_KEYFILE_CONFLICT);
+    assert(conflict==14 && conflict_slot==0);
+    dm_keyfile_free(&modern);
     // Variable record counts accepted when valid pairs remain intact.
     assert(dm_keyfile_parse(&g,original,LEN-20)==DM_KEYFILE_OK);
     dm_keyfile_free(&g);

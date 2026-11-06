@@ -15,15 +15,17 @@ static unsigned char panel_queue[32];
 static unsigned queue_head,queue_tail;
 static uint64_t held_mask[256]; // latched at key-down; UI changes cannot reinterpret a held Escape
 enum { UNMAPPED=255 };
-static const uint64_t slot_buttons[6] = {
-    DM_BTN_A,DM_BTN_B,DM_BTN_Y,DM_BTN_X,DM_BTN_R,DM_BTN_ZR
+// Use the same proven first-eight skill bindings as the existing portable
+// keyboard controller bridge: B/X/Y/R, with ZL for the alternate four.
+// The Switch guest cannot expose additional PC slots by guessing buttons.
+static const uint64_t slot_buttons[4] = {
+    DM_BTN_B,DM_BTN_X,DM_BTN_Y,DM_BTN_R
 };
 int dm_pc_input_supported_action(uint32_t id) {
     return id==0 || id==1 || id==4 || id==12 || id==44 || id==54 ||
            id==38 || id==39 || id==40 || id==45 ||
            id==7 || id==23 || id==24 || id==25 || id==26 ||
-           id==35 || id==37 || id==56 || (id>=14 && id<=21) ||
-           (id>=46 && id<=49);
+           id==35 || id==37 || id==56 || (id>=14 && id<=21);
 }
 // Skill 13..16 have no direct original Switch controller slots; do not
 // activate a different skill by guessing. Character/inventory modal
@@ -31,11 +33,7 @@ int dm_pc_input_supported_action(uint32_t id) {
 static uint64_t command_bits(unsigned id) {
     if(id>=14 && id<=21) {
         unsigned slot=id-14;
-        return slot_buttons[slot%6] | (slot>=6?DM_BTN_ZL:0);
-    }
-    if(id>=46 && id<=49) {
-        unsigned slot=id-46+8;
-        return slot_buttons[slot%6] | DM_BTN_ZL;
+        return slot_buttons[slot%4] | (slot>=4?DM_BTN_ZL:0);
     }
     switch(id) {
     case 23:return DM_BTN_LEFT;

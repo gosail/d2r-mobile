@@ -241,20 +241,6 @@ static NSString *pcKeyName(int vk) {
         [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
             handler:^(UIAlertAction *a){(void)a;[self kbPcSlot:cmd];}]];
     }
-    [list addAction:[UIAlertAction actionWithTitle:@"Restore Resurrected skill keys (1–0/-/=)" style:UIAlertActionStyleDestructive
-        handler:^(UIAlertAction *a){
-            (void)a;
-            if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK ||
-               !dm_kbmap_set_pc_mode(1))[self kbSettingsSaveError];
-            else [self kbSettingsRefresh];
-        }]];
-    [list addAction:[UIAlertAction actionWithTitle:@"Restore Legacy defaults" style:UIAlertActionStyleDestructive
-        handler:^(UIAlertAction *a) {
-            (void)a;
-            if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK ||
-               !dm_kbmap_set_pc_mode(1))[self kbSettingsSaveError];
-            else [self kbSettingsRefresh];
-        }]];
     [list addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     list.popoverPresentationController.sourceView=_kbDeviceTabs;
     list.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
@@ -277,7 +263,7 @@ static NSString *kbActionLabel(int action) {
 - (void)kbSettingsSaveError {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:
         (dm_lang_zh()?@"无法保存角色键位":@"Cannot save character bindings")
-        message:(dm_lang_zh()?@"请先选择角色，并确认角色的 .key 文件没有被其他格式占用。":@"Select a character and check for a conflicting .key file.")
+        message:(dm_lang_zh()?@"请先进入角色，让游戏生成并保存原生 .key；不会自行创建或覆盖未知格式的文件。":@"Load a character and let the original game create its native .key first. Unsupported files will not be overwritten.")
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK"
         style:UIAlertActionStyleCancel handler:nil]];
@@ -296,7 +282,7 @@ static NSString *kbActionLabel(int action) {
             (void)a;
             if(!dm_kbmap_bind(usage,(unsigned)action)) {
                 UIAlertController *error=[UIAlertController alertControllerWithTitle:@"Save failed"
-                  message:@"Could not write this character's .key" preferredStyle:UIAlertControllerStyleAlert];
+                  message:@"Cannot save the keyboard emulation .kbm for this character" preferredStyle:UIAlertControllerStyleAlert];
                 [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
                 [self.window.rootViewController presentViewController:error animated:YES completion:nil];
             } else [self kbSettingsRefresh];

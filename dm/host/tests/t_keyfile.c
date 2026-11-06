@@ -36,13 +36,13 @@ int main(void) {
     uint16_t v=0;
     assert(dm_keyfile_get(&f,(0xAB07u<<16)|7u,0,&v)==DM_KEYFILE_OK);
     assert(v==0x0100);
-    assert(dm_keyfile_get(&f,7,1,&v)==DM_KEYFILE_OK);
+    assert(dm_keyfile_get(&f,(0xAB07u<<16)|7u,1,&v)==DM_KEYFILE_OK);
     assert((v & 0xffff)==0xffff);
     assert(dm_keyfile_get(&f,999,0,&v)==DM_KEYFILE_NOT_FOUND);
     assert(dm_keyfile_get(&f,(0xAB07u<<16)|7u,0,&v)==DM_KEYFILE_OK);
     assert(dm_keyfile_set(&f,(0xAB07u<<16)|7u,0,0x0100)==DM_KEYFILE_OK);
     assert(!dm_keyfile_dirty(&f));
-    assert(dm_keyfile_set(&f,7,1,0x0101)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&f,(0xAB07u<<16)|7u,1,0x0101)==DM_KEYFILE_OK);
     assert(dm_keyfile_dirty(&f));
     const uint8_t *edited=dm_keyfile_data(&f,NULL);
     for(size_t i=0;i<LEN;i++)

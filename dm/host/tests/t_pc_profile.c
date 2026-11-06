@@ -91,6 +91,18 @@ int main(void) {
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     uint16_t vk=0;uint32_t command=999,conflict=999;unsigned slot=99,conflict_slot=99;
     assert(dm_pc_profile_get(0,0,&vk)==DM_KEYFILE_OK && vk=='A');
+    // The guest may rewrite its file in several pwrite calls while the
+    // original writer handle remains open. Do not expose partial bytes.
+    native_writers=1;
+    { char partial[1200];path("Alice",partial);
+      FILE *guest=fopen(partial,"wb");assert(guest);
+      assert(fwrite("partial",1,7,guest)==7);assert(!fclose(guest)); }
+    assert(dm_pc_profile_get(0,0,&vk)==DM_KEYFILE_OK && vk=='A');
+    assert(dm_pc_profile_file_status()==1);
+    native_writers=0;
+    assert(dm_pc_profile_get(0,0,&vk)==DM_KEYFILE_UNSUPPORTED);
+    game_seed("Alice",1);
+    assert(dm_pc_profile_get(0,0,&vk)==DM_KEYFILE_OK && vk=='A');
     assert(dm_pc_profile_get(14,0,&vk)==DM_KEYFILE_OK && vk=='1');
     assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
     assert(dm_pc_profile_get(49,0,&vk)==DM_KEYFILE_OK && vk==0xbb);

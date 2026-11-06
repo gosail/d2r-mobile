@@ -3,6 +3,7 @@
 // Legacy mobile text .key files are read ONLY as migration input and never overwritten.
 // Native .key lossless binary codec lives separately in dm_keyfile.{h,c}.
 #include "dm_kbmap.h"
+#include "dm_pc_profile.h"
 #include "dm_input.h"
 #include "dm_world.h"
 #include "dm_uiscreen.h"
@@ -72,7 +73,8 @@ void dm_kbmap_select_character(const char *name) {
     if(!hero_name_ok(name))return;
     pthread_mutex_lock(&km_mu);
     init_locked();
-    if(strcmp(hero,name)) {
+    int changed=strcmp(hero,name)!=0;
+    if(changed) {
         snprintf(hero,sizeof hero,"%s",name);
         memcpy(map,def,sizeof map);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;
         memset(down,0,sizeof down);memset(active,0,sizeof active);
@@ -81,6 +83,7 @@ void dm_kbmap_select_character(const char *name) {
         dm_kb_clear();
     }
     pthread_mutex_unlock(&km_mu);
+    if(changed)(void)dm_pc_profile_select(name);
 }
 static void load_locked(void) {
     init_locked();

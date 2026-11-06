@@ -51,6 +51,15 @@ final class NativePcKeyboardSettings {
         Toast.makeText(activity,message,Toast.LENGTH_LONG).show();
     }
     static void show(Activity activity) {
+        // The original guest creates and owns this profile. Never offer a
+        // synthetic default or present an empty editor before it exists.
+        if(DmActivity.nativePcGet(0,0)<0) {
+            new AlertDialog.Builder(activity)
+                .setTitle("Original character keyboard bindings")
+                .setMessage("The game has not created a supported .key for the selected character yet. Load the character and save its native settings first; no replacement file will be generated.")
+                .setPositiveButton("OK",null).show();
+            return;
+        }
         final AlertDialog[] parent={null};
         ScrollView sc=new ScrollView(activity);
         LinearLayout rows=new LinearLayout(activity);
@@ -72,27 +81,6 @@ final class NativePcKeyboardSettings {
             }
             rows.addView(line);
         }
-        Button reset=new Button(activity);
-        reset.setText("Restore verified Legacy defaults");
-        reset.setOnClickListener(v->new AlertDialog.Builder(activity)
-            .setMessage("Restore Legacy keyboard bindings for this character?")
-            .setPositiveButton("Restore",(d,w)->{
-                int rc=DmActivity.nativePcResetLegacy();
-                if(rc==0){parent[0].dismiss();show(activity);}
-                else toast(activity,"Cannot save native .key ("+rc+")");
-            })
-            .setNegativeButton("Cancel",null).show());
-        rows.addView(reset);
-        Button modern=new Button(activity);
-        modern.setText("Restore Resurrected skills (1–0, - and =)");
-        modern.setOnClickListener(v->new AlertDialog.Builder(activity)
-            .setMessage("Use Resurrected skill keys 1–0, - and =? Potion keys 1–4 will be unbound to prevent conflicts.")
-            .setPositiveButton("Restore",(d,w)->{
-                int rc=DmActivity.nativePcResetResurrected();
-                if(rc==0){parent[0].dismiss();show(activity);}
-                else toast(activity,"Cannot save native .key ("+rc+")");
-            }).setNegativeButton("Cancel",null).show());
-        rows.addView(modern);
         parent[0]=new AlertDialog.Builder(activity).setTitle("Native PC .key · primary / secondary")
             .setView(sc).setPositiveButton("Done",null).create();
         parent[0].show();

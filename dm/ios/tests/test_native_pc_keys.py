@@ -74,6 +74,12 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn("nativePcSetMode",activity)
         self.assertIn("nativePcBind",java)
         self.assertIn("KeyboardInput.hidUsage(keyCode)",java)
+        for source in (ios,mac,java):
+            self.assertIn("0x100",source) # original mouse-middle pseudo key
+            self.assertIn("0x103",source) # wheel-up
+            self.assertIn("0x104",source) # wheel-down
+        self.assertIn("dm_pc_profile_file_status()",src("host/dm_external_mouse.c"))
+        self.assertIn("dm_pc_profile_file_status()",mac)
     def test_main_build_includes_modules(self):
         make=src("host/Makefile")
         for path in ("dm_keyfile.c","dm_pc_profile.c","dm_pc_input.c"):

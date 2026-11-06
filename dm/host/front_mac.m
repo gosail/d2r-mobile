@@ -546,7 +546,8 @@ static NSString *mac_pc_vk_label(int vk) {
             fail.informativeText=@"Load the character and save its original keyboard settings. This editor does not create replacement files.";
             [fail runModal];return;
         }
-        [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@",id,commands[id],mac_pc_vk_label(vk)]];
+        NSString *state=dm_pc_input_supported_action(id)?@"":@" · ⚠ runtime pending";
+        [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@%@",id,commands[id],mac_pc_vk_label(vk),state]];
     }
     NSPopUpButton *slot=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,2,460,32) pullsDown:NO];
     [slot addItemsWithTitles:@[@"Primary key",@"Secondary key"]];

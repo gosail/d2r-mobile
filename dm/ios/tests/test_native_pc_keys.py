@@ -86,7 +86,7 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn("g_pc_capture_action",ios)
         self.assertIn("dm_pc_profile_bind(",mac)
         self.assertIn("g_mac_pc_capture_id",mac)
-        self.assertIn("dm_kbmap_key_event((unsigned)u,down)",mac)
+        self.assertIn("dm_kbmap_key_event((unsigned)usage,down)",mac)
         self.assertIn("nativePcSetMode",activity)
         self.assertIn("nativePcBind",java)
         self.assertIn("KeyboardInput.hidUsage(keyCode)",java)

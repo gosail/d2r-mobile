@@ -125,6 +125,19 @@ int main(int argc,char **argv) {
       unsigned char got[sizeof native_bytes];
       assert(fread(got,1,sizeof got,nf)==sizeof got);assert(!fclose(nf));
       assert(!memcmp(got,native_bytes,sizeof got)); }
+    // Transaction worktree receives native .key only when absent, byte for byte.
+    { FILE *nf=fopen(native_work,"rb");assert(nf);
+      unsigned char got[sizeof native_bytes];
+      assert(fread(got,1,sizeof got,nf)==sizeof got);assert(!fclose(nf));
+      assert(!memcmp(got,native_bytes,sizeof got)); }
+    // Worktree is authoritative if the guest changed its own .key.
+    { FILE *nf=fopen(native_work,"wb");assert(nf);
+      assert(fputs("GUEST_CHANGED",nf)>=0);assert(!fclose(nf)); }
+    dm_kbmap_pre_commit(work_dir);
+    { FILE *nf=fopen(native_work,"rb");assert(nf);
+      assert(fgets(line,sizeof line,nf));assert(!fclose(nf));
+      assert(!strcmp(line,"GUEST_CHANGED")); }
+
     remove(fw); // restore a writable mobile-owned work file
     // Old global sw_keyboard.txt is only a read-only migration source.
     char oldglob[1200],charlie[1200],charliew[1200],charliekey[1200];

@@ -29,6 +29,7 @@ void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void); 
 #include "../../host/dm_external_mouse.h"
 #include "../../host/dm_kbmap.h"
 #include "../../host/dm_pc_profile.h"
+#include "../../host/dm_pc_input.h"
 #include "../../host/dm_keyfile.h"
 #include "../../host/dm_uiscreen.h"
 #include "../../host/dm_actions.h"
@@ -267,7 +268,8 @@ static NSString *pcKeyName(int vk) {
     for(unsigned cmd=0;cmd<57;cmd++) {
         uint16_t key=0xffff;int ok=dm_pc_profile_get(cmd,0,&key);
         if(ok) { [self kbSettingsSaveError];return; }
-        NSString *title=[NSString stringWithFormat:@"%02u  %s · %@",cmd,names[cmd],pcKeyName(key)];
+        NSString *state=dm_pc_input_supported_action(cmd)?@"":@" · ⚠ runtime pending";
+        NSString *title=[NSString stringWithFormat:@"%02u  %s · %@%@",cmd,names[cmd],pcKeyName(key),state];
         [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
             handler:^(UIAlertAction *a){(void)a;[self kbPcSlot:cmd];}]];
     }

@@ -12,6 +12,8 @@
 const char *dm_save_commitdir(void);
 const char *dm_save_workdir(void);
 void dm_fs_profile_lock(void),dm_fs_profile_unlock(void);
+unsigned dm_fs_native_key_writers(void);
+void dm_fs_save_poison(int e);
 
 static pthread_mutex_t pc_mu=PTHREAD_MUTEX_INITIALIZER;
 static char selected[64];
@@ -81,6 +83,12 @@ int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk) {
 int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
                        uint32_t *conflict,unsigned *conflict_slot) {
     dm_fs_profile_lock();
+    // Never change the committed save snapshot. While the game's .key is
+    // open for writing, the host must not race its multi-write serialization.
+    if(!dm_save_workdir()) { dm_fs_profile_unlock(); return DM_KEYFILE_NOT_FOUND; }
+    if(dm_fs_native_key_writers()) {
+        dm_fs_profile_unlock(); return DM_KEYFILE_CONFLICT;
+    }
     pthread_mutex_lock(&pc_mu);
     int rc=read_locked();
     if(!rc) {
@@ -91,7 +99,13 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
             if(!rc) {
                 char fn[1200];
                 rc=path(fn)?dm_keyfile_write_atomic(&profile,fn):DM_KEYFILE_INVALID;
-                if(rc) (void)dm_keyfile_set(&profile,id,slot,old);
+                if(rc) {
+                    // A partial native host pwrite/fsync failure must never be
+                    // promoted by the game's next Commit. The original save
+                    // transaction will roll back on its poisoned state.
+                    if(rc==DM_KEYFILE_IO)dm_fs_save_poison(errno?errno:EIO);
+                    (void)dm_keyfile_set(&profile,id,slot,old);
+                }
             }
         }
     }

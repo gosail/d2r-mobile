@@ -472,6 +472,12 @@ JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseBind(JNI
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbControlsVisible(JNIEnv *e,jclass c) {
     (void)e;(void)c;return dm_kbmap_controls_visible();
 }
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcMode(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_kbmap_pc_mode()!=0;
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcSetMode(JNIEnv *e,jclass c,jboolean nativePc) {
+    (void)e;(void)c;return dm_kbmap_set_pc_mode(nativePc!=0)!=0;
+}
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcGet(JNIEnv *e,jclass c,jint action,jint slot) {
     (void)e;(void)c;uint16_t vk=0xffff;
     if(action<0 || slot<0 || dm_pc_profile_get((uint32_t)action,(unsigned)slot,&vk))

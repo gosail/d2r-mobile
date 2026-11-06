@@ -99,6 +99,23 @@ int main(void) {
     setenv("DM_SAVE", save, 1); setenv("DM_TEST_FS_FAIL", "write:5:28", 1);   // 存档第 5 次写失败，errno 28 = ENOSPC | the 5th save write fails, errno 28 = ENOSPC
     CHECK(h_fs_MountSave("save", NULL) == RES_OK, "挂载存档");
 
+    // Guest-native .key writer leases protect the host keyfile editor. An
+    // open READ handle is harmless; an open WRITE handle forbids host edits.
+    CHECK(h_fs_CreateDirectory("save:/Alice") == RES_OK, "guest native key: create character directory");
+    CHECK(h_fs_CreateFile("save:/Alice/Alice.key", 2) == RES_OK, "guest native key: create original file");
+    uint64_t keyfd=0;
+    CHECK(h_fs_OpenFile(&keyfd,"save:/Alice/Alice.key",MODE_READ)==RES_OK,
+          "guest native key: read handle opens");
+    CHECK(dm_fs_native_key_writers()==0,"guest native key: readers do not block editing");
+    h_fs_CloseFile(keyfd);
+    CHECK(h_fs_OpenFile(&keyfd,"save:/Alice/Alice.key",MODE_WRITE)==RES_OK,
+          "guest native key: write handle opens");
+    CHECK(dm_fs_native_key_writers()==1,"guest native key: writable handle blocks host editing");
+    h_fs_CloseFile(keyfd);
+    CHECK(dm_fs_native_key_writers()==0,"guest native key: close releases edit guard");
+    // Only the file open/close lifecycle is exercised here: no extra
+    // WriteFile injection count is consumed by this test.
+
     // 存档写计数：①=第 1 次 ②=第 2 次 ③=第 3 次 ④=第 4/5/6/7 次 ⑤=第 8 次
     // Save write count: (1)=1st (2)=2nd (3)=3rd (4)=4th/5th/6th/7th (5)=8th
     printf("① pwrite 返回 0\n");

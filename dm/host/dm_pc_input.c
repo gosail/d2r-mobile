@@ -20,6 +20,7 @@ static const uint64_t slot_buttons[6] = {
 };
 int dm_pc_input_supported_action(uint32_t id) {
     return id==0 || id==1 || id==4 || id==12 || id==44 || id==54 ||
+           id==38 || id==45 ||
            id==7 || id==23 || id==24 || id==25 || id==26 ||
            id==35 || id==37 || id==56 || (id>=14 && id<=21) ||
            (id>=46 && id<=49);
@@ -41,7 +42,8 @@ static uint64_t command_bits(unsigned id) {
     case 24:return DM_BTN_UP;
     case 25:return DM_BTN_DOWN;
     case 26:return DM_BTN_RIGHT;
-    case 35:return DM_BTN_LS; // native controller RunButton prompt
+    case 35:return DM_BTN_LS;
+    case 38:return dm_uiscreen_panel()?DM_BTN_B:0; // close panels only when open // native controller RunButton prompt
     case 37:return DM_BTN_L;  // native controller show-items button
     case 56:return dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_B;
     default:return 0;
@@ -90,7 +92,7 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         command[hid]=rc==0 && id<=56 && dm_pc_input_supported_action(id)?
             (unsigned char)id:UNMAPPED;
         held_mask[hid]=command[hid]==UNMAPPED?0:command_bits(command[hid]);
-        if(command[hid]==7)dm_world_mouse_map_toggle();
+        if(command[hid]==7 || command[hid]==45)dm_world_mouse_map_toggle();
         if(command[hid]==0 || command[hid]==1 || command[hid]==4 ||
            command[hid]==12 || command[hid]==44 || command[hid]==54) {
             // Keep menu operations off the platform input thread.

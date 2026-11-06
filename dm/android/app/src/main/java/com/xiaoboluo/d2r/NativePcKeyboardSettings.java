@@ -53,7 +53,7 @@ final class NativePcKeyboardSettings {
     static void show(Activity activity) {
         // The original guest creates and owns this profile. Never offer a
         // synthetic default or present an empty editor before it exists.
-        if(DmActivity.nativePcGet(0,0)<0) {
+        if(DmActivity.nativePcStatus()!=1) {
             new AlertDialog.Builder(activity)
                 .setTitle("Original character keyboard bindings")
                 .setMessage("The game has not created a supported .key for the selected character yet. Load the character and save its native settings first; no replacement file will be generated.")
@@ -76,9 +76,13 @@ final class NativePcKeyboardSettings {
                 button.setAllCaps(false);
                 button.setTextColor(Color.WHITE);
                 String status=DmActivity.nativePcActionSupported(id)?"":" · runtime pending";
-                button.setText(COMMANDS[id]+status+"\n"+(slot==0?"Primary: ":"Secondary: ")+keyName(vk));
+                button.setText(COMMANDS[id]+status+"\n"+(slot==0?"Primary: ":"Secondary: ")+
+                    (vk<0?"Unavailable in game .key":keyName(vk)));
                 line.addView(button,new LinearLayout.LayoutParams(0,-2,1));
-                button.setOnClickListener(v->capture(activity,parent[0],command,s));
+                // Native records need not cover every known command ID.
+                // Disabled rows remain visible but must not fabricate bytes.
+                button.setEnabled(vk>=0);
+                if(vk>=0)button.setOnClickListener(v->capture(activity,parent[0],command,s));
             }
             rows.addView(line);
         }

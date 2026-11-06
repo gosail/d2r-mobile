@@ -296,11 +296,14 @@ int main(void) {
     unlink(alice);unlink(backup);unlink(bob);unlink(eve);
     char late[1200];path("LateMount",late);
     assert(!unlink(late));
+    char trim_bak[1220];snprintf(trim_bak,sizeof trim_bak,"%s.bak",trim_path);
+    assert(!unlink(trim_path));
+    assert(!unlink(trim_bak));
 
     unlink(alice_commit);
     char d[1200];
-    const char *names[]={"Alice","Bob","Eve","LateMount"};
-    for(unsigned i=0;i<4;i++) {
+    const char *names[]={"Alice","Bob","Eve","LateMount","Trim"};
+    for(unsigned i=0;i<sizeof names/sizeof names[0];i++) {
         snprintf(d,sizeof d,"%s/%s",work_dir,names[i]);assert(!rmdir(d));
         snprintf(d,sizeof d,"%s/%s",save_dir,names[i]);assert(!rmdir(d));
     }

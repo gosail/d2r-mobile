@@ -16,6 +16,7 @@
 #include "../host/dm_input.h"
 #include "../host/dm_kbmap.h"
 #include "../host/dm_pc_profile.h"
+#include "../host/dm_pc_input.h"
 #include "../host/dm_keyfile.h"
 #include "../host/front.h"
 #include "../host/hle.h"
@@ -492,6 +493,10 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcBind(JNIEnv *e,
     // Failure is reported to the UI; never show success while legacy actions fire.
     if(rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1))return DM_KEYFILE_IO;
     return rc;
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcActionSupported(JNIEnv *e,jclass c,jint action) {
+    (void)e;(void)c;
+    return action>=0 && dm_pc_input_supported_action((uint32_t)action);
 }
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcVkFromHid(JNIEnv *e,jclass c,jint usage) {
     (void)e;(void)c;return usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);

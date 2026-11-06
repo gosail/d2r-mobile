@@ -57,6 +57,12 @@ void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int
     if(op==DM_MOUSE_LEAVE) memset(g_mouse_physical_down,0,sizeof g_mouse_physical_down);
     if(button>=0) {
         if(press) {
+            // A repeated down must not rebind a still-held physical button.
+            // Preserve the original role until its matching release, even
+            // when the settings page changes the mouse mapping mid-gesture.
+            if(g_mouse_physical_down[button]){
+                pthread_mutex_unlock(&mouse_mu);return;
+            }
             g_mouse_physical_role[button]=dm_kbmap_mouse_action((unsigned)button);
             g_mouse_physical_down[button]=1;
         } else if(!g_mouse_physical_down[button]) {

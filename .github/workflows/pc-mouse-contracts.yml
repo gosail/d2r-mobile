@@ -31,6 +31,11 @@ jobs:
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_keyfile.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
           /tmp/dm_test_keyboard
+      - name: Real iPadOS/Android mouse panel drag and cancel lifecycle
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host \
+            dm/host/tests/t_external_mouse.c -lm -o /tmp/dm_test_external_mouse
+          /tmp/dm_test_external_mouse
       - name: Parse, edit and atomically round-trip native .key records (synthetic fixtures)
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -I dm/host dm/host/dm_keyfile.c dm/host/tests/t_keyfile.c -o /tmp/dm_test_keyfile

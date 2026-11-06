@@ -89,7 +89,8 @@ final class KeyboardSettings {
                 else new AlertDialog.Builder(activity)
                     .setMessage(Locale.getDefault().getLanguage().equals("zh")?"恢复此角色的全部默认键鼠设置？":"Reset keyboard and mouse for this character?")
                     .setPositiveButton(Locale.getDefault().getLanguage().equals("zh")?"恢复":"Reset",(d,n)->{
-                        DmActivity.nativeKbDefaults();refreshInline(activity,scroll);
+                        if(DmActivity.nativeKbResetChecked())refreshInline(activity,scroll);
+                        else Toast.makeText(activity,"Cannot save this character's .key",Toast.LENGTH_LONG).show();
                     })
                     .setNegativeButton(Locale.getDefault().getLanguage().equals("zh")?"取消":"Cancel",null).show();
             });
@@ -127,7 +128,8 @@ final class KeyboardSettings {
                     new AlertDialog.Builder(activity)
                         .setMessage(zh?"恢复全部键鼠默认键位？":"Reset all keyboard bindings?")
                         .setPositiveButton(zh?"恢复":"Reset",(w,n)->{
-                            DmActivity.nativeKbDefaults();show(activity);
+                            if(DmActivity.nativeKbResetChecked())show(activity);
+                            else Toast.makeText(activity,"Cannot save this character's .key",Toast.LENGTH_LONG).show();
                         })
                         .setNegativeButton(zh?"取消":"Cancel",null).show();
                 } else if(which>=KEYS.length) chooseMouse(activity,which-KEYS.length);

@@ -102,6 +102,7 @@ int main(int argc,char **argv) {
     char bobkey[1200];snprintf(bobkey,sizeof bobkey,"%s/Bob/Bob.key",save_dir);
     { FILE *f2=fopen(bobkey,"wb");assert(f2);fputs("LEGACY_BINARY\n",f2);fclose(f2); }
     dm_kbmap_select_character("Bob");assert(dm_kbmap_action(0x0d)==0);
+    assert(!dm_kbmap_restore_defaults_checked()); // cannot erase another format's .key
     assert(!dm_kbmap_bind(0x0d,15));
     { FILE *f2=fopen(bobkey,"rb");assert(f2);assert(fgets(line,sizeof line,f2));fclose(f2);assert(!strcmp(line,"LEGACY_BINARY\n")); }
     dm_kbmap_select_character("../bad");assert(dm_kbmap_action(0x0d)==0);

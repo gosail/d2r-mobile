@@ -176,6 +176,15 @@ static NSString *kbActionLabel(int action) {
     for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++)if(action==ids[i])return names[i];
     return @"Unbound";
 }
+- (void)kbSettingsSaveError {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:
+        (dm_lang_zh()?@"无法保存角色键位":@"Cannot save character bindings")
+        message:(dm_lang_zh()?@"请先选择角色，并确认角色的 .key 文件没有被其他格式占用。":@"Select a character and check for a conflicting .key file.")
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+        style:UIAlertActionStyleCancel handler:nil]];
+    [self.window.rootViewController presentViewController:alert animated:YES completion:nil];
+}
 - (void)kbChooseUsage:(unsigned)usage label:(NSString *)keyName {
     static const int ids[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
         16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
@@ -189,7 +198,7 @@ static NSString *kbActionLabel(int action) {
             (void)a;
             if(!dm_kbmap_bind(usage,(unsigned)action)) {
                 UIAlertController *error=[UIAlertController alertControllerWithTitle:@"Save failed"
-                  message:@"Could not write sw_keyboard.txt" preferredStyle:UIAlertControllerStyleAlert];
+                  message:@"Could not write this character's .key" preferredStyle:UIAlertControllerStyleAlert];
                 [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
                 [self.window.rootViewController presentViewController:error animated:YES completion:nil];
             } else [self kbSettingsRefresh];
@@ -250,7 +259,8 @@ static NSString *kbActionLabel(int action) {
     }
     [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复默认键位":@"Restore defaults")
         style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-            (void)a; dm_kbmap_restore_defaults();[self kbSettingsOpen];
+            (void)a; if(dm_kbmap_restore_defaults_checked())[self kbSettingsOpen];
+            else [self kbSettingsSaveError];
         }]];
     [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"关闭":@"Close")
         style:UIAlertActionStyleCancel handler:nil]];
@@ -320,7 +330,8 @@ static NSString *kbActionLabel(int action) {
             style:UIAlertActionStyleCancel handler:nil]];
         [confirm addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复":@"Reset")
             style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
-                (void)a;dm_kbmap_restore_defaults();[self kbSettingsRefresh];
+                (void)a;if(dm_kbmap_restore_defaults_checked())[self kbSettingsRefresh];
+                else [self kbSettingsSaveError];
             }]];
         [self.window.rootViewController presentViewController:confirm animated:YES completion:nil];
     }

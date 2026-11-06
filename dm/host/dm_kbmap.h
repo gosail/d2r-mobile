@@ -6,7 +6,8 @@ enum { DM_KB_MOVE_UP=16, DM_KB_MOVE_LEFT=17, DM_KB_MOVE_DOWN=18, DM_KB_MOVE_RIGH
        DM_KB_SKILL1=48, DM_KB_SKILL8=55, DM_KB_UNBOUND=255 };
 int dm_kbmap_action(unsigned usage);
 int dm_kbmap_bind(unsigned usage,unsigned action);
-void dm_kbmap_restore_defaults(void);
+int dm_kbmap_restore_defaults_checked(void); // false if no selected hero or foreign .key
+void dm_kbmap_restore_defaults(void); // compatibility wrapper
 void dm_kbmap_key_event(unsigned usage,int down);
 void dm_kbmap_reset(void);
 

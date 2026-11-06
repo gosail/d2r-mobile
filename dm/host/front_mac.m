@@ -433,7 +433,12 @@ static int g_mac_keyboard_mode;
         confirm.messageText=@"恢复此角色默认键位和鼠标按钮？";
         [confirm addButtonWithTitle:@"恢复"];[confirm addButtonWithTitle:@"取消"];
         if([confirm runModal]==NSAlertFirstButtonReturn) {
-            dm_kbmap_restore_defaults();[self refresh];
+            if(dm_kbmap_restore_defaults_checked())[self refresh];
+            else {
+                NSAlert *fail=[NSAlert new];fail.messageText=@"无法保存角色 .key";
+                fail.informativeText=@"请先选择角色或检查 .key 文件是否使用其他格式。";
+                [fail addButtonWithTitle:@"确定"];[fail runModal];
+            }
         }
         return;
     }

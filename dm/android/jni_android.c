@@ -479,6 +479,9 @@ JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbBind(JNIEnv
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbDefaults(JNIEnv *e,jclass c) {
     (void)e;(void)c;dm_kbmap_restore_defaults();
 }
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbResetChecked(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_kbmap_restore_defaults_checked()!=0;
+}
 
 // Physical keyboard is separate from the touch and gamepad input channels.
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardEvent(JNIEnv *env,jclass cls,jint usage,jboolean down) {

@@ -197,13 +197,23 @@ int dm_kbmap_bind(unsigned usage,unsigned action) {
     pthread_mutex_unlock(&km_mu);
     dm_fs_profile_unlock();return ok;
 }
-void dm_kbmap_restore_defaults(void) {
+int dm_kbmap_restore_defaults_checked(void) {
     dm_fs_profile_lock();
     pthread_mutex_lock(&km_mu);load_locked();
-    memcpy(map,def,256);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;save_locked();
+    unsigned char previous[256],previous_mouse[3];
+    memcpy(previous,map,sizeof previous);
+    memcpy(previous_mouse,mouse_map,sizeof previous_mouse);
+    memcpy(map,def,256);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;
+    int ok=save_locked();
+    if(!ok) {
+        memcpy(map,previous,sizeof previous);
+        memcpy(mouse_map,previous_mouse,sizeof previous_mouse);
+    }
     pthread_mutex_unlock(&km_mu);
     dm_fs_profile_unlock();
+    return ok;
 }
+void dm_kbmap_restore_defaults(void) { (void)dm_kbmap_restore_defaults_checked(); }
 void dm_kbmap_reset(void) {
     pthread_mutex_lock(&km_mu);memset(down,0,256);memset(active,0,256);
     pthread_mutex_unlock(&km_mu);dm_kb_clear();

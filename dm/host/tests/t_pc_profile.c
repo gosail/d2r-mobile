@@ -92,7 +92,7 @@ int main(void) {
     assert(dm_pc_profile_get(14,0,&vk)==DM_KEYFILE_OK && vk=='1');
     assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
     assert(dm_pc_profile_get(49,0,&vk)==DM_KEYFILE_OK && vk==0xbb);
-    assert(dm_pc_profile_reset_resurrected()==DM_KEYFILE_OK);
+    game_seed("Alice",1);
     assert(dm_pc_profile_action_for_hid(0x1e,&command,&slot)==DM_KEYFILE_OK);
     assert(command==14 && slot==0);
 
@@ -142,7 +142,7 @@ int main(void) {
     assert(dm_pc_profile_select("Bob")==DM_KEYFILE_OK);
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     assert(dm_pc_profile_get(14,0,&vk)==DM_KEYFILE_OK && vk==0x70);
     assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk=='1');
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
@@ -153,13 +153,13 @@ int main(void) {
     assert(dm_pc_profile_bind(39,0,0x104,NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_pc_input_wheel(-1)==1); // wheel-down remapped to previous
     assert(dm_pc_input_wheel(1)==0); // original wheel-up now unbound
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     assert(dm_pc_profile_bind(39,0,'K',NULL,NULL)==DM_KEYFILE_OK);
     dm_pc_input_event(0x0e,1);
     assert(game_right_y==32767);
     dm_pc_input_event(0x0e,0);
     assert(game_right_y==0);
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     assert(dm_pc_input_supported_action(7) && dm_pc_input_supported_action(14));
     assert(!dm_pc_input_supported_action(49) && !dm_pc_input_supported_action(50));
     dm_pc_input_event(0x3a,1); // F1 uses native skill 1 -> Switch A
@@ -178,7 +178,7 @@ int main(void) {
     assert(dm_pc_profile_bind(7,1,0xffff,NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_pc_input_mouse_special(0x100)==0);
     assert(map_toggles==map_before+1);
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     dm_pc_input_event(0x2b,1); // Tab map: one toggle per keydown
     dm_pc_input_event(0x2b,1);assert(map_toggles==map_before+2);
     dm_pc_input_event(0x2b,0);assert(game_buttons==0);
@@ -194,12 +194,12 @@ int main(void) {
     dm_pc_input_event(0x3a,0);
     dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_B);
     dm_pc_input_event(0x0e,0);assert(game_buttons==0);
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     assert(dm_pc_profile_bind(14,0,'K',NULL,NULL)==DM_KEYFILE_OK);
     dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_B);
     dm_pc_input_reset();assert(game_buttons==0);
     assert(dm_pc_input_latched_command(0x0e)==-1);
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     dm_pc_input_event(0x1a,1); // W: original guest weapon-swap action
     dm_pc_input_guest_step();assert(panel_events[44]==1);
     dm_pc_input_event(0x1a,0);
@@ -218,7 +218,7 @@ int main(void) {
     dm_pc_input_event(0x0e,1);
     dm_pc_input_reset(); // character change/focus loss removes queued UI work
     dm_pc_input_guest_step();assert(panel_events[1]==2);
-    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    game_seed("Alice",0);
     char backup[1220];snprintf(backup,sizeof backup,"%s.bak",alice);
     assert(access(backup,F_OK)==0);
     // Existing unknown format is read but never overwritten or converted.

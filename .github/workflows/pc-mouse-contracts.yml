@@ -28,12 +28,18 @@ jobs:
           python -m unittest discover -v -s dm/ios/tests -p test_keyboard_bindings.py
       - name: Compile and run portable keyboard mapping unit test
         run: |
-          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/dm_pc_profile.c dm/host/dm_keyfile.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
           /tmp/dm_test_keyboard
       - name: Parse, edit and atomically round-trip native .key records (synthetic fixtures)
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -I dm/host dm/host/dm_keyfile.c dm/host/tests/t_keyfile.c -o /tmp/dm_test_keyfile
           /tmp/dm_test_keyfile
+      - name: Native character key profile and HID/VK tests
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host \
+            dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/tests/t_pc_profile.c \
+            -o /tmp/dm_test_pc_profile
+          /tmp/dm_test_pc_profile
       - name: Compile Android keyboard UI adapters against Android SDK
         run: |
           jar=$(find "${ANDROID_HOME}/platforms" -name android.jar | sort -V | tail -1)
@@ -67,7 +73,7 @@ jobs:
         run: |
           xcrun clang -std=gnu11 -fsyntax-only -Werror=implicit-function-declaration \
             -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include \
-            dm/host/dm_kbmap.c dm/host/dm_pages.c dm/host/dm_cursor.c dm/host/hle_fs.c
+            dm/host/dm_kbmap.c dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pages.c dm/host/dm_cursor.c dm/host/hle_fs.c
       - name: iPadOS UIKit mouse overlay syntax
         run: |
           xcrun --sdk iphoneos clang -arch arm64 -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -miphoneos-version-min=16.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/ios/Sources/front_ios.m

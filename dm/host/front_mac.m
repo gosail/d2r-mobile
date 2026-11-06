@@ -412,7 +412,7 @@ static void mac_mouse_physical(NSView *view,NSEvent *event,int physical,int phas
             mac_mouse_primary_owner=physical;mac_primary_pointer(view,event,0);
         } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,1);
         else if(mac_mouse_role[physical]==2) {
-            int source=dm_kbmap_pc_mode()?dm_pc_profile_file_status():0;
+            int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
             if(source==1)(void)dm_pc_input_mouse_special(0x100);
             else if(source==0)dm_world_mouse_map_toggle();
         }
@@ -824,7 +824,7 @@ void front_run(void (*guest)(void)) {
                 if (mac_controls_hit(v,e)) return e; // Native NSScrollView scrolls.
                 static int gen; int my = ++gen;
                 int dir=e.scrollingDeltaY>0?1:-1;
-                int source=dm_kbmap_pc_mode()?dm_pc_profile_file_status():0;
+                int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
                 g_wheel=source==1?dm_pc_input_wheel(dir):source==0?dir:0;
                 push();
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (my == gen) { g_wheel = 0; push(); } });

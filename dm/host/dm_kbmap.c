@@ -25,7 +25,7 @@ void dm_kb_clear(void);
 // Serialize profile writes with h_fs_Commit's directory swap.
 void dm_fs_profile_lock(void),dm_fs_profile_unlock(void);
 static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
-static unsigned char map[256],def[256],down[256],active[256];
+static unsigned char map[256],def[256],down[256],active[256],native_held[256];
 static unsigned char mouse_map[3]={0,1,2};
 static int inited,loaded,foreign_format;
 static int native_pc_mode=1; // new character: PC key semantics; legacy .kbm remains opt-in
@@ -84,6 +84,7 @@ void dm_kbmap_select_character(const char *name) {
         snprintf(hero,sizeof hero,"%s",name);
         memcpy(map,def,sizeof map);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;
         memset(down,0,sizeof down);memset(active,0,sizeof active);
+        memset(native_held,0,sizeof native_held);
         loaded=foreign_format=0;native_pc_mode=1;
         // load on first read, so a newly mounted save is visible.
         dm_kb_clear();
@@ -235,16 +236,47 @@ int dm_kbmap_restore_defaults_checked(void) {
 void dm_kbmap_restore_defaults(void) { (void)dm_kbmap_restore_defaults_checked(); }
 void dm_kbmap_reset(void) {
     pthread_mutex_lock(&km_mu);memset(down,0,256);memset(active,0,256);
+    memset(native_held,0,sizeof native_held);
     pthread_mutex_unlock(&km_mu);dm_pc_input_reset();dm_kb_clear();
 }
 void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;
-    pthread_mutex_lock(&km_mu);load_locked();
-    if(native_pc_mode) {
-        pthread_mutex_unlock(&km_mu);
-        dm_pc_input_event(usage,pressed);
-        return;
+    pthread_mutex_lock(&km_mu);
+    load_locked();
+    int pc_mode=native_pc_mode;
+    int was_native=native_held[usage],was_legacy=down[usage];
+    int any_native=0,any_legacy=0;
+    if(pc_mode)for(unsigned i=0;i<256;i++) {
+        any_native|=native_held[i];any_legacy|=down[i];
     }
+    pthread_mutex_unlock(&km_mu);
+    if(pc_mode) {
+        int use_native=was_native;
+        if(pressed && !was_native && !was_legacy) {
+            if(any_native)use_native=1;
+            else if(any_legacy)use_native=0;
+            else {
+                // The original game may not yet have created the character
+                // .key (main menu, loading or new character). Keep keyboard
+                // navigation functional using the existing controller bridge
+                // until the native guest profile actually appears.
+                uint16_t probe=0;
+                int rc=dm_pc_profile_get(0,0,&probe);
+                if(rc!=DM_KEYFILE_OK && rc!=DM_KEYFILE_NOT_FOUND &&
+                   rc!=DM_KEYFILE_IO)return; // unknown native format: fail closed
+                use_native=rc==DM_KEYFILE_OK;
+            }
+        }
+        if(use_native) {
+            pthread_mutex_lock(&km_mu);
+            native_held[usage]=(unsigned char)!!pressed;
+            pthread_mutex_unlock(&km_mu);
+            dm_pc_input_event(usage,pressed);
+            return;
+        }
+        if(!pressed && !was_legacy)return;
+    }
+    pthread_mutex_lock(&km_mu);load_locked();
     if((int)down[usage]==!!pressed) { pthread_mutex_unlock(&km_mu);return; }
     if(pressed) {
         unsigned a=map[usage];

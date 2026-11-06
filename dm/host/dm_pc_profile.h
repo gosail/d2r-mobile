@@ -12,6 +12,9 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot);
 int dm_pc_profile_action_for_hid(unsigned usage,uint32_t *id,unsigned *slot);
 void dm_pc_profile_clear(void);
+// 1: supported game-created .key; 0: not created/mounted; -1: invalid or
+// unsupported format. Used only for fallback before the guest creates it.
+int dm_pc_profile_file_status(void);
 
 // Portable, layout-independent HID usage -> Win32 VK for this .key variant.
 // Does not convert to ASCII (e.g. top-row '1' is VK_1 regardless of Shift).

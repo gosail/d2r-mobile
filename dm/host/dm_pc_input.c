@@ -9,6 +9,7 @@
 
 static pthread_mutex_t input_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char down[256],command[256];
+static uint64_t held_mask[256]; // latched at key-down; UI changes cannot reinterpret a held Escape
 enum { UNMAPPED=255 };
 static const uint64_t slot_buttons[6] = {
     DM_BTN_A,DM_BTN_B,DM_BTN_Y,DM_BTN_X,DM_BTN_R,DM_BTN_ZR
@@ -43,14 +44,15 @@ static uint64_t command_bits(unsigned id) {
 }
 static void publish_locked(void) {
     uint64_t bits=0;
-    for(unsigned i=0;i<256;i++)if(down[i] && command[i]!=UNMAPPED)
-        bits|=command_bits(command[i]);
+    for(unsigned i=0;i<256;i++)if(down[i])
+        bits|=held_mask[i];
     dm_kb_set(bits,0,0,0,0);
 }
 void dm_pc_input_reset(void) {
     pthread_mutex_lock(&input_mu);
     memset(down,0,sizeof down);
     memset(command,UNMAPPED,sizeof command);
+    memset(held_mask,0,sizeof held_mask);
     dm_kb_set(0,0,0,0,0);
     pthread_mutex_unlock(&input_mu);
 }
@@ -72,10 +74,12 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         down[hid]=1;
         command[hid]=rc==0 && id<=56 && dm_pc_input_supported_action(id)?
             (unsigned char)id:UNMAPPED;
+        held_mask[hid]=command[hid]==UNMAPPED?0:command_bits(command[hid]);
         if(command[hid]==7)dm_world_mouse_map_toggle();
     } else {
         down[hid]=0;
         command[hid]=UNMAPPED;
+        held_mask[hid]=0;
     }
     publish_locked();
     pthread_mutex_unlock(&input_mu);

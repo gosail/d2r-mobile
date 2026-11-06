@@ -55,6 +55,7 @@ SRC=\
 	dm_i18n.c \
 	dm_kbmap.c \
 	dm_keyfile.c \
+	dm_pc_profile.c \
 	dm_kills.c \
 	dm_lootfilter.c \
 	dm_movie_decode.c \

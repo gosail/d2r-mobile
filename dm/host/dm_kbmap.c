@@ -95,7 +95,7 @@ static void load_locked(void) {
             FILE *candidate=fopen(previous,"rb");
             if(candidate) {
                 if(fgets(mark,sizeof mark,candidate) &&
-                   !strcmp(mark,"D2RMobileKeyboard=1\n")) f=candidate;
+                   !strcmp(mark,"D2RMobileKeyboard=1\n")) {rewind(candidate);f=candidate;}
                 else fclose(candidate);
             }
         }
@@ -109,7 +109,7 @@ static void load_locked(void) {
     }
     char line[128];
     if(!fgets(line,sizeof line,f) || strcmp(line,"D2RMobileKeyboard=1\n")) {
-        // A pre-existing native/PC .key belongs to its owner; never truncate.
+        // An unrecognized private .kbm belongs to its owner; refuse to overwrite.
         foreign_format=1;fclose(f);return;
     }
     while(fgets(line,sizeof line,f)) {

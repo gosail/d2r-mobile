@@ -1164,6 +1164,7 @@ void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at th
     // Process external mouse before resolving its queued world click.
     dm_external_mouse_step();
 #endif
+    { void dm_pc_input_guest_step(void); dm_pc_input_guest_step(); }
     w_tap_step(b);
     // Middle click acts on the game thread only. Ignore in modal panels.
     if (atomic_exchange(&g_mouse_map_toggle,0)&1u) {

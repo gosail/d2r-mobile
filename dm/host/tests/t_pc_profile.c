@@ -11,7 +11,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-static char root[1024], save_dir[1100];
+static char root[1024], save_dir[1100],work_dir[1100];
 static uint64_t game_buttons;
 static int32_t game_right_y;
 static int map_toggles,panel_open;
@@ -29,12 +29,27 @@ int dm_uiscreen_panel(void) {return panel_open;}
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}
 const char *dm_save_commitdir(void) {return save_dir;}
+const char *dm_save_workdir(void) {return work_dir;}
 static void dir(const char *name) {
     char a[1200];snprintf(a,sizeof a,"%s/%s",save_dir,name);
     assert(!mkdir(a,0700));
+    snprintf(a,sizeof a,"%s/%s",work_dir,name);
+    assert(!mkdir(a,0700));
 }
 static void path(const char *name,char out[1200]) {
-    snprintf(out,1200,"%s/%s/%s.key",save_dir,name,name);
+    snprintf(out,1200,"%s/%s/%s.key",work_dir,name,name);
+}
+// Simulated guest-generated file in the active save.work directory.
+static void game_seed(const char *name,int resurrected) {
+    dm_keyfile tmp={0};
+    int rc=resurrected?dm_keyfile_new_resurrected(&tmp):
+        dm_keyfile_new_legacy(&tmp);
+    assert(rc==DM_KEYFILE_OK);
+    char fn[1200];path(name,fn);
+    size_t n=0;const uint8_t *bytes=dm_keyfile_data(&tmp,&n);
+    FILE *out=fopen(fn,"wb");assert(out);
+    assert(fwrite(bytes,1,n,out)==n);assert(!fclose(out));
+    dm_keyfile_free(&tmp);
 }
 static void bytes_at(const char *name,uint8_t *dst,size_t len) {
     FILE *in=fopen(name,"rb");assert(in);
@@ -43,12 +58,21 @@ static void bytes_at(const char *name,uint8_t *dst,size_t len) {
 int main(void) {
     strcpy(root,"/tmp/dmpcXXXXXX");assert(mkdtemp(root));
     snprintf(save_dir,sizeof save_dir,"%s/save",root);assert(!mkdir(save_dir,0700));
+    snprintf(work_dir,sizeof work_dir,"%s/save.work",root);assert(!mkdir(work_dir,0700));
     dir("Alice");dir("Bob");dir("Eve");
     assert(dm_pc_profile_select("LateMount")==DM_KEYFILE_OK);
     uint16_t late_vk=0;
-    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_IO);
-    dir("LateMount"); // previously cached IO would remain invalid forever
+    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_NOT_FOUND);
+    dir("LateMount");
+    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_NOT_FOUND);
+    // Only the guest can generate the original native profile.
+    game_seed("LateMount",1);
     assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_OK && late_vk=='A');
+    char committed_late[1200];
+    snprintf(committed_late,sizeof committed_late,"%s/LateMount/LateMount.key",save_dir);
+    assert(access(committed_late,F_OK)!=0); // uncommitted game file stays in worktree
+    game_seed("Alice",1);
+    game_seed("Bob",0);
 
     assert(dm_pc_vk_from_hid(0x04)=='A');
     assert(dm_pc_vk_from_hid(0x1e)=='1');
@@ -73,6 +97,9 @@ int main(void) {
     assert(command==14 && slot==0);
 
     char alice[1200];path("Alice",alice);
+    char alice_commit[1200];snprintf(alice_commit,sizeof alice_commit,
+        "%s/Alice/Alice.key",save_dir);
+    assert(access(alice_commit,F_OK)!=0);
     uint8_t original[1142],changed[1142];bytes_at(alice,original,sizeof original);
     assert(original[0]==0x25 && original[1]==0);
     assert(dm_pc_profile_action_for_hid(0x04,&command,&slot)==DM_KEYFILE_OK);
@@ -82,12 +109,28 @@ int main(void) {
     assert(dm_pc_profile_bind(1,1,0xffff,NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='K');
+    assert(access(alice_commit,F_OK)!=0); // adapter writes only save.work
     bytes_at(alice,changed,sizeof changed);
     size_t diff=0;
     for(size_t i=0;i<sizeof original;i++)if(original[i]!=changed[i])diff++;
     assert(diff==1); // 'B' -> 'K': single low byte in secondary VK slot
     assert(dm_pc_profile_action_for_hid(0x0e,&command,&slot)==DM_KEYFILE_OK);
     assert(command==1 && slot==1);
+    // The guest may rewrite its original .key without notifying our bridge.
+    // Lookups must observe those changes on the next call (no stale cache).
+    { FILE *guest=fopen(alice,"wb");assert(guest);
+      assert(fwrite(original,1,sizeof original,guest)==sizeof original);
+      assert(!fclose(guest)); }
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
+    assert(dm_pc_profile_action_for_hid(0x0e,&command,&slot)==DM_KEYFILE_NOT_FOUND);
+    assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_OK);
+    { FILE *in=fopen(alice,"rb"),*out=fopen(alice_commit,"wb");
+      assert(in && out);uint8_t buf[2048];size_t n;
+      while((n=fread(buf,1,sizeof buf,in)))assert(fwrite(buf,1,n,out)==n);
+      assert(!ferror(in));assert(!fclose(in));assert(!fclose(out)); }
+    // After Commit, the original game and adapter see the same binary.
+    bytes_at(alice_commit,changed,sizeof changed);
+    assert(changed[2+1*10+4]=='K');
     dm_pc_profile_clear();
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='K');
@@ -189,11 +232,14 @@ int main(void) {
     char late[1200];path("LateMount",late);
     assert(!unlink(late));
 
-    char d[1200];snprintf(d,sizeof d,"%s/Alice",save_dir);assert(!rmdir(d));
-    snprintf(d,sizeof d,"%s/Bob",save_dir);assert(!rmdir(d));
-    snprintf(d,sizeof d,"%s/Eve",save_dir);assert(!rmdir(d));
-    snprintf(d,sizeof d,"%s/LateMount",save_dir);assert(!rmdir(d));
-    assert(!rmdir(save_dir));assert(!rmdir(root));
+    unlink(alice_commit);
+    char d[1200];
+    const char *names[]={"Alice","Bob","Eve","LateMount"};
+    for(unsigned i=0;i<4;i++) {
+        snprintf(d,sizeof d,"%s/%s",work_dir,names[i]);assert(!rmdir(d));
+        snprintf(d,sizeof d,"%s/%s",save_dir,names[i]);assert(!rmdir(d));
+    }
+    assert(!rmdir(work_dir));assert(!rmdir(save_dir));assert(!rmdir(root));
     puts("native character keyboard profiles: PASS");
     return 0;
 }

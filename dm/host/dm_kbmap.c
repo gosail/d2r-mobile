@@ -256,16 +256,12 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
         if(pressed && !was_native && !was_legacy) {
             if(any_native)use_native=1;
             else if(any_legacy)use_native=0;
+            else if(!dm_uiscreen_ingame())use_native=0; // main menu/character select
             else {
-                // The original game may not yet have created the character
-                // .key (main menu, loading or new character). Keep keyboard
-                // navigation functional using the existing controller bridge
-                // until the native guest profile actually appears.
-                uint16_t probe=0;
-                int rc=dm_pc_profile_get(0,0,&probe);
-                if(rc!=DM_KEYFILE_OK && rc!=DM_KEYFILE_NOT_FOUND &&
-                   rc!=DM_KEYFILE_IO)return; // unknown native format: fail closed
-                use_native=rc==DM_KEYFILE_OK;
+                // The guest creates the .key only for a real character. An
+                // unsupported file still permits safe controller-style
+                // navigation; the native .key editor stays read-only.
+                use_native=dm_pc_profile_file_status()==1;
             }
         }
         if(use_native) {

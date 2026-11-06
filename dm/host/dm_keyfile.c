@@ -156,14 +156,18 @@ int dm_keyfile_new_resurrected(dm_keyfile *out) {
 }
 int dm_keyfile_lookup_vk(const dm_keyfile *f,uint16_t vk,uint32_t *id,unsigned *slot) {
     if(!f || !f->raw || !id || !slot || vk==0xffff)return DM_KEYFILE_INVALID;
+    int found=0;uint32_t command=0;unsigned binding=0;
     for(size_t i=0;i<f->records;i++) {
         const uint8_t *p=f->raw+HEADER_BYTES+i*RECORD_BYTES;
         if(le16(p+4)==vk) {
-            *id=le32(p);*slot=le32(p+6)==1 ? 0u:1u;
-            return DM_KEYFILE_OK;
+            if(found)return DM_KEYFILE_CONFLICT; // do not dispatch ambiguous imported files
+            command=le32(p);binding=le32(p+6)==1?0u:1u;
+            found=1;
         }
     }
-    return DM_KEYFILE_NOT_FOUND;
+    if(!found)return DM_KEYFILE_NOT_FOUND;
+    *id=command;*slot=binding;
+    return DM_KEYFILE_OK;
 }
 int dm_keyfile_bind_checked(dm_keyfile *f,uint32_t id,unsigned slot,uint16_t vk,
                             uint32_t *conflicting_id,unsigned *conflicting_slot) {

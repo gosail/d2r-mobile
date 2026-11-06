@@ -82,6 +82,33 @@ int main(void) {
     put16(invalid+2+6,2);assert(dm_keyfile_parse(&g,invalid,LEN)==DM_KEYFILE_UNSUPPORTED);
     put16(invalid+2+6,1);
     put16(invalid+2+10+6,1);assert(dm_keyfile_parse(&g,invalid,LEN)==DM_KEYFILE_INVALID);
+    // Full DWORD slot: setting the high word must be rejected, not masked.
+    memcpy(invalid,original,LEN);
+    invalid[2+8]=1;
+    assert(dm_keyfile_parse(&g,invalid,LEN)==DM_KEYFILE_UNSUPPORTED);
+    dm_keyfile def={0};
+    assert(dm_keyfile_new_legacy(&def)==DM_KEYFILE_OK);
+    assert(def.records==114 && def.size==1142);
+    assert(!dm_keyfile_dirty(&def));
+    uint16_t vk=0;
+    assert(dm_keyfile_get(&def,0,0,&vk)==DM_KEYFILE_OK && vk==0x41);
+    assert(dm_keyfile_get(&def,0,1,&vk)==DM_KEYFILE_OK && vk==0x43);
+    assert(dm_keyfile_get(&def,1,0,&vk)==DM_KEYFILE_OK && vk==0x49);
+    assert(dm_keyfile_get(&def,14,0,&vk)==DM_KEYFILE_OK && vk==0x70);
+    assert(dm_keyfile_get(&def,21,0,&vk)==DM_KEYFILE_OK && vk==0x77);
+    assert(dm_keyfile_get(&def,23,0,&vk)==DM_KEYFILE_OK && vk==0x31);
+    assert(dm_keyfile_get(&def,35,1,&vk)==DM_KEYFILE_OK && vk==0x102);
+    assert(dm_keyfile_get(&def,46,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
+    uint32_t found=999,conflict=999;unsigned slot=99,conflict_slot=99;
+    assert(dm_keyfile_lookup_vk(&def,0x70,&found,&slot)==DM_KEYFILE_OK);
+    assert(found==14 && slot==0);
+    assert(dm_keyfile_bind_checked(&def,1,1,0x70,&conflict,&conflict_slot)==DM_KEYFILE_CONFLICT);
+    assert(conflict==14 && conflict_slot==0);
+    assert(dm_keyfile_bind_checked(&def,1,1,0xffff,NULL,NULL)==DM_KEYFILE_OK);
+    assert(dm_keyfile_bind_checked(&def,14,1,0x104,NULL,NULL)==DM_KEYFILE_CONFLICT);
+    assert(dm_keyfile_bind_checked(&def,14,1,0x80,NULL,NULL)==DM_KEYFILE_OK);
+    assert(dm_keyfile_lookup_vk(&def,0x80,&found,&slot)==DM_KEYFILE_OK && found==14 && slot==1);
+    dm_keyfile_free(&def);
     // Variable record counts accepted when valid pairs remain intact.
     assert(dm_keyfile_parse(&g,original,LEN-20)==DM_KEYFILE_OK);
     dm_keyfile_free(&g);

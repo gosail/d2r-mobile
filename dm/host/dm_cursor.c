@@ -3221,6 +3221,11 @@ static void fe_send(const char *cat, const char *act, const char *arg) {
 // keyboard UI threads and execute here only when the guest world is active.
 void dm_ui_pc_toggle_panel(unsigned command_id) {
     if(!dm_uiscreen_ingame())return;
+    if(command_id==44) {
+        void dm_swapskill_manual_request(void);
+        dm_swapskill_manual_request();
+        return;
+    }
     const char *panel=NULL;
     switch(command_id) {
     case 0:panel="CharacterStatsPanel";break;

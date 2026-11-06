@@ -375,7 +375,7 @@ static NSString *kbActionLabel(int action) {
     NSArray<NSString *> *roles=@[@"主点击 / Primary",@"次要使用 / Secondary",@"切换地图 / Map"];
     CGFloat w=_kbBindingScroll.bounds.size.width, rowHeight=46, y=0;
     if(w<10)return;
-    for(NSUInteger i=0;i<keys.count+5;i++) {
+    for(NSUInteger i=0;i<keys.count+6;i++) {
         UIButton *row=[UIButton buttonWithType:UIButtonTypeSystem];
         row.frame=CGRectMake(8,y+3,w-16,rowHeight-6);
         row.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
@@ -389,9 +389,12 @@ static NSString *kbActionLabel(int action) {
             int role=dm_kbmap_mouse_action(phys);
             title=[NSString stringWithFormat:@"%@     →     %@",mouse[phys],roles[role>=0 && role<3?role:0]];
         } else if(i==keys.count+3)title=dm_lang_zh()?@"恢复此角色的默认键鼠配置":@"Reset this character's keyboard/mouse";
-        else title=g_pc_capture_action>=0?
+        else if(i==keys.count+4)title=g_pc_capture_action>=0?
             [NSString stringWithFormat:@"PC .key · cmd %d (%@) · 请按物理键",g_pc_capture_action,g_pc_capture_slot?@"Secondary":@"Primary"]:
             @"PC .key · 57 native commands · Primary / Secondary";
+        else title=dm_kbmap_pc_mode()?
+            @"Input mode: Native PC .key (tap for controller emulation)":
+            @"Input mode: Legacy HID emulation (tap for native PC)";
         [row setTitle:title forState:UIControlStateNormal];
         [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         row.tag=(NSInteger)i;
@@ -414,7 +417,10 @@ static NSString *kbActionLabel(int action) {
     if(i<(NSInteger)labels.count)[self kbChooseUsage:usages[i] label:labels[i]];
     else if(i<(NSInteger)labels.count+3)[self kbMouseChoose:(unsigned)(i-labels.count)];
     else if(i==(NSInteger)labels.count+4)[self kbPcOpen];
-    else {
+    else if(i==(NSInteger)labels.count+5) {
+        if(dm_kbmap_set_pc_mode(!dm_kbmap_pc_mode()))[self kbSettingsRefresh];
+        else [self kbSettingsSaveError];
+    } else {
         UIAlertController *confirm=[UIAlertController alertControllerWithTitle:
             (dm_lang_zh()?@"恢复默认？":@"Restore defaults?")
             message:nil preferredStyle:UIAlertControllerStyleAlert];

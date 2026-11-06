@@ -108,6 +108,8 @@ int main(void) {
     assert(dm_keyfile_bind_checked(&def,14,1,0x104,NULL,NULL)==DM_KEYFILE_CONFLICT);
     assert(dm_keyfile_bind_checked(&def,14,1,0x80,NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_keyfile_lookup_vk(&def,0x80,&found,&slot)==DM_KEYFILE_OK && found==14 && slot==1);
+    assert(dm_keyfile_set(&def,1,1,'A')==DM_KEYFILE_OK); // simulate a foreign duplicate
+    assert(dm_keyfile_lookup_vk(&def,'A',&found,&slot)==DM_KEYFILE_CONFLICT);
     dm_keyfile_free(&def);
     dm_keyfile modern={0};
     assert(dm_keyfile_new_resurrected(&modern)==DM_KEYFILE_OK);

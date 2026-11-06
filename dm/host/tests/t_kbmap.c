@@ -3,6 +3,7 @@
 #include "dm_input.h"
 #include "dm_kbmap.h"
 #include "dm_pc_input.h"
+#include "dm_keyfile.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdint.h>

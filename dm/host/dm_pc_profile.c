@@ -39,12 +39,23 @@ void dm_pc_profile_clear(void) {
 int dm_pc_profile_select(const char *name) {
     if(!valid_name(name))return DM_KEYFILE_INVALID;
     pthread_mutex_lock(&pc_mu);
-    if(strcmp(selected,name)) {
+    int changed=strcmp(selected,name)!=0;
+    if(changed) {
         dm_keyfile_free(&profile);
         snprintf(selected,sizeof selected,"%s",name);
         loaded=0;load_result=DM_KEYFILE_NOT_FOUND;
     }
     pthread_mutex_unlock(&pc_mu);
+    if(changed) {
+        // Create a missing native .key at character selection rather than
+        // waiting for the first key press. An unavailable save directory is
+        // retryable in read_locked once it is mounted.
+        uint16_t ignored=0;
+        int rc=dm_pc_profile_get(0,0,&ignored);
+        if(rc!=DM_KEYFILE_OK && rc!=DM_KEYFILE_IO &&
+           rc!=DM_KEYFILE_NOT_FOUND && rc!=DM_KEYFILE_UNSUPPORTED)
+            return rc;
+    }
     return DM_KEYFILE_OK;
 }
 static int read_locked(void) {

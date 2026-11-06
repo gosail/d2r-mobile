@@ -85,7 +85,8 @@ jobs:
       - name: Compile and exercise native save-file writer leases and rollback
         run: |
           xcrun clang -std=gnu11 -pthread -I dm/host -I dm/gfx/nvn/include \
-            dm/host/tests/t_fs.c dm/host/tests/t_fs_stub.c -o /tmp/dm_test_fs
+            dm/host/tests/t_fs.c dm/host/tests/t_fs_stub.c \
+            dm/host/dm_pc_profile.c dm/host/dm_keyfile.c -o /tmp/dm_test_fs
           /tmp/dm_test_fs
       - name: iPadOS UIKit mouse overlay syntax
         run: |

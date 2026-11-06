@@ -135,7 +135,7 @@ void dm_external_mouse_step(void) {
             mouse_hover_valid=0; dm_world_hover_end(); continue;
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
-            int source=dm_kbmap_pc_mode()?dm_pc_profile_file_status():0;
+            int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
             if(source==1)(void)dm_pc_input_mouse_special(0x100);
             else if(source==0)dm_world_mouse_map_toggle();
             continue;
@@ -154,7 +154,7 @@ void dm_external_mouse_step(void) {
         if (e->op == DM_MOUSE_RIGHT_UP) { mouse_right_item=0; atomic_store(&mouse_right,0); continue; }
         if (e->op == DM_MOUSE_WHEEL) {
             if (e->arg) {
-                int source=dm_kbmap_pc_mode()?dm_pc_profile_file_status():0;
+                int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
                 int direction=source==1?dm_pc_input_wheel(e->arg):
                     source==0?(e->arg>0?1:-1):0;
                 atomic_store(&mouse_scroll,direction);

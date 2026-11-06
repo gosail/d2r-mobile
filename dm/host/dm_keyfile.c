@@ -228,13 +228,64 @@ static int backup_once(const char *path,const dm_keyfile *f) {
     free(backup);
     return ok;
 }
+// Edit guest-owned files in place inside the transactional save.work tree.
+// Replacing the inode by rename would discard nn::fs guest-name xattrs and
+// detach any still-open guest file handles. Only native VK fields are mutable.
+// The original h_fs_Commit atomically promotes this whole worktree.
+static int patch_guest_keyfile(dm_keyfile *f,const char *path) {
+    for(size_t i=0;i<f->size;i++)if(f->raw[i]!=f->baseline[i]) {
+        if(i<HEADER_BYTES)return DM_KEYFILE_UNSUPPORTED;
+        size_t field=(i-HEADER_BYTES)%RECORD_BYTES;
+        if(field!=4 && field!=5)return DM_KEYFILE_UNSUPPORTED;
+    }
+    int fd=open(path,O_RDWR
+#ifdef O_NOFOLLOW
+        |O_NOFOLLOW
+#endif
+    );
+    if(fd<0)return DM_KEYFILE_IO;
+    struct stat st;
+    if(fstat(fd,&st) || !S_ISREG(st.st_mode) || st.st_size<0 ||
+       (uintmax_t)st.st_size!=f->size){close(fd);return DM_KEYFILE_CONFLICT;}
+    uint8_t check[4096];
+    size_t offset=0;int ok=1;
+    while(offset<f->size) {
+        size_t take=f->size-offset<sizeof check?f->size-offset:sizeof check;
+        ssize_t n=pread(fd,check,take,(off_t)offset);
+        if(n<0 && errno==EINTR)continue;
+        if(n!=(ssize_t)take || memcmp(check,f->baseline+offset,take)) {
+            ok=0;break;
+        }
+        offset+=take;
+    }
+    if(!ok){close(fd);return DM_KEYFILE_CONFLICT;}
+    if(!backup_once(path,f)){close(fd);return DM_KEYFILE_IO;}
+    for(size_t i=0;i<f->records;i++) {
+        size_t pos=HEADER_BYTES+i*RECORD_BYTES+4;
+        if(memcmp(f->raw+pos,f->baseline+pos,2)) {
+            size_t wrote=0;
+            while(wrote<2) {
+                ssize_t n=pwrite(fd,f->raw+pos+wrote,2-wrote,
+                                 (off_t)(pos+wrote));
+                if(n<0 && errno==EINTR)continue;
+                if(n<=0){close(fd);return DM_KEYFILE_IO;}
+                wrote+=(size_t)n;
+            }
+        }
+    }
+    if(fsync(fd) || close(fd))return DM_KEYFILE_IO;
+    memcpy(f->baseline,f->raw,f->size);
+    return DM_KEYFILE_OK;
+}
 int dm_keyfile_write_atomic(dm_keyfile *f,const char *path) {
     if(!f || !f->raw || !f->baseline || !path)return DM_KEYFILE_INVALID;
     int rv=validate(f->raw,f->size);if(rv)return rv;
     int exists=0;rv=matches_original(path,f,&exists);
     if(rv)return rv;
     if(exists && !dm_keyfile_dirty(f))return DM_KEYFILE_OK;
-    if(exists && !backup_once(path,f))return DM_KEYFILE_IO;
+    if(exists)return patch_guest_keyfile(f,path);
+    // Creation is used only by isolated test utilities; the live profile
+    // adapter refuses to create a native file before the guest does.
     size_t n=strlen(path);char *temp=malloc(n+12);
     if(!temp)return DM_KEYFILE_IO;
     memcpy(temp,path,n);memcpy(temp+n,".tmp.XXXXXX",12);

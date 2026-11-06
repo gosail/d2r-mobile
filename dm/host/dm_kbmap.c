@@ -164,92 +164,16 @@ static int save_to(const char *root) {
     return ok;
 }
 static int save_locked(void) {
-    const char *commit=dm_save_commitdir();
     const char *work=dm_save_workdir();
-    // Keep the live transaction copy and durable committed copy aligned.
-    // A game save clones work -> commit; pre-commit below refreshes the key.
-    if(work && strcmp(work,commit?commit:"") && !save_to(work))return 0;
-    return save_to(commit);
+    // Game save transaction owns persistence. Do not write to committed
+    // snapshots before the guest commits its active work tree.
+    if(work && *work)return save_to(work);
+    return save_to(dm_save_commitdir());
 }
-// The game's transactional save may replace the whole per-hero directory.
-// Preserve the committed native PC .key if the work tree does not already
-// contain one. Never replace a file produced/modified by the guest itself.
-// Link from a completed sibling temp file: O_EXCL-style no-clobber semantics.
-static void native_key_preserve_if_missing(const char *workdir) {
-    const char *commit=dm_save_commitdir();
-    if(!commit || !*commit || !workdir || !*workdir ||
-       !strcmp(commit,workdir) || !hero_name_ok(hero))return;
-    char source[1152],target[1152],temp[1180];
-    int a=snprintf(source,sizeof source,"%s/%s/%s.key",commit,hero,hero);
-    int b=snprintf(target,sizeof target,"%s/%s/%s.key",workdir,hero,hero);
-    if(a<=0 || (size_t)a>=sizeof source || b<=0 || (size_t)b>=sizeof target)return;
-    struct stat st;
-    if(lstat(source,&st) || !S_ISREG(st.st_mode) || st.st_size<0 ||
-       st.st_size>1024*1024)return;
-    if(!lstat(target,&st) || errno!=ENOENT)return;
-    FILE *in=fopen(source,"rb");if(!in)return;
-    if(snprintf(temp,sizeof temp,"%s.tmp.XXXXXX",target)<0) {fclose(in);return;}
-    int out=mkstemp(temp);
-    if(out<0){fclose(in);return;}
-    int ok=1;char buf[4096];size_t n;
-    while((n=fread(buf,1,sizeof buf,in))>0) {
-        size_t pos=0;
-        while(pos<n) {
-            ssize_t w=write(out,buf+pos,n-pos);
-            if(w<0 && errno==EINTR)continue;
-            if(w<=0){ok=0;break;}
-            pos+=(size_t)w;
-        }
-        if(!ok)break;
-    }
-    if(ferror(in))ok=0;
-    if(fclose(in))ok=0;
-    if(ok && fsync(out))ok=0;
-    if(close(out))ok=0;
-    if(ok) (void)link(temp,target); // EEXIST: the work tree is authoritative
-    unlink(temp);
-}
-void dm_kbmap_pre_commit(const char *workdir) {
-    if(!workdir)return;
-    pthread_mutex_lock(&km_mu);
-    // Do not synthesize a .key before the user explicitly edits bindings.
-    // Only sync a file that we own from the committed directory.
-    char fn[1152];
-    if(filename(fn,sizeof fn)) {
-        FILE *f=fopen(fn,"rb");
-        char buf[4096],header[128];
-        size_t n=0;
-        if(f && fgets(header,sizeof header,f) &&
-           !strcmp(header,"D2RMobileKeyboard=1\n")) {
-            size_t h=strlen(header);memcpy(buf,header,h);n=h;
-            n+=fread(buf+n,1,sizeof buf-n,f);
-            if(feof(f) && n<sizeof buf) {
-                char dst[1152],tmp[1176];
-                if(filename_at(dst,sizeof dst,workdir) &&
-                   snprintf(tmp,sizeof tmp,"%s.tmp",dst)>0) {
-                    // A guest-native .key may have appeared in the transaction
-                    // work tree. Preserve its bytes rather than destroying it.
-                    int safe=1;FILE *existing=fopen(dst,"rb");
-                    if(existing) {
-                        char mark[128];safe=fgets(mark,sizeof mark,existing) &&
-                            !strcmp(mark,"D2RMobileKeyboard=1\n");
-                        fclose(existing);
-                    }
-                    if(safe) {
-                        FILE *out=fopen(tmp,"wb");
-                        int ok=out && fwrite(buf,1,n,out)==n;
-                        if(out && fclose(out))ok=0;
-                        if(ok)ok=rename(tmp,dst)==0;
-                        if(!ok)remove(tmp);
-                    }
-                }
-            }
-        }
-        if(f)fclose(f);
-    }
-    native_key_preserve_if_missing(workdir);
-    pthread_mutex_unlock(&km_mu);
-}
+// .key and .ctl belong exclusively to the guest's original save pipeline.
+// There is no host pre-commit copy/recovery step for either file: the game
+// writes to save.work and h_fs_Commit atomically promotes the whole tree.
+void dm_kbmap_pre_commit(const char *workdir) { (void)workdir; }
 
 int dm_kbmap_pc_mode(void) {
     pthread_mutex_lock(&km_mu);

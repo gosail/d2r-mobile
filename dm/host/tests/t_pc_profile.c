@@ -124,8 +124,15 @@ int main(void) {
     dm_pc_input_event(0x1e,1); // potion column 1
     assert(game_buttons==DM_BTN_LEFT);
     dm_pc_input_event(0x1e,0);assert(game_buttons==0);
+    int map_before=map_toggles;
+    assert(dm_pc_input_mouse_special(0x100)==1);
+    assert(map_toggles==map_before+1);
+    assert(dm_pc_profile_bind(7,1,0xffff,NULL,NULL)==DM_KEYFILE_OK);
+    assert(dm_pc_input_mouse_special(0x100)==0);
+    assert(map_toggles==map_before+1);
+    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
     dm_pc_input_event(0x2b,1); // Tab map: one toggle per keydown
-    dm_pc_input_event(0x2b,1);assert(map_toggles==1);
+    dm_pc_input_event(0x2b,1);assert(map_toggles==map_before+2);
     dm_pc_input_event(0x2b,0);assert(game_buttons==0);
     dm_pc_input_event(0x29,1);
     assert(game_buttons==DM_BTN_PLUS);

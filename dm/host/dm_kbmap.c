@@ -68,8 +68,12 @@ static int filename_at(char *out,size_t n,const char *root) {
     int len=snprintf(out,n,"%s/%s/%s.kbm",root,hero,hero);
     return len>0 && (size_t)len<n;
 }
+static const char *active_save_dir(void) {
+    const char *work=dm_save_workdir();
+    return work && *work?work:dm_save_commitdir();
+}
 static int filename(char *out,size_t n) {
-    return filename_at(out,n,dm_save_commitdir());
+    return filename_at(out,n,active_save_dir());
 }
 void dm_kbmap_select_character(const char *name) {
     if(!hero_name_ok(name))return;
@@ -100,7 +104,7 @@ static void load_locked(void) {
     if(!f) {
         // Existing private .key belongs to an earlier D2R Mobile revision.
         // Probe only the exact text signature; never parse or touch native binary.
-        char previous[1152],mark[128];const char *root=dm_save_commitdir();
+        char previous[1152],mark[128];const char *root=active_save_dir();
         int n=root?snprintf(previous,sizeof previous,"%s/%s/%s.key",root,hero,hero):0;
         if(n>0 && (size_t)n<sizeof previous) {
             FILE *candidate=fopen(previous,"rb");

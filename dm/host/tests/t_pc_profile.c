@@ -130,7 +130,7 @@ int main(void) {
       assert(!ferror(in));assert(!fclose(in));assert(!fclose(out)); }
     // After Commit, the original game and adapter see the same binary.
     bytes_at(alice_commit,changed,sizeof changed);
-    assert(changed[2+1*10+4]=='K');
+    assert(changed[2+(1*2+1)*10+4]=='K');
     dm_pc_profile_clear();
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='K');

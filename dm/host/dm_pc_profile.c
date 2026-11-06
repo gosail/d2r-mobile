@@ -128,7 +128,10 @@ int dm_pc_profile_file_status(void) {
     pthread_mutex_unlock(&pc_mu);
     dm_fs_profile_unlock();
     if(rc==DM_KEYFILE_OK)return 1;
-    if(rc==DM_KEYFILE_NOT_FOUND || rc==DM_KEYFILE_IO)return 0;
+    // Only a genuinely absent file may use the temporary controller
+    // fallback. A present but unreadable .key is an error, not an invitation
+    // to silently dispatch different gamepad-style actions.
+    if(rc==DM_KEYFILE_NOT_FOUND)return 0;
     return -1;
 }
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {

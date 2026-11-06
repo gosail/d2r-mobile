@@ -489,6 +489,9 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcBind(JNIEnv *e,
     if(action<0 || slot<0 || vk<0 || vk>65535)return DM_KEYFILE_INVALID;
     return dm_pc_profile_bind((uint32_t)action,(unsigned)slot,(uint16_t)vk,NULL,NULL);
 }
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetResurrected(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_pc_profile_reset_resurrected();
+}
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetLegacy(JNIEnv *e,jclass c) {
     (void)e;(void)c;return dm_pc_profile_reset_legacy();
 }

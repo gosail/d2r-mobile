@@ -101,8 +101,6 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native boolean nativePcSetMode(boolean nativePc);
     static native int nativePcGet(int action, int slot);
     static native int nativePcBind(int action, int slot, int vk);
-    static native int nativePcResetLegacy();
-    static native int nativePcResetResurrected();
     static native int nativePcVkFromHid(int usage);
     static native int nativeKbAction(int hidUsage);
     static native boolean nativeKbBind(int hidUsage, int action);

@@ -85,6 +85,9 @@ int main(void) {
     dm_external_mouse_apply(&buttons,&rx,&ry);
     assert(buttons&DM_BTN_B);
     mouse_role[0]=0;
+    event_at(DM_MOUSE_DOWN); // noisy duplicate must not change the role
+    buttons=0;dm_external_mouse_apply(&buttons,&rx,&ry);
+    assert(buttons&DM_BTN_B);
     event_at(DM_MOUSE_UP); // release routes to the latched secondary role
     buttons=0;dm_external_mouse_apply(&buttons,&rx,&ry);
     assert(!(buttons&DM_BTN_B));

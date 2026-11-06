@@ -6,6 +6,9 @@
 #include "dm_input.h"
 #include "dm_world.h"
 #include "dm_uiscreen.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdatomic.h>
@@ -156,6 +159,44 @@ static int save_locked(void) {
     if(work && strcmp(work,commit?commit:"") && !save_to(work))return 0;
     return save_to(commit);
 }
+// The game's transactional save may replace the whole per-hero directory.
+// Preserve the committed native PC .key if the work tree does not already
+// contain one. Never replace a file produced/modified by the guest itself.
+// Link from a completed sibling temp file: O_EXCL-style no-clobber semantics.
+static void native_key_preserve_if_missing(const char *workdir) {
+    const char *commit=dm_save_commitdir();
+    if(!commit || !*commit || !workdir || !*workdir ||
+       !strcmp(commit,workdir) || !hero_name_ok(hero))return;
+    char source[1152],target[1152],temp[1180];
+    int a=snprintf(source,sizeof source,"%s/%s/%s.key",commit,hero,hero);
+    int b=snprintf(target,sizeof target,"%s/%s/%s.key",workdir,hero,hero);
+    if(a<=0 || (size_t)a>=sizeof source || b<=0 || (size_t)b>=sizeof target)return;
+    struct stat st;
+    if(lstat(source,&st) || !S_ISREG(st.st_mode) || st.st_size<0 ||
+       st.st_size>1024*1024)return;
+    if(!lstat(target,&st) || errno!=ENOENT)return;
+    FILE *in=fopen(source,"rb");if(!in)return;
+    if(snprintf(temp,sizeof temp,"%s.tmp.XXXXXX",target)<0) {fclose(in);return;}
+    int out=mkstemp(temp);
+    if(out<0){fclose(in);return;}
+    int ok=1;char buf[4096];size_t n;
+    while((n=fread(buf,1,sizeof buf,in))>0) {
+        size_t pos=0;
+        while(pos<n) {
+            ssize_t w=write(out,buf+pos,n-pos);
+            if(w<0 && errno==EINTR)continue;
+            if(w<=0){ok=0;break;}
+            pos+=(size_t)w;
+        }
+        if(!ok)break;
+    }
+    if(ferror(in))ok=0;
+    if(fclose(in))ok=0;
+    if(ok && fsync(out))ok=0;
+    if(close(out))ok=0;
+    if(ok) (void)link(temp,target); // EEXIST: the work tree is authoritative
+    unlink(temp);
+}
 void dm_kbmap_pre_commit(const char *workdir) {
     if(!workdir)return;
     pthread_mutex_lock(&km_mu);
@@ -194,6 +235,7 @@ void dm_kbmap_pre_commit(const char *workdir) {
         }
         if(f)fclose(f);
     }
+    native_key_preserve_if_missing(workdir);
     pthread_mutex_unlock(&km_mu);
 }
 

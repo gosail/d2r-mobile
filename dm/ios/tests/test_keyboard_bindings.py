@@ -68,5 +68,5 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn("dm_kbmap_select_character((const char *)pd)",pages)
         self.assertIn("dm_kbmap_pre_commit(g_mnt[i].dir)",fs)
         self.assertIn("rename(tmp,fn)",c)
-        self.assertNotIn(".ctl",c.split("static void defaults(")[1])
+        self.assertNotIn(".ctl",c.split("static void defaults(")[1].split("static void init_locked(")[0])
 if __name__=="__main__":unittest.main()

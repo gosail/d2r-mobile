@@ -203,12 +203,14 @@ static NSString *pcKeyName(int vk) {
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear primary" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *a){(void)a;
-            if(dm_pc_profile_bind(command,0,0xffff,NULL,NULL)==DM_KEYFILE_OK)[self kbSettingsRefresh];
+            if(dm_pc_profile_bind(command,0,0xffff,NULL,NULL)==DM_KEYFILE_OK &&
+               dm_kbmap_set_pc_mode(1))[self kbSettingsRefresh];
             else [self kbSettingsSaveError];
         }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear secondary" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *a){(void)a;
-            if(dm_pc_profile_bind(command,1,0xffff,NULL,NULL)==DM_KEYFILE_OK)[self kbSettingsRefresh];
+            if(dm_pc_profile_bind(command,1,0xffff,NULL,NULL)==DM_KEYFILE_OK &&
+               dm_kbmap_set_pc_mode(1))[self kbSettingsRefresh];
             else [self kbSettingsSaveError];
         }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -242,13 +244,15 @@ static NSString *pcKeyName(int vk) {
     [list addAction:[UIAlertAction actionWithTitle:@"Restore Resurrected skill keys (1–0/-/=)" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *a){
             (void)a;
-            if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK)[self kbSettingsSaveError];
+            if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK ||
+               !dm_kbmap_set_pc_mode(1))[self kbSettingsSaveError];
             else [self kbSettingsRefresh];
         }]];
     [list addAction:[UIAlertAction actionWithTitle:@"Restore Legacy defaults" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *a) {
             (void)a;
-            if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK)[self kbSettingsSaveError];
+            if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK ||
+               !dm_kbmap_set_pc_mode(1))[self kbSettingsSaveError];
             else [self kbSettingsRefresh];
         }]];
     [list addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -491,7 +495,7 @@ static NSString *kbActionLabel(int action) {
             int vk=dm_pc_vk_from_hid((unsigned)p.key.keyCode);
             if(vk<0)continue;
             int rc=dm_pc_profile_bind((unsigned)g_pc_capture_action,(unsigned)g_pc_capture_slot,(uint16_t)vk,NULL,NULL);
-            if(rc==DM_KEYFILE_OK) {
+            if(rc==DM_KEYFILE_OK && dm_kbmap_set_pc_mode(1)) {
                 g_pc_capture_action=g_pc_capture_slot=-1;
                 [self kbSettingsRefresh];
             } else [self kbSettingsSaveError];

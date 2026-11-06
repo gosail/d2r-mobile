@@ -14,7 +14,8 @@ static unsigned char down[256],command[256];
 static unsigned char panel_queue[32];
 static unsigned queue_head,queue_tail;
 static uint64_t held_mask[256]; // latched at key-down (no re-interpretation of held keys)
-enum { UNMAPPED=255, PH_IDLE, PH_ZL_LEAD, PH_HELD, PH_ZL_TAP, PH_TAP_PULSE };
+enum { UNMAPPED=255 };
+enum { PH_IDLE, PH_ZL_LEAD, PH_HELD, PH_ZL_TAP, PH_TAP_PULSE };
 static unsigned char skill_phase[256];
 static uint64_t skill_sample[256];
 

@@ -180,7 +180,32 @@ static NSString *pcKeyName(int vk) {
     if(vk==0x11)return @"Ctrl";
     if(vk==0x12)return @"Alt";
     if(vk==0x20)return @"Space";
+    if(vk==0x100)return @"Mouse middle";
+    if(vk==0x103)return @"Wheel up";
+    if(vk==0x104)return @"Wheel down";
     return [NSString stringWithFormat:@"VK %04X",vk];
+}
+- (void)kbPcMouseCode:(unsigned)command slot:(unsigned)slot {
+    static const uint16_t codes[]={0x100,0x103,0x104};
+    NSArray<NSString *> *names=@[@"Mouse middle (0x100)",@"Wheel up (0x103)",@"Wheel down (0x104)"];
+    UIAlertController *pick=[UIAlertController alertControllerWithTitle:
+        [NSString stringWithFormat:@"PC command %u · %@",command,slot?@"Secondary":@"Primary"]
+        message:@"Bind a native mouse/wheel event to this command"
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for(unsigned i=0;i<3;i++) {
+        uint16_t vk=codes[i];
+        [pick addAction:[UIAlertAction actionWithTitle:names[i]
+            style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+                (void)a;
+                if(dm_pc_profile_bind(command,slot,vk,NULL,NULL)==DM_KEYFILE_OK &&
+                   dm_kbmap_set_pc_mode(1))[self kbSettingsRefresh];
+                else [self kbSettingsSaveError];
+            }]];
+    }
+    [pick addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    pick.popoverPresentationController.sourceView=_kbDeviceTabs;
+    pick.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
+    [self.window.rootViewController presentViewController:pick animated:YES completion:nil];
 }
 - (void)kbPcSlot:(unsigned)command {
     uint16_t primary=0xffff,secondary=0xffff;
@@ -200,6 +225,11 @@ static NSString *pcKeyName(int vk) {
                 [self kbSettingsRefresh];
                 [self becomeFirstResponder];
             }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:
+             [NSString stringWithFormat:@"%@ · mouse/wheel",slot?@"Secondary":@"Primary"]
+             style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                 (void)a;[self kbPcMouseCode:command slot:slot];
+             }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear primary" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *a){(void)a;

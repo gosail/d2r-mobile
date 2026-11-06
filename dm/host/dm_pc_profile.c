@@ -54,6 +54,12 @@ int dm_pc_profile_select(const char *name) {
     return DM_KEYFILE_OK;
 }
 static int read_locked(void) {
+    // A guest save can update the native profile using several writes under
+    // one open handle. Never parse its intermediate bytes as a new mapping.
+    // Keep the last fully validated snapshot only for the same character;
+    // select_character() invalidates it before switching hero.
+    if(dm_fs_native_key_writers())
+        return profile.raw?DM_KEYFILE_OK:DM_KEYFILE_CONFLICT;
     char fn[1200];
     if(!path(fn))return DM_KEYFILE_NOT_FOUND;
     // Always read the active guest file, not a stale snapshot from a prior

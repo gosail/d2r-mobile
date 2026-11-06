@@ -9,8 +9,6 @@ int dm_pc_profile_select(const char *name);
 int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk);
 int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
                        uint32_t *conflict,unsigned *conflict_slot);
-int dm_pc_profile_reset_legacy(void);
-int dm_pc_profile_reset_resurrected(void);
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot);
 int dm_pc_profile_action_for_hid(unsigned usage,uint32_t *id,unsigned *slot);
 void dm_pc_profile_clear(void);

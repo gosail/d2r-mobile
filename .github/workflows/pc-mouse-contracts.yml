@@ -48,6 +48,8 @@ jobs:
           cat > /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java <<'STUB'
           package com.xiaoboluo.d2r;
           class DmActivity {
+              static native boolean nativePcMode();
+              static native boolean nativePcSetMode(boolean nativePc);
               static native int nativePcGet(int action,int slot);
               static native int nativePcBind(int action,int slot,int vk);
               static native int nativePcResetLegacy();

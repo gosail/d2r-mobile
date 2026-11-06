@@ -97,6 +97,8 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native void nativeKeyboardReset();
     static native int nativeKbControlsVisible();
     // Native Diablo II .key command bindings are distinct from .kbm controller emulation.
+    static native boolean nativePcMode();
+    static native boolean nativePcSetMode(boolean nativePc);
     static native int nativePcGet(int action, int slot);
     static native int nativePcBind(int action, int slot, int vk);
     static native int nativePcResetLegacy();

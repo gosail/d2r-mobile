@@ -75,6 +75,10 @@ final class KeyboardInput {
             case KeyEvent.KEYCODE_SPACE:return 0x2c;
             case KeyEvent.KEYCODE_EQUALS:return 0x2e;
             case KeyEvent.KEYCODE_NUMPAD_ADD:return 0x57;
+            case KeyEvent.KEYCODE_NUMPAD_SUBTRACT:return 0x56;
+            case KeyEvent.KEYCODE_NUMPAD_MULTIPLY:return 0x55;
+            case KeyEvent.KEYCODE_NUMPAD_DIVIDE:return 0x54;
+            case KeyEvent.KEYCODE_NUMPAD_DOT:return 0x63;
             case KeyEvent.KEYCODE_DPAD_RIGHT:return 0x4f;
             case KeyEvent.KEYCODE_DPAD_LEFT:return 0x50;
             case KeyEvent.KEYCODE_DPAD_DOWN:return 0x51;

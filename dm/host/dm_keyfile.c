@@ -273,7 +273,8 @@ static int patch_guest_keyfile(dm_keyfile *f,const char *path) {
             }
         }
     }
-    if(fsync(fd) || close(fd))return DM_KEYFILE_IO;
+    int syncrc=fsync(fd),closerc=close(fd);
+    if(syncrc || closerc)return DM_KEYFILE_IO;
     memcpy(f->baseline,f->raw,f->size);
     return DM_KEYFILE_OK;
 }

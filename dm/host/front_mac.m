@@ -382,7 +382,10 @@ static void mac_mouse_physical(NSView *view,NSEvent *event,int physical,int phas
         if(mac_mouse_role[physical]==0 && mac_mouse_primary_owner<0) {
             mac_mouse_primary_owner=physical;mac_primary_pointer(view,event,0);
         } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,1);
-        else if(mac_mouse_role[physical]==2)dm_world_mouse_map_toggle();
+        else if(mac_mouse_role[physical]==2) {
+            if(dm_kbmap_pc_mode())(void)dm_pc_input_mouse_special(0x100);
+            else dm_world_mouse_map_toggle();
+        }
     } else if(phase==1) {
         if(mac_mouse_down[physical] && mac_mouse_primary_owner==physical)
             mac_primary_pointer(view,event,1);

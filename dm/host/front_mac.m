@@ -615,6 +615,7 @@ void front_run(void (*guest)(void)) {
             }];
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent *(NSEvent *e) {
                 if (e.window != win || e.scrollingDeltaY == 0) return e;
+                if (mac_controls_hit(v,e)) return e; // Native NSScrollView scrolls.
                 static int gen; int my = ++gen; g_wheel = e.scrollingDeltaY > 0 ? 1 : -1; push();
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (my == gen) { g_wheel = 0; push(); } });
                 return nil;

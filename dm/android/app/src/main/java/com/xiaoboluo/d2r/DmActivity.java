@@ -6,6 +6,7 @@ package com.xiaoboluo.d2r;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.graphics.Rect;
 import android.content.Intent;
 import android.net.Uri;
 import android.hardware.display.DisplayManager;
@@ -132,6 +133,21 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     };
     private boolean started;
     private boolean secondaryMouseDown;
+    // Game mouse routing must not consume events belonging to the Java
+    // Controls editor. Capture the entire down/up sequence once it begins
+    // on the editor, even when the cursor is dragged outside it.
+    private boolean controlsMouseCaptured;
+    private boolean mouseHitsControls(MotionEvent e) {
+        if (kbDeviceTabs == null || kbDeviceTabs.getVisibility()!=View.VISIBLE)
+            return false;
+        Rect bounds=new Rect();
+        if (kbDeviceTabs.getGlobalVisibleRect(bounds) &&
+            bounds.contains((int)e.getRawX(),(int)e.getRawY())) return true;
+        return kbInlinePanel!=null &&
+            kbInlinePanel.getVisibility()==View.VISIBLE &&
+            kbInlinePanel.getGlobalVisibleRect(bounds) &&
+            bounds.contains((int)e.getRawX(),(int)e.getRawY());
+    }
     boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
     private boolean importing, savesTransferred;
     private boolean libraryLoaded;
@@ -276,6 +292,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         return true;
     }
     @Override public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        if (mouseHitsControls(e)) return super.dispatchGenericMotionEvent(e);
         if (handleExternalMouse(e)) return true;
         return super.dispatchGenericMotionEvent(e);
     }
@@ -291,6 +308,16 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private final Set<Integer> swallowed = new HashSet<>();
 
     @Override public boolean dispatchTouchEvent(MotionEvent e) {
+        if ((e.getSource() & InputDevice.SOURCE_MOUSE)==InputDevice.SOURCE_MOUSE &&
+            (controlsMouseCaptured || mouseHitsControls(e))) {
+            int action=e.getActionMasked();
+            if(action==MotionEvent.ACTION_DOWN || action==MotionEvent.ACTION_BUTTON_PRESS)
+                controlsMouseCaptured=true;
+            boolean handled=super.dispatchTouchEvent(e);
+            if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ||
+               action==MotionEvent.ACTION_BUTTON_RELEASE)controlsMouseCaptured=false;
+            return true; // Editor owns this press; never forward it as a world click.
+        }
         if (handleExternalMouse(e)) return true; // Never switch pad mode or issue virtual touch buttons for a mouse.
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {

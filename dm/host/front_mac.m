@@ -13,6 +13,7 @@
 #include "dm_input.h"
 #include "dm_kbmap.h"
 #include "dm_pc_profile.h"
+#include "dm_pc_input.h"
 #include "dm_keyfile.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
@@ -766,7 +767,10 @@ void front_run(void (*guest)(void)) {
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent *(NSEvent *e) {
                 if (e.window != win || e.scrollingDeltaY == 0) return e;
                 if (mac_controls_hit(v,e)) return e; // Native NSScrollView scrolls.
-                static int gen; int my = ++gen; g_wheel = e.scrollingDeltaY > 0 ? 1 : -1; push();
+                static int gen; int my = ++gen;
+                int dir=e.scrollingDeltaY>0?1:-1;
+                g_wheel=dm_kbmap_pc_mode()?dm_pc_input_wheel(dir):dir;
+                push();
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (my == gen) { g_wheel = 0; push(); } });
                 return nil;
             }];

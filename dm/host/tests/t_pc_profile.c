@@ -58,6 +58,13 @@ int main(void) {
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     uint16_t vk=0;uint32_t command=999,conflict=999;unsigned slot=99,conflict_slot=99;
     assert(dm_pc_profile_get(0,0,&vk)==DM_KEYFILE_OK && vk=='A');
+    assert(dm_pc_profile_get(14,0,&vk)==DM_KEYFILE_OK && vk=='1');
+    assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
+    assert(dm_pc_profile_get(49,0,&vk)==DM_KEYFILE_OK && vk==0xbb);
+    assert(dm_pc_profile_reset_resurrected()==DM_KEYFILE_OK);
+    assert(dm_pc_profile_action_for_hid(0x1e,&command,&slot)==DM_KEYFILE_OK);
+    assert(command==14 && slot==0);
+
     char alice[1200];path("Alice",alice);
     uint8_t original[1142],changed[1142];bytes_at(alice,original,sizeof original);
     assert(original[0]==0x25 && original[1]==0);
@@ -81,6 +88,8 @@ int main(void) {
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    assert(dm_pc_profile_get(14,0,&vk)==DM_KEYFILE_OK && vk==0x70);
+    assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk=='1');
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
     dm_pc_input_reset();
     assert(dm_pc_input_supported_action(7) && dm_pc_input_supported_action(14));

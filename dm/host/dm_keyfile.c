@@ -24,10 +24,11 @@ void dm_keyfile_free(dm_keyfile *f) {
     free(f->raw);free(f->baseline);memset(f,0,sizeof *f);
 }
 static int validate(const uint8_t *raw,size_t len) {
-    if(!raw || len<HEADER_BYTES+2*RECORD_BYTES || len>MAX_BYTES ||
-       (len-HEADER_BYTES)%RECORD_BYTES)return DM_KEYFILE_INVALID;
-    // Empirically observed variant, NOT an assumed record-count header.
+    if(!raw || len<HEADER_BYTES || len>MAX_BYTES)return DM_KEYFILE_INVALID;
+    // Check format header before checking record count, including old mobile text files.
     if(le16(raw)!=0x0025)return DM_KEYFILE_UNSUPPORTED;
+    if(len<HEADER_BYTES+2*RECORD_BYTES ||
+       (len-HEADER_BYTES)%RECORD_BYTES)return DM_KEYFILE_INVALID;
     size_t n=(len-HEADER_BYTES)/RECORD_BYTES;
     if(n%2)return DM_KEYFILE_INVALID;
     if(n>MAX_RECORDS)return DM_KEYFILE_UNSUPPORTED;
@@ -222,10 +223,11 @@ int dm_keyfile_write_atomic(dm_keyfile *f,const char *path) {
         if(exists)ok=rename(temp,path)==0;
         else ok=link(temp,path)==0; // no-clobber if another actor creates it
     }
+    int error=errno;
     if(!exists || !ok)unlink(temp);
     free(temp);
     if(!ok)return exists?DM_KEYFILE_IO:
-        (errno==EEXIST?DM_KEYFILE_CONFLICT:DM_KEYFILE_IO);
+        (error==EEXIST?DM_KEYFILE_CONFLICT:DM_KEYFILE_IO);
     // Sync the containing directory, where supported.
     const char *slash=strrchr(path,'/');
     if(slash) {

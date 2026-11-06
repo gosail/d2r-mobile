@@ -12,6 +12,8 @@
 #include "dm.h"
 #include "dm_input.h"
 #include "dm_kbmap.h"
+#include "dm_pc_profile.h"
+#include "dm_keyfile.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
 #include "dm_cursor.h"
@@ -241,6 +243,34 @@ static int mac_hid_usage(unsigned short c) {
         case 99:return 0x3c; case 118:return 0x3d;
         case 96:return 0x3e; case 97:return 0x3f;
         case 98:return 0x40; case 100:return 0x41;
+        // Standard macOS virtual keycodes for USB HID physical key capture.
+        case 4:return 0x0b; case 7:return 0x1b; case 9:return 0x19;
+        case 11:return 0x05; case 15:return 0x15;
+        case 16:return 0x1c; case 17:return 0x17;
+        case 22:return 0x23; case 23:return 0x22; case 25:return 0x26;
+        case 26:return 0x24; case 27:return 0x2d;
+        case 28:return 0x25; case 29:return 0x27;
+        case 30:return 0x30; case 31:return 0x12;
+        case 33:return 0x2f; case 35:return 0x13;
+        case 37:return 0x0f; case 39:return 0x34;
+        case 41:return 0x33; case 42:return 0x31;
+        case 43:return 0x36; case 44:return 0x38;
+        case 45:return 0x11; case 47:return 0x37;
+        case 50:return 0x35; case 51:return 0x2a;
+        case 54:return 0xe7; case 55:return 0xe3;
+        case 56:return 0xe1; case 57:return 0x39;
+        case 58:return 0xe2; case 59:return 0xe0;
+        case 60:return 0xe5; case 61:return 0xe6;
+        case 62:return 0xe4; case 65:return 0x63;
+        case 67:return 0x55; case 75:return 0x54;
+        case 76:return 0x58; case 78:return 0x56;
+        case 82:return 0x62; case 83:return 0x59;
+        case 84:return 0x5a; case 85:return 0x5b;
+        case 86:return 0x5c; case 87:return 0x5d;
+        case 88:return 0x5e; case 89:return 0x5f;
+        case 91:return 0x60; case 92:return 0x61;
+        case 101:return 0x42;case 109:return 0x43;
+        case 103:return 0x44;case 111:return 0x45;
     }
     return -1;
 }
@@ -386,6 +416,15 @@ static NSButton *g_mac_keyboard_tab,*g_mac_pad_tab;
 static NSView *g_mac_keyboard_panel;
 static NSScrollView *g_mac_keyboard_scroll;
 static int g_mac_keyboard_mode;
+static int g_mac_pc_capture_id=-1,g_mac_pc_capture_slot=-1;
+static NSString *mac_pc_vk_label(int vk) {
+    if(vk<0)return @"Invalid";
+    if(vk==0xffff)return @"Unbound";
+    if(vk>='A'&&vk<='Z')return [NSString stringWithFormat:@"%c",vk];
+    if(vk>='0'&&vk<='9')return [NSString stringWithFormat:@"%c",vk];
+    if(vk>=0x70&&vk<=0x7b)return [NSString stringWithFormat:@"F%d",vk-0x70+1];
+    return [NSString stringWithFormat:@"VK 0x%04X",vk];
+}
 @interface DmMacFlippedView : NSView @end
 @implementation DmMacFlippedView
 - (BOOL)isFlipped {return YES;}
@@ -393,11 +432,13 @@ static int g_mac_keyboard_mode;
 @interface DmMacKeyboardEditor : NSObject
 - (void)chooseDevice:(id)sender;
 - (void)chooseBinding:(id)sender;
+- (void)chooseNativeBinding:(id)sender;
 - (void)refresh;
 @end
 @implementation DmMacKeyboardEditor
 - (void)chooseDevice:(id)sender {
     g_mac_keyboard_mode=sender==g_mac_keyboard_tab;
+    g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
     // Flush any held game key when switching from gameplay to the editor.
     memset(g_mac_keys_down,0,sizeof g_mac_keys_down);
     g_btn=0;g_w=g_a=g_s=g_d=0;push();
@@ -410,8 +451,8 @@ static int g_mac_keyboard_mode;
     if(old)[old removeFromSuperview];
     CGFloat w=MAX(230,g_mac_keyboard_scroll.contentSize.width-14),rh=36;
     NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
-    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,(n+4)*rh+12)];
-    for(NSUInteger i=0;i<n+4;i++) {
+    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,(n+5)*rh+12)];
+    for(NSUInteger i=0;i<n+5;i++) {
         NSString *title;
         if(i<n) {
             unsigned usage=mac_key_rows[i].usage;int action=dm_kbmap_action(usage);const char *name="Unbound";
@@ -423,13 +464,67 @@ static int g_mac_keyboard_mode;
             const char *const buttons[]={"鼠标左键 / Left","鼠标右键 / Right","鼠标中键 / Middle"};
             const char *const roles[]={"主点击 / Primary","次要使用 / Secondary","切换地图 / Map"};
             title=[NSString stringWithFormat:@"%s   →   %s",buttons[physical],roles[role>=0&&role<3?role:0]];
-        } else title=@"恢复此角色默认键鼠设置 / Reset defaults";
-        NSButton *b=[NSButton buttonWithTitle:title target:self action:@selector(chooseBinding:)];
+        } else if(i==n+3) title=@"恢复此角色模拟手柄键位 / Reset .kbm";
+        else title=g_mac_pc_capture_id>=0?
+            [NSString stringWithFormat:@"PC .key: waiting for key · cmd %d / slot %d",g_mac_pc_capture_id,g_mac_pc_capture_slot]:
+            @"PC .key: Original keyboard actions · Primary / Secondary";
+        NSButton *b=[NSButton buttonWithTitle:title target:self
+           action:i==n+4?@selector(chooseNativeBinding:):@selector(chooseBinding:)];
         b.tag=i;b.frame=NSMakeRect(8,i*rh+2,w-16,rh-4);
         b.alignment=NSTextAlignmentLeft;
         [rows addSubview:b];
     }
     g_mac_keyboard_scroll.documentView=rows;
+}
+- (void)chooseNativeBinding:(id)sender {
+    (void)sender;
+    static const char *const commands[57]={
+        "Character","Inventory","Party","Message Log","Quests","Chat","Help","Automap",
+        "Center Map","Fade Map","Map Party","Map Party Names","Skill Tree","Skill Bar",
+        "Skill 1","Skill 2","Skill 3","Skill 4","Skill 5","Skill 6","Skill 7","Skill 8",
+        "Show Belt","Potion 1","Potion 2","Potion 3","Potion 4",
+        "Say 1","Say 2","Say 3","Say 4","Say 5","Say 6","Say 7",
+        "Run Hold","Toggle Run","Stand Still","Show Items","Close Panels",
+        "Previous Skill","Next Skill","Clear Messages","Screenshot","Portraits",
+        "Weapon Swap","Toggle Minimap","Skill 9","Skill 10","Skill 11","Skill 12",
+        "Skill 13","Skill 14","Skill 15","Skill 16","Hireling","Say 8","Escape"
+    };
+    NSPopUpButton *which=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,43,460,32) pullsDown:NO];
+    for(unsigned id=0;id<57;id++) {
+        uint16_t vk=0xffff;
+        if(dm_pc_profile_get(id,0,&vk)!=DM_KEYFILE_OK){
+            NSAlert *fail=[NSAlert new];fail.messageText=@"Cannot open native .key";
+            [fail runModal];return;
+        }
+        [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@",id,commands[id],mac_pc_vk_label(vk)]];
+    }
+    NSPopUpButton *slot=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,2,460,32) pullsDown:NO];
+    [slot addItemsWithTitles:@[@"Primary key",@"Secondary key"]];
+    NSView *panel=[[NSView alloc] initWithFrame:NSMakeRect(0,0,460,79)];
+    [panel addSubview:which];[panel addSubview:slot];
+    NSAlert *dialog=[NSAlert new];dialog.messageText=@"Original Diablo II .key binding";
+    dialog.informativeText=@"Select command and key slot. Bind captures the next physical key.";
+    dialog.accessoryView=panel;
+    [dialog addButtonWithTitle:@"Bind next key"];
+    [dialog addButtonWithTitle:@"Cancel"];
+    [dialog addButtonWithTitle:@"Clear binding"];
+    [dialog addButtonWithTitle:@"Restore Legacy defaults"];
+    NSModalResponse response=[dialog runModal];
+    if(response==NSAlertFirstButtonReturn) {
+        g_mac_pc_capture_id=(int)which.indexOfSelectedItem;
+        g_mac_pc_capture_slot=(int)slot.indexOfSelectedItem;
+        [self refresh];
+    } else if(response==NSAlertThirdButtonReturn) {
+        if(dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,(unsigned)slot.indexOfSelectedItem,0xffff,NULL,NULL)!=DM_KEYFILE_OK) {
+            NSAlert *fail=[NSAlert new];fail.messageText=@"Could not clear binding";[fail runModal];
+        }
+        [self refresh];
+    } else if(response==NSAlertThirdButtonReturn+1) {
+        if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK){
+            NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Legacy defaults";[fail runModal];
+        }
+        [self refresh];
+    }
 }
 - (void)chooseBinding:(NSButton *)button {
     NSUInteger i=(NSUInteger)button.tag;
@@ -585,8 +680,22 @@ void front_run(void (*guest)(void)) {
         screen_note();
         [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) { (void)n; screen_note(); }];
         [NSApp activateIgnoringOtherApps:YES];
-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
+        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;   // 只吃游戏窗口的键；软键盘输入框等其他窗口照常收字 | Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
+            if (g_mac_pc_capture_id>=0) {
+                if(e.type==NSEventTypeKeyUp || e.isARepeat)return nil;
+                int usage=mac_hid_usage(e.keyCode),vk=usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);
+                if(vk>=0 && !(e.modifierFlags & NSEventModifierFlagCommand)) {
+                    int rc=dm_pc_profile_bind((uint32_t)g_mac_pc_capture_id,
+                        (unsigned)g_mac_pc_capture_slot,(uint16_t)vk,NULL,NULL);
+                    if(rc==DM_KEYFILE_OK){
+                        g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
+                        [g_mac_keyboard_editor refresh];
+                    } else NSBeep(); // conflict or save failure, stay in capture
+                }
+                return nil;
+            }
+            if(e.type==NSEventTypeFlagsChanged)return e;
             if (e.modifierFlags & NSEventModifierFlagCommand) return e;   // 带 ⌘ 的留给菜单（⌘Q、⌃⌘F） | Keys with ⌘ are left to the menu (⌘Q, ⌃⌘F)
             if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
                 !g_mac_keyboard_panel.hidden) return e; // editor owns navigation

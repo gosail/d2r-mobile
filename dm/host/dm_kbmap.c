@@ -85,7 +85,10 @@ void dm_kbmap_select_character(const char *name) {
         dm_kb_clear();
     }
     pthread_mutex_unlock(&km_mu);
-    if(changed)(void)dm_pc_profile_select(name);
+    if(changed) {
+        dm_pc_input_reset(); // no stale hero-specific held command
+        (void)dm_pc_profile_select(name);
+    }
 }
 static void load_locked(void) {
     init_locked();

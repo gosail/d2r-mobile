@@ -588,7 +588,7 @@ void front_run(void (*guest)(void)) {
             NSEventMaskLeftMouseDown|NSEventMaskLeftMouseDragged|NSEventMaskLeftMouseUp|
             NSEventMaskMouseMoved|NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
             if(e.window!=win)return e;
-            if(mac_controls_hit(v,e))return e;
+            if(mac_controls_hit(v,e) && !mac_mouse_down[0])return e;
             if(e.type==NSEventTypeMouseMoved || e.type==NSEventTypeMouseExited) {
                 if(g_live) {
                     int hint=dm_mouse_pointer_hint();
@@ -606,7 +606,7 @@ void front_run(void (*guest)(void)) {
                 NSEventMaskRightMouseDown|NSEventMaskRightMouseDragged|NSEventMaskRightMouseUp
                 handler:^NSEvent *(NSEvent *e) {
                 if(e.window!=win)return e;
-                if(mac_controls_hit(v,e))return e;
+                if(mac_controls_hit(v,e) && !mac_mouse_down[1])return e;
                 int phase=e.type==NSEventTypeRightMouseDown?0:e.type==NSEventTypeRightMouseUp?2:1;
                 mac_mouse_physical(v,e,1,phase);return nil;
             }];
@@ -614,7 +614,7 @@ void front_run(void (*guest)(void)) {
                 NSEventMaskOtherMouseDown|NSEventMaskOtherMouseDragged|NSEventMaskOtherMouseUp
                 handler:^NSEvent *(NSEvent *e) {
                 if(e.window!=win||e.buttonNumber!=2)return e;
-                if(mac_controls_hit(v,e))return e;
+                if(mac_controls_hit(v,e) && !mac_mouse_down[2])return e;
                 int phase=e.type==NSEventTypeOtherMouseDown?0:e.type==NSEventTypeOtherMouseUp?2:1;
                 mac_mouse_physical(v,e,2,phase);return nil;
             }];

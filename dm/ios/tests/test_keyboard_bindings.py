@@ -40,6 +40,8 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('dm_kbmap_reset(); // clear held keys before editor takes first responder',ui)
         self.assertIn('!g_mac_keyboard_panel.hidden) return e;',src("host/front_mac.m"))
         self.assertIn('controlsMouseCaptured',android)
+        self.assertIn('gameMouseCaptured',android)
+        self.assertIn('if(mac_controls_hit(v,e) && !mac_mouse_down[0])',src("host/front_mac.m"))
         self.assertIn('if (mac_controls_hit(v,e)) return e; // Native NSScrollView scrolls.',src("host/front_mac.m"))
         self.assertIn('UISegmentedControl *_kbDeviceTabs',ui)
         self.assertIn('kbBindingTapped:',ui)

@@ -207,6 +207,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         // Keep the original KeyBindingMenu and its .ctl visible by default.
         kbKeyboardMode=false;
         kbSettingsButton.setOnClickListener(view->{
+            if(libraryLoaded && started)nativeKeyboardReset();
             kbKeyboardMode=true;
             KeyboardSettings.refreshInline(this,kbInlinePanel);
             kbInlinePanel.setVisibility(View.VISIBLE);
@@ -214,6 +215,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
             kbDeviceTabs.bringToFront();
         });
         controllerSettingsButton.setOnClickListener(view->{
+            if(libraryLoaded && started)nativeKeyboardReset();
             kbKeyboardMode=false;kbInlinePanel.setVisibility(View.GONE);
             kbDeviceTabs.bringToFront();
         });

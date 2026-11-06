@@ -33,13 +33,14 @@ int main(void) {
     assert(dm_keyfile_data(&f,&len) && len==LEN);
     assert(!memcmp(dm_keyfile_data(&f,NULL),original,LEN));
     assert(!dm_keyfile_dirty(&f));
-    unsigned v=0;
-    assert(dm_keyfile_get(&f,7,0,(uint16_t *)&v)==DM_KEYFILE_OK);
-    assert((v & 0xffff)==0x0100);
-    assert(dm_keyfile_get(&f,7,1,(uint16_t *)&v)==DM_KEYFILE_OK);
+    uint16_t v=0;
+    assert(dm_keyfile_get(&f,(0xAB07u<<16)|7u,0,&v)==DM_KEYFILE_OK);
+    assert(v==0x0100);
+    assert(dm_keyfile_get(&f,7,1,&v)==DM_KEYFILE_OK);
     assert((v & 0xffff)==0xffff);
-    assert(dm_keyfile_get(&f,999,0,(uint16_t *)&v)==DM_KEYFILE_NOT_FOUND);
-    assert(dm_keyfile_set(&f,7,0,0x0100)==DM_KEYFILE_OK);
+    assert(dm_keyfile_get(&f,999,0,&v)==DM_KEYFILE_NOT_FOUND);
+    assert(dm_keyfile_get(&f,(0xAB07u<<16)|7u,0,&v)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&f,(0xAB07u<<16)|7u,0,0x0100)==DM_KEYFILE_OK);
     assert(!dm_keyfile_dirty(&f));
     assert(dm_keyfile_set(&f,7,1,0x0101)==DM_KEYFILE_OK);
     assert(dm_keyfile_dirty(&f));
@@ -60,15 +61,15 @@ int main(void) {
     dm_keyfile g={0};
     assert(dm_keyfile_read(&g,path)==DM_KEYFILE_OK);
     assert(!memcmp(dm_keyfile_data(&g,NULL),dm_keyfile_data(&f,NULL),LEN));
-    assert(dm_keyfile_set(&g,30,0,0xffff)==DM_KEYFILE_OK);
-    assert(dm_keyfile_set(&g,31,1,300)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&g,(0xAB1Eu<<16)|30u,0,0xffff)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&g,(0xAB1Fu<<16)|31u,1,300)==DM_KEYFILE_OK);
     assert(dm_keyfile_write_atomic(&g,path)==DM_KEYFILE_OK);
     dm_keyfile_free(&g);
     assert(dm_keyfile_read(&g,path)==DM_KEYFILE_OK);
     uint16_t key=0;
-    assert(dm_keyfile_get(&g,30,0,&key)==DM_KEYFILE_OK && key==0xffff);
-    assert(dm_keyfile_get(&g,31,1,&key)==DM_KEYFILE_OK && key==300);
-    assert(dm_keyfile_set(&g,0,0,90)==DM_KEYFILE_OK);
+    assert(dm_keyfile_get(&g,(0xAB1Eu<<16)|30u,0,&key)==DM_KEYFILE_OK && key==0xffff);
+    assert(dm_keyfile_get(&g,(0xAB1Fu<<16)|31u,1,&key)==DM_KEYFILE_OK && key==300);
+    assert(dm_keyfile_set(&g,(0xAB00u<<16)|0u,0,90)==DM_KEYFILE_OK);
     // Concurrent external modification must not be silently overwritten.
     {FILE *out=fopen(path,"r+b");assert(out);assert(fputc(0x24,out)!=EOF);assert(!fclose(out));}
     assert(dm_keyfile_write_atomic(&g,path)==DM_KEYFILE_CONFLICT);
@@ -85,7 +86,7 @@ int main(void) {
     assert(dm_keyfile_parse(&g,original,LEN-20)==DM_KEYFILE_OK);
     dm_keyfile_free(&g);
     assert(dm_keyfile_parse(&g,original,LEN)==DM_KEYFILE_OK);
-    assert(dm_keyfile_set(&g,56,0,0xffff)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&g,(0xAB38u<<16)|56u,0,0xffff)==DM_KEYFILE_OK);
     dm_keyfile_free(&g);dm_keyfile_free(&f);
     assert(!unlink(path));assert(!unlink(bak));assert(!rmdir(root));
     puts("native .key lossless codec: PASS");

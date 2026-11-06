@@ -513,7 +513,7 @@ static NSString *mac_pc_vk_label(int vk) {
         [fail runModal];return;
     }
     NSPopUpButton *which=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,43,460,32) pullsDown:NO];
-    unsigned present=0;
+    unsigned present=0;NSInteger first_present=-1;
     for(unsigned id=0;id<57;id++) {
         uint16_t vk=0xffff;
         int rc=dm_pc_profile_get(id,0,&vk);
@@ -522,6 +522,7 @@ static NSString *mac_pc_vk_label(int vk) {
         }
         NSString *state=dm_pc_input_supported_action(id)?@"":@" · ⚠ runtime pending";
         if(rc==DM_KEYFILE_OK) {
+            if(first_present<0)first_present=(NSInteger)id;
             present++;
             [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@%@",id,commands[id],mac_pc_vk_label(vk),state]];
         } else {
@@ -530,6 +531,7 @@ static NSString *mac_pc_vk_label(int vk) {
         }
     }
     if(!present) {NSBeep();return;}
+    [which selectItemAtIndex:first_present]; // ID 0 can be absent
     NSPopUpButton *slot=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,2,460,32) pullsDown:NO];
     [slot addItemsWithTitles:@[@"Primary key",@"Secondary key"]];
     NSView *panel=[[NSView alloc] initWithFrame:NSMakeRect(0,0,460,79)];

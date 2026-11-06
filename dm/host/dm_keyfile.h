@@ -31,8 +31,8 @@ const uint8_t *dm_keyfile_data(const dm_keyfile *file,size_t *size);
 
 // slot 0 = observed flag 1 (primary); slot 1 = observed flag 0 (secondary).
 // The flag's exact native semantics still require controlled in-game tests.
-int dm_keyfile_get(const dm_keyfile *file,uint16_t id,unsigned slot,uint16_t *code);
-int dm_keyfile_set(dm_keyfile *file,uint16_t id,unsigned slot,uint16_t code);
+int dm_keyfile_get(const dm_keyfile *file,uint32_t id,unsigned slot,uint16_t *code);
+int dm_keyfile_set(dm_keyfile *file,uint32_t id,unsigned slot,uint16_t code);
 int dm_keyfile_dirty(const dm_keyfile *file);
 
 // Conflict-aware, backup-preserving, sibling-temp + fsync + atomic rename.

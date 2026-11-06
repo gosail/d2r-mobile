@@ -106,8 +106,13 @@ int main(void) {
     assert(command==0 && slot==0);
     assert(dm_pc_profile_bind(1,1,'A',&conflict,&conflict_slot)==DM_KEYFILE_CONFLICT);
     assert(conflict==0 && conflict_slot==0);
+    struct stat native_before,native_after;
+    assert(stat(alice,&native_before)==0);
     assert(dm_pc_profile_bind(1,1,0xffff,NULL,NULL)==DM_KEYFILE_OK);
     assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_OK);
+    assert(stat(alice,&native_after)==0);
+    assert(native_before.st_ino==native_after.st_ino);
+    assert((native_before.st_mode&0777)==(native_after.st_mode&0777));
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='K');
     assert(access(alice_commit,F_OK)!=0); // adapter writes only save.work
     bytes_at(alice,changed,sizeof changed);

@@ -24,6 +24,9 @@ static ssize_t fake_pwrite(int fd, const void *buf, size_t n, off_t off);
 #undef pwrite
 ssize_t pwrite(int, const void *, size_t, off_t);
 
+// HLE save transaction integration test has no full game frontend.
+void dm_kbmap_pre_commit(const char *workdir) {(void)workdir;}
+int dm_sys_lang(void) {return 0;}
 struct dm_flags g_flag; uint64_t g_t0_ns; uint64_t now_ns(void) { return 0; }   // 日志时间戳与读路径的桩（写路径不用） | stubs for log timestamps and the read path (not used by the write path)
 void dm_prof_add(int id, uint64_t ns, uint64_t b) { (void)id; (void)ns; (void)b; } void dm_guest_write_prepare(void *a, size_t n) { (void)a; (void)n; }
 void dm_fs_save_poison(int e);

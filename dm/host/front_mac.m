@@ -519,6 +519,7 @@ static NSString *mac_pc_vk_label(int vk) {
     [dialog addButtonWithTitle:@"Cancel"];
     [dialog addButtonWithTitle:@"Clear binding"];
     [dialog addButtonWithTitle:@"Restore Legacy defaults"];
+    [dialog addButtonWithTitle:@"Restore Resurrected skills"];
     NSModalResponse response=[dialog runModal];
     if(response==NSAlertFirstButtonReturn) {
         g_mac_pc_capture_id=(int)which.indexOfSelectedItem;
@@ -532,6 +533,11 @@ static NSString *mac_pc_vk_label(int vk) {
     } else if(response==NSAlertThirdButtonReturn+1) {
         if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK){
             NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Legacy defaults";[fail runModal];
+        }
+        [self refresh];
+    } else if(response==NSAlertThirdButtonReturn+2) {
+        if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK){
+            NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Resurrected skills";[fail runModal];
         }
         [self refresh];
     }

@@ -91,15 +91,21 @@ int main(int argc,char **argv) {
     snprintf(fw,sizeof fw,"%s/Alice/Alice.kbm",work_dir);
     snprintf(ctl,sizeof ctl,"%s/Alice/Alice.ctl",save_dir);
     { FILE *c=fopen(ctl,"wb");assert(c);assert(fwrite("NATIVE_CTL",1,10,c)==10);fclose(c); }
-    FILE *f=fopen(fn,"r");assert(f);char line[128];assert(fgets(line,sizeof line,f));
-    assert(!strcmp(line,"D2RMobileKeyboard=1\n"));fclose(f);
-    f=fopen(fw,"rb");assert(f);assert(fgets(line,sizeof line,f));assert(!strcmp(line,"D2RMobileKeyboard=1\n"));fclose(f);
-    // Game saving swaps work -> committed; the pre-commit hook must restore
-    // latest keyboard changes without touching the game-owned .ctl.
-    { FILE *wf=fopen(fw,"wb");assert(wf);fputs("D2RMobileKeyboard=1\n",wf);fclose(wf); }
+    // All live edits stay inside the guest work tree until Commit.
+    assert(access(fn,F_OK)!=0);
+    FILE *f=fopen(fw,"rb");assert(f);char line[128];
+    assert(fgets(line,sizeof line,f));assert(!strcmp(line,"D2RMobileKeyboard=1\n"));
+    assert(fclose(f)==0);
+    // The pre-commit hook never rewrites a native .key or private .kbm.
     dm_kbmap_pre_commit(work_dir);
     f=fopen(fw,"rb");assert(f);size_t bytes=fread(line,1,sizeof(line)-1,f);line[bytes]=0;fclose(f);
     assert(strstr(line,"0d=15"));
+    // Simulate the original h_fs_Commit promotion (work -> committed).
+    { FILE *in=fopen(fw,"rb"),*out=fopen(fn,"wb");assert(in && out);
+      unsigned char chunk[512];size_t n;
+      while((n=fread(chunk,1,sizeof chunk,in)))assert(fwrite(chunk,1,n,out)==n);
+      assert(!ferror(in));assert(!fclose(in));assert(!fclose(out)); }
+
     f=fopen(ctl,"rb");assert(f);assert(fread(line,1,10,f)==10);fclose(f);assert(!memcmp(line,"NATIVE_CTL",10));
     pid_t pid=fork();assert(pid>=0);
     if(!pid){execl(argv[0],argv[0],root,(char*)0);_exit(127);}
@@ -129,11 +135,9 @@ int main(int argc,char **argv) {
       unsigned char got[sizeof native_bytes];
       assert(fread(got,1,sizeof got,nf)==sizeof got);assert(!fclose(nf));
       assert(!memcmp(got,native_bytes,sizeof got)); }
-    // Transaction worktree receives native .key only when absent, byte for byte.
-    { FILE *nf=fopen(native_work,"rb");assert(nf);
-      unsigned char got[sizeof native_bytes];
-      assert(fread(got,1,sizeof got,nf)==sizeof got);assert(!fclose(nf));
-      assert(!memcmp(got,native_bytes,sizeof got)); }
+    // The original game owns native .key creation; the host never
+    // fabricates a worktree copy from an older committed snapshot.
+    assert(access(native_work,F_OK)!=0);
     // Worktree is authoritative if the guest changed its own .key.
     { FILE *nf=fopen(native_work,"wb");assert(nf);
       assert(fputs("GUEST_CHANGED",nf)>=0);assert(!fclose(nf)); }
@@ -154,7 +158,9 @@ int main(int argc,char **argv) {
     assert(dm_kbmap_action(0x0d)==15);
     assert(dm_kbmap_bind(0x0e,7));
     { FILE *g=fopen(oldglob,"rb");assert(g);assert(fgets(line,sizeof line,g));fclose(g);assert(!strcmp(line,"D2RMobileKeyboard=1\n")); }
-    assert(access(charliekey,F_OK)==0);
+    assert(access(charliekey,F_OK)!=0);
+    { char cw[1200];snprintf(cw,sizeof cw,"%s/Charlie/Charlie.kbm",work_dir);
+      assert(access(cw,F_OK)==0); }
     // Old private per-character .key is read-only migration input.
     char dave[1200],davew[1200],davekey[1200],davekbm[1200];
     snprintf(dave,sizeof dave,"%s/Dave",save_dir);assert(!mkdir(dave,0700));
@@ -169,7 +175,9 @@ int main(int argc,char **argv) {
     { FILE *g=fopen(davekey,"rb");assert(g);
       assert(fgets(line,sizeof line,g));assert(!strcmp(line,"D2RMobileKeyboard=1\n"));
       assert(fgets(line,sizeof line,g));assert(!strcmp(line,"0d=15\n"));assert(!fclose(g)); }
-    assert(access(davekbm,F_OK)==0);
+    assert(access(davekbm,F_OK)!=0);
+    { char dw[1200];snprintf(dw,sizeof dw,"%s/Dave/Dave.kbm",work_dir);
+      assert(access(dw,F_OK)==0); }
     dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
     assert(dm_kbmap_pc_mode()==0);
     assert(dm_kbmap_set_pc_mode(1));
@@ -184,6 +192,8 @@ int main(int argc,char **argv) {
     remove(fn);remove(fw);remove(ctl);remove(bobkey);
     remove(native_key);remove(native_work);remove(davekey);remove(davekbm);
     remove(charliekey);remove(cw);remove(oldglob);
+    { char dw[1200];snprintf(dw,sizeof dw,"%s/Dave/Dave.kbm",work_dir);
+      remove(dw); }
     rmdir(alice);rmdir(alice_work);rmdir(bob);rmdir(bob_work);rmdir(charlie);rmdir(charliew);rmdir(dave);rmdir(davew);
     rmdir(save_dir);rmdir(work_dir);rmdir(root);
     puts("portable keyboard bindings: PASS");

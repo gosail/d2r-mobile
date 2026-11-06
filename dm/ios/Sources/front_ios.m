@@ -239,6 +239,12 @@ static NSString *pcKeyName(int vk) {
         [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
             handler:^(UIAlertAction *a){(void)a;[self kbPcSlot:cmd];}]];
     }
+    [list addAction:[UIAlertAction actionWithTitle:@"Restore Resurrected skill keys (1–0/-/=)" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *a){
+            (void)a;
+            if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK)[self kbSettingsSaveError];
+            else [self kbSettingsRefresh];
+        }]];
     [list addAction:[UIAlertAction actionWithTitle:@"Restore Legacy defaults" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *a) {
             (void)a;

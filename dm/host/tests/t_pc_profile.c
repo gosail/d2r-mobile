@@ -43,6 +43,12 @@ int main(void) {
     strcpy(root,"/tmp/dmpcXXXXXX");assert(mkdtemp(root));
     snprintf(save_dir,sizeof save_dir,"%s/save",root);assert(!mkdir(save_dir,0700));
     dir("Alice");dir("Bob");dir("Eve");
+    assert(dm_pc_profile_select("LateMount")==DM_KEYFILE_OK);
+    uint16_t late_vk=0;
+    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_NOT_FOUND);
+    dir("LateMount"); // previously cached IO would remain invalid forever
+    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_OK && late_vk=='A');
+
     assert(dm_pc_vk_from_hid(0x04)=='A');
     assert(dm_pc_vk_from_hid(0x1e)=='1');
     assert(dm_pc_vk_from_hid(0x27)=='0');
@@ -159,9 +165,13 @@ int main(void) {
     dm_pc_profile_clear();
     char bob[1200];path("Bob",bob);
     unlink(alice);unlink(backup);unlink(bob);unlink(eve);
+    char late[1200];path("LateMount",late);
+    assert(!unlink(late));
+
     char d[1200];snprintf(d,sizeof d,"%s/Alice",save_dir);assert(!rmdir(d));
     snprintf(d,sizeof d,"%s/Bob",save_dir);assert(!rmdir(d));
     snprintf(d,sizeof d,"%s/Eve",save_dir);assert(!rmdir(d));
+    snprintf(d,sizeof d,"%s/LateMount",save_dir);assert(!rmdir(d));
     assert(!rmdir(save_dir));assert(!rmdir(root));
     puts("native character keyboard profiles: PASS");
     return 0;

@@ -16,6 +16,7 @@ static char root[1024],save_dir[1100],work_dir[1100];
 static uint64_t buttons;
 static int32_t left_x,left_y;
 static unsigned maps,pc_native_panels;
+static int game_ingame=1;
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}
 unsigned dm_fs_native_key_writers(void) {return 0;}
@@ -28,7 +29,7 @@ void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
 }
 void dm_world_mouse_map_toggle(void) {maps++;}
 void dm_ui_pc_toggle_panel(unsigned id) {if(id==0)pc_native_panels++;}
-int dm_uiscreen_ingame(void) {return 1;}
+int dm_uiscreen_ingame(void) {return game_ingame;}
 int dm_uiscreen_panel(void) {return 0;}
 int main(int argc,char **argv) {
     if(argc==2) {
@@ -71,6 +72,16 @@ int main(int argc,char **argv) {
     dm_pc_input_guest_step();
     assert(pc_native_panels==1); // HID A now means native command 0
     dm_kbmap_key_event(0x04,0);
+    // The native .key exists, but Enter must still select/confirm in menus.
+    game_ingame=0;
+    dm_kbmap_key_event(0x28,1); assert(buttons & DM_BTN_A);
+    dm_kbmap_key_event(0x28,0); assert(buttons==0);
+    game_ingame=1;
+    // Unsupported future game file must not make all keyboard input inert.
+    { FILE *nf=fopen(native_work,"wb");assert(nf);
+      assert(fwrite("unknown",1,7,nf)==7);assert(!fclose(nf)); }
+    dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
+    dm_kbmap_key_event(0x1a,0);assert(left_y==0);
     assert(!unlink(native_work));
     assert(dm_kbmap_set_pc_mode(0));
     assert(dm_kbmap_pc_mode()==0);

@@ -493,14 +493,6 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcBind(JNIEnv *e,
     if(rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1))return DM_KEYFILE_IO;
     return rc;
 }
-JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetResurrected(JNIEnv *e,jclass c) {
-    (void)e;(void)c;int rc=dm_pc_profile_reset_resurrected();
-    return rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1)?DM_KEYFILE_IO:rc;
-}
-JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetLegacy(JNIEnv *e,jclass c) {
-    (void)e;(void)c;int rc=dm_pc_profile_reset_legacy();
-    return rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1)?DM_KEYFILE_IO:rc;
-}
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcVkFromHid(JNIEnv *e,jclass c,jint usage) {
     (void)e;(void)c;return usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);
 }

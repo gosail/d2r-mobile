@@ -20,7 +20,8 @@ class KeyboardContract(unittest.TestCase):
         n=src("android/jni_android.c")
         for s in ("KeyboardInput.onKey(e)","nativeKeyboardEvent(int hidUsage, boolean down)","nativeKeyboardReset()"):
             self.assertIn(s,j)
-        for s in ("KEYCODE_F1","KEYCODE_DPAD_UP","SOURCE_GAMEPAD","KEYCODE_A","nativeKeyboardEvent"):
+        for s in ("KEYCODE_F1","KEYCODE_DPAD_UP","SOURCE_GAMEPAD","KEYCODE_A","nativeKeyboardEvent",
+                  "KEYCODE_NUMPAD_DIVIDE","KEYCODE_NUMPAD_MULTIPLY","KEYCODE_NUMPAD_SUBTRACT","KEYCODE_NUMPAD_DOT"):
             self.assertIn(s,k)
         self.assertIn("dm_kbmap_key_event((unsigned)usage,down!=0)",n)
     def test_controls_editor_entry(self):
@@ -39,7 +40,13 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('mouseHitsControls(e)',android)
         self.assertIn('kbDeviceTabs.getVisibility()==View.VISIBLE)return super.dispatchKeyEvent(e)',android)
         self.assertIn('dm_kbmap_reset(); // clear held keys before editor takes first responder',ui)
-        self.assertIn('!g_mac_keyboard_panel.hidden) return e;',src("host/front_mac.m"))
+        mac=src("host/front_mac.m")
+        self.assertIn('!g_mac_keyboard_panel.hidden) return e;',mac)
+        event_code=mac.split('NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged handler:')[1]
+        self.assertLess(event_code.find('!g_mac_keyboard_panel.hidden) return e;'),
+                        event_code.find('mac_modifier_changed(e);'),
+                        "Settings editor must intercept modifiers before gameplay")
+        self.assertIn('mac_modifier_changed(e);',event_code)
         self.assertIn('action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0',src("host/front_mac.m"))
         self.assertIn('controlsMouseCaptured',android)
         self.assertIn('gameMouseCaptured',android)

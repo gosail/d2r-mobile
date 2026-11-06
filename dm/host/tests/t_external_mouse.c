@@ -7,7 +7,8 @@
 #include <assert.h>
 #include <stdio.h>
 
-static int panel=1,ingame=1,mouse_role[3]={0,1,2};
+static int panel=1,ingame=1,pc_mode,native_status,mouse_role[3]={0,1,2};
+static int native_special_calls,native_wheel_calls;
 static int touch_phases[32],touch_count,world_stops,right_uses,map_toggles;
 static unsigned long long ticks=1000000000ull;
 
@@ -40,10 +41,12 @@ void dm_world_mouse_map_toggle(void) {map_toggles++;}
 int dm_kbmap_mouse_action(unsigned physical) {
     return physical<3?mouse_role[physical]:-1;
 }
-int dm_kbmap_pc_mode(void) {return 0;}
-int dm_pc_profile_file_status(void) {return 0;}
-int dm_pc_input_mouse_special(unsigned pseudo) {(void)pseudo;return 0;}
-int dm_pc_input_wheel(int delta) {return delta>0?1:-1;}
+int dm_kbmap_pc_mode(void) {return pc_mode;}
+int dm_pc_profile_file_status(void) {return native_status;}
+int dm_pc_input_mouse_special(unsigned pseudo) {
+    assert(pseudo==0x100);native_special_calls++;return 1;
+}
+int dm_pc_input_wheel(int delta) {native_wheel_calls++;return delta>0?1:-1;}
 
 static void event_at(int op) {
     dm_external_mouse_event(op,0.4f,0.4f,0.4f,0.4f,0);
@@ -87,7 +90,27 @@ int main(void) {
     assert(!(buttons&DM_BTN_B));
     event_at(DM_MOUSE_LEAVE);
     assert(touch_count==6);
-    (void)right_uses;(void)map_toggles;
-    puts("physical mouse panel drag / cancel / role latch: PASS");
+
+    // A saved character .key can exist while showing the front-end menu.
+    // Wheel and middle must keep menu-safe navigation and only dispatch
+    // native bindings after entering an actual game.
+    ingame=0;pc_mode=1;native_status=1;mouse_role[0]=0;
+    int before_map=map_toggles;
+    event_at(DM_MOUSE_MIDDLE_DOWN);
+    assert(map_toggles==before_map+1 && native_special_calls==0);
+    event_at(DM_MOUSE_MIDDLE_UP);
+    dm_external_mouse_event(DM_MOUSE_WHEEL,0.4f,0.4f,0.4f,0.4f,1);
+    dm_external_mouse_step();
+    buttons=0;rx=ry=0;dm_external_mouse_apply(&buttons,&rx,&ry);
+    assert(ry==32767 && native_wheel_calls==0);
+    ingame=1;
+    event_at(DM_MOUSE_MIDDLE_DOWN);
+    assert(native_special_calls==1);
+    event_at(DM_MOUSE_MIDDLE_UP);
+    dm_external_mouse_event(DM_MOUSE_WHEEL,0.4f,0.4f,0.4f,0.4f,1);
+    dm_external_mouse_step();
+    assert(native_wheel_calls==1);
+    (void)right_uses;
+    puts("physical mouse panel drag / cancel / role latch / menu fallback: PASS");
     return 0;
 }

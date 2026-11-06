@@ -487,13 +487,19 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcGet(JNIEnv *e,j
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcBind(JNIEnv *e,jclass c,jint action,jint slot,jint vk) {
     (void)e;(void)c;
     if(action<0 || slot<0 || vk<0 || vk>65535)return DM_KEYFILE_INVALID;
-    return dm_pc_profile_bind((uint32_t)action,(unsigned)slot,(uint16_t)vk,NULL,NULL);
+    int rc=dm_pc_profile_bind((uint32_t)action,(unsigned)slot,(uint16_t)vk,NULL,NULL);
+    // Editing a native PC action must also switch the actual input dispatcher.
+    // Failure is reported to the UI; never show success while legacy actions fire.
+    if(rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1))return DM_KEYFILE_IO;
+    return rc;
 }
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetResurrected(JNIEnv *e,jclass c) {
-    (void)e;(void)c;return dm_pc_profile_reset_resurrected();
+    (void)e;(void)c;int rc=dm_pc_profile_reset_resurrected();
+    return rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1)?DM_KEYFILE_IO:rc;
 }
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetLegacy(JNIEnv *e,jclass c) {
-    (void)e;(void)c;return dm_pc_profile_reset_legacy();
+    (void)e;(void)c;int rc=dm_pc_profile_reset_legacy();
+    return rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1)?DM_KEYFILE_IO:rc;
 }
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcVkFromHid(JNIEnv *e,jclass c,jint usage) {
     (void)e;(void)c;return usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);

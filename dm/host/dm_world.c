@@ -672,12 +672,17 @@ static void w_hover_step(uint8_t *b) {
                             const char *en[6]={"Physical","Magic","Fire","Lightning","Cold","Poison"};
                             const char *zh[6]={"物理","魔法","火焰","闪电","冰冷","毒素"};
                             for (int z=0;z<6;z++) if (stat(unit,stat_id[z],0)>=100) {
+                                if(view.immune_mask==0 && view.details[0])
+                                    strlcat(view.details,", ",sizeof view.details);
+                                else if(view.immune_mask!=0)
+                                    strlcat(view.details,", ",sizeof view.details);
                                 view.immune_mask|=1u<<z;
-                                const char *s=dm_lang_zh()?zh[z]:en[z];
-                                if (view.details[0]) strlcat(view.details,", ",sizeof view.details);
-                                strlcat(view.details,s,sizeof view.details);
+                                strlcat(view.details,dm_lang_zh()?zh[z]:en[z],sizeof view.details);
                             }
-                            if (view.details[0])
+                            // A champion/unique tier alone is *not* immunity.
+                            // Append the suffix only when a resistance >=100
+                            // was observed, rather than checking details[0].
+                            if (view.immune_mask)
                                 strlcat(view.details,dm_lang_zh()?"免疫":" immune",sizeof view.details);
                             // The native target selector still applies the game's
                             // eligibility/range/LOS rules; this is display only.

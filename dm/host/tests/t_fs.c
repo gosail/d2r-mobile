@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../dm_keyfile.h"
+#include "../dm_pc_profile.h"
 #include <sys/types.h>
 static ssize_t fake_pwrite(int fd, const void *buf, size_t n, off_t off);
 #define pwrite fake_pwrite
@@ -111,11 +113,35 @@ int main(void) {
           "guest native key: read handle opens");
     CHECK(dm_fs_native_key_writers()==0,"guest native key: readers do not block editing");
     h_fs_CloseFile(keyfd);
+    // Write a synthetic, structurally native .key as if the guest had
+    // finished creating its own profile. Test data never comes from a user.
+    dm_keyfile guestkey={0};
+    CHECK(dm_keyfile_new_legacy(&guestkey)==DM_KEYFILE_OK,
+          "guest key: fixture has the original 0x25 records");
+    char guest_path[1300];snprintf(guest_path,sizeof guest_path,
+        "%s/Alice/Alice.key",work);
+    size_t guest_len=0;const uint8_t *guest_raw=dm_keyfile_data(&guestkey,&guest_len);
+    FILE *guest_out=fopen(guest_path,"wb");
+    CHECK(guest_out && fwrite(guest_raw,1,guest_len,guest_out)==guest_len &&
+          fclose(guest_out)==0,"guest key: seeded the active transaction inode");
+    dm_keyfile_free(&guestkey);
+    CHECK(dm_pc_profile_select("Alice")==DM_KEYFILE_OK,"host sees guest character");
+    uint16_t pc_vk=0;
+    CHECK(dm_pc_profile_get(0,0,&pc_vk)==DM_KEYFILE_OK && pc_vk=='A',
+          "host reads guest-owned native code");
     CHECK(h_fs_OpenFile(&keyfd,"save:/Alice/Alice.key",MODE_WRITE)==RES_OK,
           "guest native key: write handle opens");
     CHECK(dm_fs_native_key_writers()==1,"guest native key: writable handle blocks host editing");
+    CHECK(dm_pc_profile_bind(0,0,0xf5,NULL,NULL)==DM_KEYFILE_CONFLICT,
+          "host refuses concurrent edit while guest has writable file open");
+    CHECK(dm_pc_profile_get(0,0,&pc_vk)==DM_KEYFILE_OK && pc_vk=='A',
+          "busy edit leaves original profile unchanged");
     h_fs_CloseFile(keyfd);
     CHECK(dm_fs_native_key_writers()==0,"guest native key: close releases edit guard");
+    CHECK(dm_pc_profile_bind(0,0,0xf5,NULL,NULL)==DM_KEYFILE_OK,
+          "host edits game-owned .key only after guest closes its writer");
+    CHECK(dm_pc_profile_get(0,0,&pc_vk)==DM_KEYFILE_OK && pc_vk==0xf5,
+          "guest worktree now contains native edited VK");
     // Only the file open/close lifecycle is exercised here: no extra
     // WriteFile injection count is consumed by this test.
 

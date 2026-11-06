@@ -34,6 +34,7 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('KeyboardSettings.createInline(this)',android)
         self.assertIn('KeyboardSettings.refreshInline(this,kbInlinePanel)',android)
         self.assertIn('kbKeyboardMode',android)
+        self.assertIn('if(libraryLoaded && started)nativeKeyboardReset();',android)
         self.assertIn('controllerSettingsButton',android)
         self.assertIn('mouseHitsControls(e)',android)
         self.assertIn('kbDeviceTabs.getVisibility()==View.VISIBLE)return super.dispatchKeyEvent(e)',android)

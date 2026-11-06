@@ -3217,6 +3217,27 @@ static void fe_send(const char *cat, const char *act, const char *arg) {
     LOG("前端路径：发 %s:%s %s", cat, act, arg);
     ((void (*)(uint64_t, void *))fn)(root, msg);
 }
+// Native PC commands have distinct panel semantics. Queue them from external
+// keyboard UI threads and execute here only when the guest world is active.
+void dm_ui_pc_toggle_panel(unsigned command_id) {
+    if(!dm_uiscreen_ingame())return;
+    const char *panel=NULL;
+    switch(command_id) {
+    case 0:panel="CharacterStatsPanel";break;
+    case 1:panel="PlayerInventoryExpansionLayout";break;
+    case 4:panel="QuestLogPanelExpansion";break;
+    case 12:panel="SkillsTreePanel";break;
+    case 54:panel="HirelingInventoryPanel";break;
+    default:return;
+    }
+    module_t *m=main_module();uint64_t root=0;
+    if(!m)return;
+    memcpy(&root,m->base+0x2f05458,8);
+    if(!root)return;
+    uint64_t current=ui_panel(root,panel);
+    int visible=current && *(uint8_t *)(current+0x50);
+    fe_send("PanelManager",visible?"ClosePanel":"OpenPanel",panel);
+}
 // ---------- 一键重开（暂停菜单「一键重开」= 保存 + 登出 + 同难度登入；标准：不慢于正常进局，只出现开门读取画面，不露主菜单 / 选角页） ----------
 // 只走原版的路：替玩家发原版「保存并退出」(PausePanelMessage:ExitGame；退出时的存档提交都在 ToFrontEnd 之前完成) → 回到前端（ToFrontEnd）的下一帧
 // 直接发原版 CharacterSelect:LoadCharacter:<原难度>：前端记着的「选中角色」就是刚退出的那个（宿主实测：玩第二行的角色退出后直接载入，进的仍是它），

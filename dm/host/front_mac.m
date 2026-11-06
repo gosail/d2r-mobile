@@ -435,6 +435,9 @@ static NSString *mac_pc_vk_label(int vk) {
     if(vk>='A'&&vk<='Z')return [NSString stringWithFormat:@"%c",vk];
     if(vk>='0'&&vk<='9')return [NSString stringWithFormat:@"%c",vk];
     if(vk>=0x70&&vk<=0x7b)return [NSString stringWithFormat:@"F%d",vk-0x70+1];
+    if(vk==0x100)return @"Mouse middle";
+    if(vk==0x103)return @"Wheel up";
+    if(vk==0x104)return @"Wheel down";
     return [NSString stringWithFormat:@"VK 0x%04X",vk];
 }
 @interface DmMacFlippedView : NSView @end
@@ -524,6 +527,7 @@ static NSString *mac_pc_vk_label(int vk) {
     [dialog addButtonWithTitle:@"Bind next key"];
     [dialog addButtonWithTitle:@"Cancel"];
     [dialog addButtonWithTitle:@"Clear binding"];
+    [dialog addButtonWithTitle:@"Mouse / Wheel"];
     NSModalResponse response=[dialog runModal];
     if(response==NSAlertFirstButtonReturn) {
         g_mac_pc_capture_id=(int)which.indexOfSelectedItem;
@@ -535,6 +539,26 @@ static NSString *mac_pc_vk_label(int vk) {
             NSAlert *fail=[NSAlert new];fail.messageText=@"Could not clear binding";[fail runModal];
         }
         [self refresh];
+    } else if(response==NSAlertThirdButtonReturn+1) {
+        NSPopUpButton *mouse=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,310,32) pullsDown:NO];
+        [mouse addItemsWithTitles:@[@"Mouse middle (0x100)",@"Wheel up (0x103)",@"Wheel down (0x104)"]];
+        NSAlert *choose=[NSAlert new];
+        choose.messageText=@"Native .key mouse / wheel binding";
+        choose.accessoryView=mouse;
+        [choose addButtonWithTitle:@"Bind"];
+        [choose addButtonWithTitle:@"Cancel"];
+        if([choose runModal]==NSAlertFirstButtonReturn) {
+            static const uint16_t codes[]={0x100,0x103,0x104};
+            unsigned idx=(unsigned)mouse.indexOfSelectedItem;
+            if(idx<3 && (dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,
+                  (unsigned)slot.indexOfSelectedItem,codes[idx],NULL,NULL)!=DM_KEYFILE_OK ||
+                  !dm_kbmap_set_pc_mode(1))) {
+                NSAlert *fail=[NSAlert new];fail.messageText=@"Mouse binding conflicts or could not be saved";
+                fail.informativeText=@"Clear the previous action's binding before reassigning this input.";
+                [fail runModal];
+            }
+            [self refresh];
+        }
     }
 }
 - (void)chooseBinding:(NSButton *)button {

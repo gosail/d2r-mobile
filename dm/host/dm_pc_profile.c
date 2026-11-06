@@ -10,12 +10,12 @@
 #include <sys/stat.h>
 
 const char *dm_save_commitdir(void);
+const char *dm_save_workdir(void);
 void dm_fs_profile_lock(void),dm_fs_profile_unlock(void);
 
 static pthread_mutex_t pc_mu=PTHREAD_MUTEX_INITIALIZER;
 static char selected[64];
 static dm_keyfile profile;
-static int loaded,load_result;
 
 static int valid_name(const char *name) {
     if(!name || !name[0] || strlen(name)>48 ||
@@ -25,7 +25,10 @@ static int valid_name(const char *name) {
     return 1;
 }
 static int path(char out[1200]) {
-    const char *root=dm_save_commitdir();
+    // The game writes its own .key in the active transactional save tree.
+    // Never write the committed snapshot while a guest work tree is mounted.
+    const char *root=dm_save_workdir();
+    if(!root || !*root)root=dm_save_commitdir();
     if(!root || !*root || !valid_name(selected))return 0;
     int n=snprintf(out,1200,"%s/%s/%s.key",root,selected,selected);
     return n>0 && n<1200;
@@ -33,54 +36,40 @@ static int path(char out[1200]) {
 void dm_pc_profile_clear(void) {
     pthread_mutex_lock(&pc_mu);
     dm_keyfile_free(&profile);
-    selected[0]=0;loaded=0;load_result=DM_KEYFILE_NOT_FOUND;
+    selected[0]=0;
     pthread_mutex_unlock(&pc_mu);
 }
 int dm_pc_profile_select(const char *name) {
     if(!valid_name(name))return DM_KEYFILE_INVALID;
     pthread_mutex_lock(&pc_mu);
-    int changed=strcmp(selected,name)!=0;
-    if(changed) {
+    if(strcmp(selected,name)) {
         dm_keyfile_free(&profile);
         snprintf(selected,sizeof selected,"%s",name);
-        loaded=0;load_result=DM_KEYFILE_NOT_FOUND;
     }
     pthread_mutex_unlock(&pc_mu);
-    if(changed) {
-        // Create a missing native .key at character selection rather than
-        // waiting for the first key press. An unavailable save directory is
-        // retryable in read_locked once it is mounted.
-        uint16_t ignored=0;
-        int rc=dm_pc_profile_get(0,0,&ignored);
-        if(rc!=DM_KEYFILE_OK && rc!=DM_KEYFILE_IO &&
-           rc!=DM_KEYFILE_NOT_FOUND && rc!=DM_KEYFILE_UNSUPPORTED)
-            return rc;
-    }
+    // The guest, not this host adapter, creates the native character .key.
+    // Selection must not create a guessed preset or change the save tree.
     return DM_KEYFILE_OK;
 }
 static int read_locked(void) {
-    if(loaded)return load_result;
-    char fn[1200];if(!path(fn))return DM_KEYFILE_NOT_FOUND;
-    dm_keyfile temp={0};int rc=dm_keyfile_read(&temp,fn);
-    if(rc==DM_KEYFILE_NOT_FOUND) {
-        // New character: independent Resurrected skill-key preset, never
-        // reuse imported personal bindings as a default.
-        rc=dm_keyfile_new_resurrected(&temp);
-        if(rc==DM_KEYFILE_OK)rc=dm_keyfile_write_atomic(&temp,fn);
-    }
+    char fn[1200];
+    if(!path(fn))return DM_KEYFILE_NOT_FOUND;
+    // Always read the active guest file, not a stale snapshot from a prior
+    // commit. The original game may rewrite key bindings through its own UI.
+    // Native files are small; this also detects inode swaps after Commit.
+    dm_keyfile temp={0};
+    int rc=dm_keyfile_read(&temp,fn);
     if(rc==DM_KEYFILE_OK) {
-        dm_keyfile_free(&profile);profile=temp;
-    } else dm_keyfile_free(&temp);
-    // A role can be selected before its save directory is mounted. Retry
-    // transient FS errors; never cache a missing directory for the session.
-    loaded=(rc==DM_KEYFILE_OK || rc==DM_KEYFILE_INVALID ||
-            rc==DM_KEYFILE_UNSUPPORTED || rc==DM_KEYFILE_CONFLICT);
-    load_result=rc;
+        dm_keyfile_free(&profile);
+        profile=temp;
+    } else {
+        dm_keyfile_free(&temp);
+        dm_keyfile_free(&profile);
+    }
     return rc;
 }
 int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk) {
-    // The lazy first read can create a new .key. Serialize it with guest
-    // transactional worktree swaps exactly like an explicit rebind.
+    // Serialize reads against the save directory swap; the guest owns file creation.
     dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);
     int rc=read_locked();

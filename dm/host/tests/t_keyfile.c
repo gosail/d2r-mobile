@@ -97,6 +97,10 @@ int main(void) {
     assert(dm_keyfile_get(&def,14,0,&vk)==DM_KEYFILE_OK && vk==0x70);
     assert(dm_keyfile_get(&def,21,0,&vk)==DM_KEYFILE_OK && vk==0x77);
     assert(dm_keyfile_get(&def,23,0,&vk)==DM_KEYFILE_OK && vk==0x31);
+    // Native classic command 34 ("hold to run") is unbound by default;
+    // hardcoding Ctrl there would diverge from D2Client's default.key.
+    assert(dm_keyfile_get(&def,34,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
+    assert(dm_keyfile_get(&def,34,1,&vk)==DM_KEYFILE_OK && vk==0xffff);
     assert(dm_keyfile_get(&def,35,1,&vk)==DM_KEYFILE_OK && vk==0x102);
     assert(dm_keyfile_get(&def,46,0,&vk)==DM_KEYFILE_OK && vk==0xffff);
     uint32_t found=999,conflict=999;unsigned slot=99,conflict_slot=99;

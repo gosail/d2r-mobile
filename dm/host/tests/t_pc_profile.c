@@ -67,6 +67,12 @@ int main(void) {
     assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_NOT_FOUND);
     dir("LateMount");
     assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_NOT_FOUND);
+    char bad_native_path[1200];path("LateMount",bad_native_path);
+    assert(!mkdir(bad_native_path,0700)); // exists, but is not a regular file
+    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_IO);
+    assert(dm_pc_profile_file_status()==-1); // cannot silently use legacy
+    assert(!rmdir(bad_native_path));
+    assert(dm_pc_profile_file_status()==0);
     // Only the guest can generate the original native profile.
     game_seed("LateMount",1);
     assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_OK && late_vk=='A');

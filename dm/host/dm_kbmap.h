@@ -10,6 +10,9 @@ int dm_kbmap_restore_defaults_checked(void); // false if no selected hero or for
 void dm_kbmap_restore_defaults(void); // compatibility wrapper
 void dm_kbmap_key_event(unsigned usage,int down);
 void dm_kbmap_reset(void);
+// 1 = native PC .key command semantics, 0 = legacy .kbm HID->controller.
+int dm_kbmap_pc_mode(void);
+int dm_kbmap_set_pc_mode(int enabled);
 
 // UI source: original Controls tab, independent from controller mapping data.
 int dm_kbmap_controls_visible(void);

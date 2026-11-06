@@ -4,6 +4,7 @@
 // Native .key lossless binary codec lives separately in dm_keyfile.{h,c}.
 #include "dm_kbmap.h"
 #include "dm_pc_profile.h"
+#include "dm_keyfile.h"
 #include "dm_pc_input.h"
 #include "dm_input.h"
 #include "dm_world.h"

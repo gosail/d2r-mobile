@@ -504,17 +504,32 @@ static NSString *mac_pc_vk_label(int vk) {
         "Weapon Swap","Toggle Minimap","Skill 9","Skill 10","Skill 11","Skill 12",
         "Skill 13","Skill 14","Skill 15","Skill 16","Hireling","Say 8","Escape"
     };
+    // A valid game profile may contain fewer (or additional) action pairs.
+    // Preserve the numeric command ID even when a row is absent: never
+    // mistake a popup's compacted row index for an original .key command ID.
+    if(dm_pc_profile_file_status()!=1) {
+        NSAlert *fail=[NSAlert new];fail.messageText=@"The game has not created a supported .key";
+        fail.informativeText=@"Load the character and save its original keyboard settings. This editor does not create replacement files.";
+        [fail runModal];return;
+    }
     NSPopUpButton *which=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,43,460,32) pullsDown:NO];
+    unsigned present=0;
     for(unsigned id=0;id<57;id++) {
         uint16_t vk=0xffff;
-        if(dm_pc_profile_get(id,0,&vk)!=DM_KEYFILE_OK){
-            NSAlert *fail=[NSAlert new];fail.messageText=@"The game has not created a supported .key";
-            fail.informativeText=@"Load the character and save its original keyboard settings. This editor does not create replacement files.";
-            [fail runModal];return;
+        int rc=dm_pc_profile_get(id,0,&vk);
+        if(rc!=DM_KEYFILE_OK && rc!=DM_KEYFILE_NOT_FOUND) {
+            NSBeep();return;
         }
         NSString *state=dm_pc_input_supported_action(id)?@"":@" · ⚠ runtime pending";
-        [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@%@",id,commands[id],mac_pc_vk_label(vk),state]];
+        if(rc==DM_KEYFILE_OK) {
+            present++;
+            [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@%@",id,commands[id],mac_pc_vk_label(vk),state]];
+        } else {
+            [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · not in guest .key",id,commands[id]]];
+            [[which itemAtIndex:(NSInteger)id] setEnabled:NO];
+        }
     }
+    if(!present) {NSBeep();return;}
     NSPopUpButton *slot=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,2,460,32) pullsDown:NO];
     [slot addItemsWithTitles:@[@"Primary key",@"Secondary key"]];
     NSView *panel=[[NSView alloc] initWithFrame:NSMakeRect(0,0,460,79)];

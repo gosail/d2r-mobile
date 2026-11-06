@@ -114,8 +114,13 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
     return rc;
 }
 int dm_pc_profile_file_status(void) {
-    uint16_t probe=0;
-    int rc=dm_pc_profile_get(0,0,&probe);
+    // Do not infer validity from a particular command ID: other game-created
+    // versions may omit ID 0 while still having a well-formed profile.
+    dm_fs_profile_lock();
+    pthread_mutex_lock(&pc_mu);
+    int rc=read_locked();
+    pthread_mutex_unlock(&pc_mu);
+    dm_fs_profile_unlock();
     if(rc==DM_KEYFILE_OK)return 1;
     if(rc==DM_KEYFILE_NOT_FOUND || rc==DM_KEYFILE_IO)return 0;
     return -1;

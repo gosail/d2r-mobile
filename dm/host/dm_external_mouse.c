@@ -47,13 +47,13 @@ void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int
     pthread_mutex_lock(&mouse_mu);
     // Translate physical button roles once at press time; release uses the
     // latched action even if the user rebinds while holding the button.
-    int button=-1,press=0,release=0;
+    int button=-1,press=0;
     if(op==DM_MOUSE_DOWN){button=0;press=1;}
     else if(op==DM_MOUSE_RIGHT_DOWN){button=1;press=1;}
     else if(op==DM_MOUSE_MIDDLE_DOWN){button=2;press=1;}
-    else if(op==DM_MOUSE_UP){button=0;release=1;}
-    else if(op==DM_MOUSE_RIGHT_UP){button=1;release=1;}
-    else if(op==DM_MOUSE_MIDDLE_UP){button=2;release=1;}
+    else if(op==DM_MOUSE_UP){button=0;}
+    else if(op==DM_MOUSE_RIGHT_UP){button=1;}
+    else if(op==DM_MOUSE_MIDDLE_UP){button=2;}
     if(op==DM_MOUSE_LEAVE) memset(g_mouse_physical_down,0,sizeof g_mouse_physical_down);
     if(button>=0) {
         if(press) {

@@ -30,6 +30,10 @@ jobs:
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
           /tmp/dm_test_keyboard
+      - name: Parse, edit and atomically round-trip native .key records (synthetic fixtures)
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -I dm/host dm/host/dm_keyfile.c dm/host/tests/t_keyfile.c -o /tmp/dm_test_keyfile
+          /tmp/dm_test_keyfile
       - name: Compile Android keyboard UI adapters against Android SDK
         run: |
           jar=$(find "${ANDROID_HOME}/platforms" -name android.jar | sort -V | tail -1)

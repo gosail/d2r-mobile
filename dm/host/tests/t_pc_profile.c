@@ -13,6 +13,7 @@
 #include <unistd.h>
 static char root[1024], save_dir[1100];
 static uint64_t game_buttons;
+static int32_t game_right_y;
 static int map_toggles,panel_open;
 static unsigned panel_events[57];
 void dm_ui_pc_toggle_panel(unsigned id) {
@@ -20,7 +21,7 @@ void dm_ui_pc_toggle_panel(unsigned id) {
     panel_events[id]++;
 }
 void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
-    (void)lx;(void)ly;(void)rx;(void)ry;game_buttons=b;
+    (void)lx;(void)ly;(void)rx;game_buttons=b;game_right_y=ry;
 }
 void dm_world_mouse_map_toggle(void) {map_toggles++;}
 int dm_uiscreen_ingame(void) {return 1;}
@@ -98,6 +99,19 @@ int main(void) {
     assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk=='1');
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
     dm_pc_input_reset();
+    assert(dm_pc_input_wheel(1)==1 && dm_pc_input_wheel(-1)==-1);
+    assert(dm_pc_input_wheel(0)==0);
+    assert(dm_pc_profile_bind(40,0,0xffff,NULL,NULL)==DM_KEYFILE_OK);
+    assert(dm_pc_profile_bind(39,0,0x104,NULL,NULL)==DM_KEYFILE_OK);
+    assert(dm_pc_input_wheel(-1)==1); // wheel-down remapped to previous
+    assert(dm_pc_input_wheel(1)==0); // original wheel-up now unbound
+    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    assert(dm_pc_profile_bind(39,0,'K',NULL,NULL)==DM_KEYFILE_OK);
+    dm_pc_input_event(0x0e,1);
+    assert(game_right_y==32767);
+    dm_pc_input_event(0x0e,0);
+    assert(game_right_y==0);
+    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
     assert(dm_pc_input_supported_action(7) && dm_pc_input_supported_action(14));
     assert(dm_pc_input_supported_action(49) && !dm_pc_input_supported_action(50));
     dm_pc_input_event(0x3a,1); // F1 uses native skill 1 -> Switch A

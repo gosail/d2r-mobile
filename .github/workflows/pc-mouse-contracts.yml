@@ -37,7 +37,7 @@ jobs:
       - name: Native character key profile and HID/VK tests
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host \
-            dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/tests/t_pc_profile.c \
+            dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/tests/t_pc_profile.c \
             -o /tmp/dm_test_pc_profile
           /tmp/dm_test_pc_profile
       - name: Compile Android keyboard UI adapters against Android SDK

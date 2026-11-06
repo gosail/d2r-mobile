@@ -18,6 +18,8 @@ static int32_t left_x,left_y;
 static unsigned maps,pc_native_panels;
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}
+unsigned dm_fs_native_key_writers(void) {return 0;}
+void dm_fs_save_poison(int e) {(void)e;}
 const char *dm_save_commitdir(void) {return save_dir;}
 const char *dm_save_workdir(void) {return work_dir;}
 void dm_kb_clear(void) {buttons=0;left_x=left_y=0;}

@@ -84,13 +84,13 @@ static uint8_t *record(const dm_keyfile *f,uint32_t id,unsigned slot) {
     }
     return NULL;
 }
-int dm_keyfile_get(const dm_keyfile *f,uint16_t id,unsigned slot,uint16_t *code) {
+int dm_keyfile_get(const dm_keyfile *f,uint32_t id,unsigned slot,uint16_t *code) {
     if(!code || slot>1)return DM_KEYFILE_INVALID;
     uint8_t *p=record(f,id,slot);
     if(!p)return DM_KEYFILE_NOT_FOUND;
     *code=le16(p+4);return DM_KEYFILE_OK;
 }
-int dm_keyfile_set(dm_keyfile *f,uint16_t id,unsigned slot,uint16_t code) {
+int dm_keyfile_set(dm_keyfile *f,uint32_t id,unsigned slot,uint16_t code) {
     if(slot>1)return DM_KEYFILE_INVALID;
     uint8_t *p=record(f,id,slot);
     if(!p)return DM_KEYFILE_NOT_FOUND;

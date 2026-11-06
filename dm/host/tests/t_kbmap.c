@@ -120,6 +120,12 @@ int main(int argc,char **argv) {
     // Switch characters: no global bindings leak into another hero.
     char bobkey[1200];snprintf(bobkey,sizeof bobkey,"%s/Bob/Bob.kbm",save_dir);
     { FILE *f2=fopen(bobkey,"wb");assert(f2);fputs("LEGACY_BINARY\n",f2);fclose(f2); }
+    char bobworkkbm[1200];
+    snprintf(bobworkkbm,sizeof bobworkkbm,"%s/Bob/Bob.kbm",work_dir);
+    // The guest mounts save.work as a clone of committed save; simulate
+    // the foreign-format file already present in that active snapshot.
+    { FILE *f2=fopen(bobworkkbm,"wb");assert(f2);
+      assert(fputs("LEGACY_BINARY\n",f2)>=0);assert(!fclose(f2)); }
     dm_kbmap_select_character("Bob");assert(dm_kbmap_action(0x0d)==0);
     assert(!dm_kbmap_restore_defaults_checked()); // cannot erase another format's .key
     assert(!dm_kbmap_bind(0x0d,15));
@@ -189,7 +195,7 @@ int main(int argc,char **argv) {
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
     assert(dm_kbmap_mouse_action(0)==0);
     char cw[1200];snprintf(cw,sizeof cw,"%s/Charlie/Charlie.kbm",work_dir);
-    remove(fn);remove(fw);remove(ctl);remove(bobkey);
+    remove(fn);remove(fw);remove(ctl);remove(bobkey);remove(bobworkkbm);
     remove(native_key);remove(native_work);remove(davekey);remove(davekbm);
     remove(charliekey);remove(cw);remove(oldglob);
     { char dw[1200];snprintf(dw,sizeof dw,"%s/Dave/Dave.kbm",work_dir);

@@ -62,7 +62,8 @@ int dm_keyfile_parse(dm_keyfile *out,const void *data,size_t len) {
 int dm_keyfile_read(dm_keyfile *out,const char *path) {
     if(!out || !path)return DM_KEYFILE_INVALID;
     struct stat st;
-    if(lstat(path,&st) || !S_ISREG(st.st_mode) || st.st_size<0 ||
+    if(lstat(path,&st))return errno==ENOENT?DM_KEYFILE_NOT_FOUND:DM_KEYFILE_IO;
+    if(!S_ISREG(st.st_mode) || st.st_size<0 ||
        (uintmax_t)st.st_size>MAX_BYTES)return DM_KEYFILE_IO;
     FILE *in=fopen(path,"rb");if(!in)return DM_KEYFILE_IO;
     size_t n=(size_t)st.st_size;
@@ -196,10 +197,11 @@ static int backup_once(const char *path,const dm_keyfile *f) {
     if(!backup)return 0;
     memcpy(backup,path,n);memcpy(backup+n,".bak",5);
     int fd=open(backup,O_CREAT|O_EXCL|O_WRONLY,0600);
-    free(backup);
-    if(fd<0)return errno==EEXIST; // preserve an earlier backup
+    if(fd<0){int ok=errno==EEXIST;free(backup);return ok;}
     int ok=write_all(fd,f->baseline,f->size) && fsync(fd)==0;
     if(close(fd))ok=0;
+    if(!ok)unlink(backup); // never keep a partial backup
+    free(backup);
     return ok;
 }
 int dm_keyfile_write_atomic(dm_keyfile *f,const char *path) {
@@ -216,10 +218,14 @@ int dm_keyfile_write_atomic(dm_keyfile *f,const char *path) {
     if(fd<0){free(temp);return DM_KEYFILE_IO;}
     int ok=write_all(fd,f->raw,f->size) && fsync(fd)==0;
     if(close(fd))ok=0;
-    if(ok)ok=rename(temp,path)==0;
-    if(!ok)unlink(temp);
+    if(ok) {
+        if(exists)ok=rename(temp,path)==0;
+        else ok=link(temp,path)==0; // no-clobber if another actor creates it
+    }
+    if(!exists || !ok)unlink(temp);
     free(temp);
-    if(!ok)return DM_KEYFILE_IO;
+    if(!ok)return exists?DM_KEYFILE_IO:
+        (errno==EEXIST?DM_KEYFILE_CONFLICT:DM_KEYFILE_IO);
     // Sync the containing directory, where supported.
     const char *slash=strrchr(path,'/');
     if(slash) {

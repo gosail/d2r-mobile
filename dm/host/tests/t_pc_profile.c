@@ -14,7 +14,7 @@
 static char root[1024], save_dir[1100],work_dir[1100];
 static uint64_t game_buttons;
 static int32_t game_right_y;
-static int map_toggles,panel_open;
+static int map_toggles,panel_open,poisoned;static unsigned native_writers;
 static unsigned panel_events[57];
 void dm_ui_pc_toggle_panel(unsigned id) {
     assert(id<57);
@@ -28,6 +28,8 @@ int dm_uiscreen_ingame(void) {return 1;}
 int dm_uiscreen_panel(void) {return panel_open;}
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}
+unsigned dm_fs_native_key_writers(void) {return native_writers;}
+void dm_fs_save_poison(int e) {poisoned=e;}
 const char *dm_save_commitdir(void) {return save_dir;}
 const char *dm_save_workdir(void) {return work_dir;}
 static void dir(const char *name) {
@@ -104,6 +106,11 @@ int main(void) {
     assert(original[0]==0x25 && original[1]==0);
     assert(dm_pc_profile_action_for_hid(0x04,&command,&slot)==DM_KEYFILE_OK);
     assert(command==0 && slot==0);
+    native_writers=1; // the original guest is rewriting its .key
+    assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_CONFLICT);
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
+    native_writers=0;
+    assert(poisoned==0);
     assert(dm_pc_profile_bind(1,1,'A',&conflict,&conflict_slot)==DM_KEYFILE_CONFLICT);
     assert(conflict==0 && conflict_slot==0);
     struct stat native_before,native_after;

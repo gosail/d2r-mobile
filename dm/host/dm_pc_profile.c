@@ -1,0 +1,178 @@
+#define _POSIX_C_SOURCE 200809L
+#include "dm_pc_profile.h"
+#include "dm_keyfile.h"
+#include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
+
+const char *dm_save_commitdir(void);
+void dm_fs_profile_lock(void),dm_fs_profile_unlock(void);
+
+static pthread_mutex_t pc_mu=PTHREAD_MUTEX_INITIALIZER;
+static char selected[64];
+static dm_keyfile profile;
+static int loaded,load_result;
+
+static int valid_name(const char *name) {
+    if(!name || !name[0] || strlen(name)>48 ||
+       !strcmp(name,".") || !strcmp(name,".."))return 0;
+    for(const unsigned char *p=(const unsigned char *)name;*p;p++)
+        if(*p<' ' || *p=='/' || *p=='\\' || *p==127)return 0;
+    return 1;
+}
+static int path(char out[1200]) {
+    const char *root=dm_save_commitdir();
+    if(!root || !*root || !valid_name(selected))return 0;
+    int n=snprintf(out,1200,"%s/%s/%s.key",root,selected,selected);
+    return n>0 && n<1200;
+}
+void dm_pc_profile_clear(void) {
+    pthread_mutex_lock(&pc_mu);
+    dm_keyfile_free(&profile);
+    selected[0]=0;loaded=0;load_result=DM_KEYFILE_NOT_FOUND;
+    pthread_mutex_unlock(&pc_mu);
+}
+int dm_pc_profile_select(const char *name) {
+    if(!valid_name(name))return DM_KEYFILE_INVALID;
+    pthread_mutex_lock(&pc_mu);
+    if(strcmp(selected,name)) {
+        dm_keyfile_free(&profile);
+        snprintf(selected,sizeof selected,"%s",name);
+        loaded=0;load_result=DM_KEYFILE_NOT_FOUND;
+    }
+    pthread_mutex_unlock(&pc_mu);
+    return DM_KEYFILE_OK;
+}
+static int read_locked(void) {
+    if(loaded)return load_result;
+    char fn[1200];if(!path(fn))return DM_KEYFILE_NOT_FOUND;
+    dm_keyfile temp={0};int rc=dm_keyfile_read(&temp,fn);
+    if(rc==DM_KEYFILE_IO && errno==ENOENT)rc=DM_KEYFILE_NOT_FOUND;
+    if(rc==DM_KEYFILE_NOT_FOUND) {
+        // New character only: an independent documented Legacy baseline.
+        // Never copy the player's sample .key into default bindings.
+        rc=dm_keyfile_new_legacy(&temp);
+        if(rc==DM_KEYFILE_OK)rc=dm_keyfile_write_atomic(&temp,fn);
+    }
+    if(rc==DM_KEYFILE_OK) {
+        dm_keyfile_free(&profile);profile=temp;
+    } else dm_keyfile_free(&temp);
+    loaded=1;load_result=rc;
+    return rc;
+}
+int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk) {
+    pthread_mutex_lock(&pc_mu);
+    int rc=read_locked();
+    if(!rc)rc=dm_keyfile_get(&profile,id,slot,vk);
+    pthread_mutex_unlock(&pc_mu);return rc;
+}
+int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
+                       uint32_t *conflict,unsigned *conflict_slot) {
+    dm_fs_profile_lock();
+    pthread_mutex_lock(&pc_mu);
+    int rc=read_locked();
+    if(!rc) {
+        uint16_t old;
+        rc=dm_keyfile_get(&profile,id,slot,&old);
+        if(!rc) {
+            rc=dm_keyfile_bind_checked(&profile,id,slot,vk,conflict,conflict_slot);
+            if(!rc) {
+                char fn[1200];
+                rc=path(fn)?dm_keyfile_write_atomic(&profile,fn):DM_KEYFILE_INVALID;
+                if(rc) (void)dm_keyfile_set(&profile,id,slot,old);
+            }
+        }
+    }
+    pthread_mutex_unlock(&pc_mu);
+    dm_fs_profile_unlock();
+    return rc;
+}
+int dm_pc_profile_reset_legacy(void) {
+    dm_fs_profile_lock();
+    pthread_mutex_lock(&pc_mu);
+    int rc=read_locked();
+    if(!rc) {
+        dm_keyfile defaults={0};
+        rc=dm_keyfile_new_legacy(&defaults);
+        if(!rc) {
+            // Preserve record order and all unknown fields. Only alter known
+            // cmdId 0..56 keyboard VK fields, never unknown/extra records.
+            size_t n=0;const uint8_t *bytes=dm_keyfile_data(&profile,&n);
+            unsigned char *backup=malloc(n?n:1);
+            if(!backup)rc=DM_KEYFILE_IO;
+            else {
+                memcpy(backup,bytes,n);
+                for(uint32_t id=0;!rc && id<57;id++)
+                    for(unsigned slot=0;slot<2;slot++) {
+                        uint16_t vk;
+                        if(!dm_keyfile_get(&defaults,id,slot,&vk) &&
+                           dm_keyfile_get(&profile,id,slot,&vk)!=DM_KEYFILE_OK)
+                            rc=DM_KEYFILE_UNSUPPORTED;
+                        // Fetch separately (do not reuse overwritten vk).
+                        if(!rc) {
+                            (void)dm_keyfile_get(&defaults,id,slot,&vk);
+                            rc=dm_keyfile_set(&profile,id,slot,vk);
+                        }
+                    }
+                if(!rc) {
+                    char fn[1200];
+                    rc=path(fn)?dm_keyfile_write_atomic(&profile,fn):DM_KEYFILE_INVALID;
+                }
+                if(rc)memcpy(profile.raw,backup,n);
+                free(backup);
+            }
+        }
+        dm_keyfile_free(&defaults);
+    }
+    pthread_mutex_unlock(&pc_mu);
+    dm_fs_profile_unlock();return rc;
+}
+int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {
+    pthread_mutex_lock(&pc_mu);
+    int rc=read_locked();
+    if(!rc)rc=dm_keyfile_lookup_vk(&profile,vk,id,slot);
+    pthread_mutex_unlock(&pc_mu);return rc;
+}
+int dm_pc_vk_from_hid(unsigned u) {
+    if(u>=0x04 && u<=0x1d)return 'A'+(int)(u-0x04);
+    if(u>=0x1e && u<=0x26)return '1'+(int)(u-0x1e);
+    if(u==0x27)return '0';
+    if(u>=0x3a && u<=0x45)return 0x70+(int)(u-0x3a);
+    if(u>=0x59 && u<=0x61)return 0x61+(int)(u-0x59);
+    if(u==0x62)return 0x60;
+    switch(u) {
+    case 0x28: return 0x0d; case 0x29: return 0x1b;
+    case 0x2a: return 0x08; case 0x2b: return 0x09;
+    case 0x2c: return 0x20; case 0x2d: return 0xbd;
+    case 0x2e: return 0xbb; case 0x2f: return 0xdb;
+    case 0x30: return 0xdd; case 0x31: return 0xdc;
+    case 0x33: return 0xba; case 0x34: return 0xde;
+    case 0x35: return 0xc0; case 0x36: return 0xbc;
+    case 0x37: return 0xbe; case 0x38: return 0xbf;
+    case 0x39: return 0x14; case 0x46: return 0x2c;
+    case 0x47: return 0x91; case 0x48: return 0x13;
+    case 0x49: return 0x2d; case 0x4a: return 0x24;
+    case 0x4b: return 0x21; case 0x4c: return 0x2e;
+    case 0x4d: return 0x23; case 0x4e: return 0x22;
+    case 0x4f: return 0x27; case 0x50: return 0x25;
+    case 0x51: return 0x28; case 0x52: return 0x26;
+    case 0x54: return 0x6f; case 0x55: return 0x6a;
+    case 0x56: return 0x6d; case 0x57: return 0x6b;
+    case 0x58: return 0x0d; case 0x63: return 0x6e;
+    case 0x64: return 0xe2;
+    case 0xe0: case 0xe4: return 0x11;
+    case 0xe1: case 0xe5: return 0x10;
+    case 0xe2: case 0xe6: return 0x12;
+    case 0xe3: return 0x5b; case 0xe7: return 0x5c;
+    default: return -1;
+    }
+}
+int dm_pc_profile_action_for_hid(unsigned usage,uint32_t *id,unsigned *slot) {
+    int vk=dm_pc_vk_from_hid(usage);
+    return vk<0?DM_KEYFILE_UNSUPPORTED:
+        dm_pc_profile_action_for_vk((uint16_t)vk,id,slot);
+}

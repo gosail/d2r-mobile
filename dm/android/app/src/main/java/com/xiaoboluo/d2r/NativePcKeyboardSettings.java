@@ -83,6 +83,16 @@ final class NativePcKeyboardSettings {
             })
             .setNegativeButton("Cancel",null).show());
         rows.addView(reset);
+        Button modern=new Button(activity);
+        modern.setText("Restore Resurrected skills (1–0, - and =)");
+        modern.setOnClickListener(v->new AlertDialog.Builder(activity)
+            .setMessage("Use Resurrected skill keys 1–0, - and =? Potion keys 1–4 will be unbound to prevent conflicts.")
+            .setPositiveButton("Restore",(d,w)->{
+                int rc=DmActivity.nativePcResetResurrected();
+                if(rc==0){parent[0].dismiss();show(activity);}
+                else toast(activity,"Cannot save native .key ("+rc+")");
+            }).setNegativeButton("Cancel",null).show());
+        rows.addView(modern);
         parent[0]=new AlertDialog.Builder(activity).setTitle("Native PC .key · primary / secondary")
             .setView(sc).setPositiveButton("Done",null).create();
         parent[0].show();

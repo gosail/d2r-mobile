@@ -277,6 +277,13 @@ static int mac_hid_usage(unsigned short c) {
 static void on_key(NSEvent *e, int down) {
     int u=mac_hid_usage(e.keyCode);
     if(u<0) return;
+    if(dm_kbmap_pc_mode()){
+        // Native PC .key is the sole keyboard dispatcher in this mode.
+        // Never let old .kbm actions keep firing after a rebind.
+        dm_kbmap_key_event((unsigned)u,down);
+        if(down)dm_padmode_request_glyph(DM_GLYPH_KBD);
+        return;
+    }
     if((int)g_mac_keys_down[u]==!!down) return;
     if(down) {
         int action=dm_kbmap_action((unsigned)u);
@@ -451,8 +458,8 @@ static NSString *mac_pc_vk_label(int vk) {
     if(old)[old removeFromSuperview];
     CGFloat w=MAX(230,g_mac_keyboard_scroll.contentSize.width-14),rh=36;
     NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
-    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,(n+5)*rh+12)];
-    for(NSUInteger i=0;i<n+5;i++) {
+    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,(n+6)*rh+12)];
+    for(NSUInteger i=0;i<n+6;i++) {
         NSString *title;
         if(i<n) {
             unsigned usage=mac_key_rows[i].usage;int action=dm_kbmap_action(usage);const char *name="Unbound";
@@ -465,9 +472,12 @@ static NSString *mac_pc_vk_label(int vk) {
             const char *const roles[]={"主点击 / Primary","次要使用 / Secondary","切换地图 / Map"};
             title=[NSString stringWithFormat:@"%s   →   %s",buttons[physical],roles[role>=0&&role<3?role:0]];
         } else if(i==n+3) title=@"恢复此角色模拟手柄键位 / Reset .kbm";
-        else title=g_mac_pc_capture_id>=0?
+        else if(i==n+4)title=g_mac_pc_capture_id>=0?
             [NSString stringWithFormat:@"PC .key: waiting for key · cmd %d / slot %d",g_mac_pc_capture_id,g_mac_pc_capture_slot]:
             @"PC .key: Original keyboard actions · Primary / Secondary";
+        else title=dm_kbmap_pc_mode()?
+            @"Input Mode: Native PC .key (click to select legacy .kbm)":
+            @"Input Mode: Legacy gamepad emulation (click to select native PC)";
         NSButton *b=[NSButton buttonWithTitle:title target:self
            action:i==n+4?@selector(chooseNativeBinding:):@selector(chooseBinding:)];
         b.tag=i;b.frame=NSMakeRect(8,i*rh+2,w-16,rh-4);
@@ -529,6 +539,14 @@ static NSString *mac_pc_vk_label(int vk) {
 - (void)chooseBinding:(NSButton *)button {
     NSUInteger i=(NSUInteger)button.tag;
     NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
+    if(i==n+5) {
+        if(!dm_kbmap_set_pc_mode(!dm_kbmap_pc_mode()))NSBeep();
+        else {
+            memset(g_mac_keys_down,0,sizeof g_mac_keys_down);
+            g_btn=0;g_w=g_a=g_s=g_d=0;push();
+        }
+        [self refresh];return;
+    }
     if(i==n+3) {
         NSAlert *confirm=[NSAlert new];
         confirm.messageText=@"恢复此角色默认键位和鼠标按钮？";

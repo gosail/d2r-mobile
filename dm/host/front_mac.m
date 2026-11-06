@@ -770,13 +770,16 @@ void front_run(void (*guest)(void)) {
                 }
                 return nil;
             }
+            // Do not dispatch modifiers into the game while a settings
+            // editor is accepting input. flagsChanged fires independently
+            // from keyDown and previously bypassed the editor guard.
+            if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
+                !g_mac_keyboard_panel.hidden) return e;
             if(e.type==NSEventTypeFlagsChanged) {
                 mac_modifier_changed(e);
                 return e;
             }
             if (e.modifierFlags & NSEventModifierFlagCommand) return e;   // 带 ⌘ 的留给菜单（⌘Q、⌃⌘F） | Keys with ⌘ are left to the menu (⌘Q, ⌃⌘F)
-            if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
-                !g_mac_keyboard_panel.hidden) return e; // editor owns navigation
             if (!e.isARepeat) on_key(e, e.type == NSEventTypeKeyDown);
             return nil;   // 吃掉，免得系统提示音 | Swallow it to avoid the system beep
         }];

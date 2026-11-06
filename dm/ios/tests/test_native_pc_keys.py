@@ -89,6 +89,13 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn("dm_kbmap_key_event((unsigned)usage,down)",mac)
         self.assertIn("nativePcSetMode",activity)
         self.assertIn("nativePcBind",java)
+        # Guest-provided files may omit commands; editors must never
+        # assume command zero or a fixed 57-pair payload is present.
+        self.assertIn("dm_pc_profile_file_status()!=1",mac)
+        self.assertIn("dm_pc_profile_file_status()!=1",ios)
+        self.assertIn("if(ok==DM_KEYFILE_NOT_FOUND)item.enabled=NO",ios)
+        self.assertIn("nativePcStatus",activity)
+        self.assertIn("button.setEnabled(vk>=0)",java)
         self.assertIn("KeyboardInput.hidUsage(keyCode)",java)
         for source in (ios,mac,java):
             self.assertIn("0x100",source) # original mouse-middle pseudo key

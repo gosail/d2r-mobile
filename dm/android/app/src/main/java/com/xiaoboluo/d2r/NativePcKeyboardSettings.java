@@ -75,7 +75,8 @@ final class NativePcKeyboardSettings {
                 Button button=new Button(activity);
                 button.setAllCaps(false);
                 button.setTextColor(Color.WHITE);
-                button.setText(COMMANDS[id]+"\n"+(slot==0?"Primary: ":"Secondary: ")+keyName(vk));
+                String status=DmActivity.nativePcActionSupported(id)?"":" · runtime pending";
+                button.setText(COMMANDS[id]+status+"\n"+(slot==0?"Primary: ":"Secondary: ")+keyName(vk));
                 line.addView(button,new LinearLayout.LayoutParams(0,-2,1));
                 button.setOnClickListener(v->capture(activity,parent[0],command,s));
             }

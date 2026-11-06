@@ -1,29 +1,20 @@
-// D2R Mobile portable physical-keyboard mapping (USB HID usage IDs).
-// Config is independent of the PC .key/.ctl format.
+// Physical-keyboard bridge: no private character configuration file.
+// Guest native character .key owns key bindings and .ctl owns gamepad bindings.
 #pragma once
 enum { DM_KB_MOVE_UP=16, DM_KB_MOVE_LEFT=17, DM_KB_MOVE_DOWN=18, DM_KB_MOVE_RIGHT=19,
        DM_KB_ENTER=40, DM_KB_ESCAPE=41, DM_KB_MAP=42,
        DM_KB_SKILL1=48, DM_KB_SKILL8=55, DM_KB_UNBOUND=255 };
-int dm_kbmap_action(unsigned usage);
-int dm_kbmap_bind(unsigned usage,unsigned action);
-int dm_kbmap_restore_defaults_checked(void); // false if no selected hero or foreign .key
-void dm_kbmap_restore_defaults(void); // compatibility wrapper
+int dm_kbmap_action(unsigned usage); // built-in menu fallback
+int dm_kbmap_bind(unsigned usage,unsigned action); // no second persistent mapper
+int dm_kbmap_restore_defaults_checked(void); // not an original game .key writer
+void dm_kbmap_restore_defaults(void);
 void dm_kbmap_key_event(unsigned usage,int down);
 void dm_kbmap_reset(void);
-// 1 = native PC .key command semantics, 0 = legacy .kbm HID->controller.
-int dm_kbmap_pc_mode(void);
-int dm_kbmap_set_pc_mode(int enabled);
-
-// UI source: original Controls tab, independent from controller mapping data.
+int dm_kbmap_pc_mode(void); // native mode on when original .key exists
+int dm_kbmap_set_pc_mode(int enabled); // compatibility no-op for enabled=true
 int dm_kbmap_controls_visible(void);
 void dm_kbmap_controls_event(const char *category,const char *action,const char *arg);
-
-// Physical mouse button (0 left, 1 right, 2 middle) -> logical
-// 0 primary/click, 1 secondary/use, 2 toggle map. Same local config.
-int dm_kbmap_mouse_action(unsigned physical);
-int dm_kbmap_bind_mouse(unsigned physical,unsigned action);
-
-// Called on the guest game thread when the active/selected character changes.
+int dm_kbmap_mouse_action(unsigned physical); // fixed PC mouse roles
+int dm_kbmap_bind_mouse(unsigned physical,unsigned action); // no private storage
 void dm_kbmap_select_character(const char *name);
-// Invoked before a transactional game save; never touches native .ctl.
-void dm_kbmap_pre_commit(const char *workdir);
+void dm_kbmap_pre_commit(const char *workdir); // no-op

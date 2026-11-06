@@ -227,6 +227,7 @@ static void push(void) {
 // USB HID usage adapter for AppKit virtual-key codes; same local binding
 // file as iPad/Android. Default J/K/U/I, WASD etc. remain unchanged.
 static unsigned char g_mac_keys_down[256],g_mac_actions[256];
+static unsigned char g_mac_modifier_down[256];
 static int mac_hid_usage(unsigned short c) {
     switch(c) {
         case 0:return 0x04; case 1:return 0x16; case 2:return 0x07;
@@ -320,6 +321,34 @@ static void on_key(NSEvent *e, int down) {
     push();
 }
 
+// flagsChanged is how AppKit delivers modifier *edges*; ordinary keyDown
+// and keyUp are not sent for Shift/Control/Option. A separate per-side latch
+// handles L+R Shift without interpreting the second left-side release as down.
+static NSEventModifierFlags mac_modifier_mask(unsigned short code) {
+    switch(code) {
+    case 56:case 60:return NSEventModifierFlagShift;
+    case 59:case 62:return NSEventModifierFlagControl;
+    case 58:case 61:return NSEventModifierFlagOption;
+    case 57:return NSEventModifierFlagCapsLock;
+    default:return 0; // Command remains owned by macOS keyboard shortcuts
+    }
+}
+static void mac_modifier_changed(NSEvent *event) {
+    NSEventModifierFlags flag=mac_modifier_mask(event.keyCode);
+    int usage=mac_hid_usage(event.keyCode);
+    if(!flag || usage<0)return;
+    if(event.keyCode==57) {
+        // Caps Lock toggles state; do not leave a game action held until
+        // the next toggle. A physical press is a short independent pulse.
+        on_key(event,1);on_key(event,0);
+        return;
+    }
+    int previous=g_mac_modifier_down[usage];
+    int pressed=(event.modifierFlags & flag)?!previous:0;
+    if(pressed==previous)return;
+    g_mac_modifier_down[usage]=(unsigned char)pressed;
+    on_key(event,pressed);
+}
 // All three physical mouse buttons can be assigned to a *logical* primary,
 // secondary, or map action. The role is captured on mouse-down and kept until
 // that same physical button is released. Only one primary touch is active.
@@ -456,6 +485,8 @@ static NSString *mac_pc_vk_label(int vk) {
     g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
     // Flush any held game key when switching from gameplay to the editor.
     memset(g_mac_keys_down,0,sizeof g_mac_keys_down);
+    memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down);
+    dm_kbmap_reset();
     g_btn=0;g_w=g_a=g_s=g_d=0;push();
     if(g_mac_keyboard_panel)g_mac_keyboard_panel.hidden=!g_mac_keyboard_mode;
     if(g_mac_keyboard_mode)[self refresh];
@@ -738,7 +769,10 @@ void front_run(void (*guest)(void)) {
                 }
                 return nil;
             }
-            if(e.type==NSEventTypeFlagsChanged)return e;
+            if(e.type==NSEventTypeFlagsChanged) {
+                mac_modifier_changed(e);
+                return e;
+            }
             if (e.modifierFlags & NSEventModifierFlagCommand) return e;   // 带 ⌘ 的留给菜单（⌘Q、⌃⌘F） | Keys with ⌘ are left to the menu (⌘Q, ⌃⌘F)
             if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
                 !g_mac_keyboard_panel.hidden) return e; // editor owns navigation
@@ -909,7 +943,7 @@ void front_run(void (*guest)(void)) {
                   LOG("DM_TEST_COVER：盖上 %.1f 秒，游戏窗口%s是主窗口", dur, win.isKeyWindow ? "" : "不");
                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dur * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [c orderOut:nil]; LOG("DM_TEST_COVER：拿开"); });
               }); }
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = g_mouse_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); memset(mac_mouse_down,0,sizeof mac_mouse_down); memset(mac_mouse_secondary,0,sizeof mac_mouse_secondary); mac_mouse_primary_owner=-1; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = g_mouse_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down); dm_kbmap_reset(); memset(mac_mouse_down,0,sizeof mac_mouse_down); memset(mac_mouse_secondary,0,sizeof mac_mouse_secondary); mac_mouse_primary_owner=-1; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
         [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(1); }];
         [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
         [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];

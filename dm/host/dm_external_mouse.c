@@ -3,6 +3,7 @@
 // macOS keeps its already tested live mouse path in touch_mac.c.
 #include "dm_external_mouse.h"
 #include "dm_kbmap.h"
+#include "dm_pc_input.h"
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -145,8 +146,11 @@ void dm_external_mouse_step(void) {
         if (e->op == DM_MOUSE_RIGHT_UP) { mouse_right_item=0; atomic_store(&mouse_right,0); continue; }
         if (e->op == DM_MOUSE_WHEEL) {
             if (e->arg) {
-                atomic_store(&mouse_scroll, e->arg > 0 ? 1 : -1);
-                atomic_store(&mouse_scroll_until, now_ns() + 120000000ull);
+                int direction=dm_kbmap_pc_mode() ?
+                    dm_pc_input_wheel(e->arg) : (e->arg>0?1:-1);
+                atomic_store(&mouse_scroll,direction);
+                atomic_store(&mouse_scroll_until, direction?
+                    now_ns()+120000000ull:0);
             }
             continue;
         }

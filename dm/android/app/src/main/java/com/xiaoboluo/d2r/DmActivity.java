@@ -137,7 +137,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     // Game mouse routing must not consume events belonging to the Java
     // Controls editor. Capture the entire down/up sequence once it begins
     // on the editor, even when the cursor is dragged outside it.
-    private boolean controlsMouseCaptured,gameMouseCaptured;
+    private boolean controlsMouseCaptured,gameMouseCaptured,controlsTouchCaptured;
     private boolean mouseHitsControls(MotionEvent e) {
         if (kbDeviceTabs == null || kbDeviceTabs.getVisibility()!=View.VISIBLE)
             return false;
@@ -351,6 +351,16 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
             }
         }
         int action = e.getActionMasked();
+        // Native settings widgets must also receive the FIRST finger tap.
+        // Otherwise PadInput.onTouch() consumes it as a controller->touch
+        // mode switch, making every editor button appear to need two taps.
+        if(controlsTouchCaptured || mouseHitsControls(e)) {
+            if(action==MotionEvent.ACTION_DOWN)controlsTouchCaptured=true;
+            super.dispatchTouchEvent(e);
+            if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL)
+                controlsTouchCaptured=false;
+            return true;
+        }
         if (action == MotionEvent.ACTION_DOWN) {
             boolean wasPad = PadInput.isPadMode();
             PadInput.onTouch();
@@ -727,11 +737,11 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     @Override public void onDisplayRemoved(int id) { updateRefresh(); }
     @Override public void onDisplayChanged(int id) { updateRefresh(); }
     @Override protected void onResume() { super.onResume(); resumed = true; immersive(); startHost(); updateRefresh(); if (started) { nativeFocus(3); if (touchOverlay != null && bootFailure == 0) applyPadMode(PadInput.isPadMode()); if (camSensor != null) camSensor.start(nativeCamSensor()); if (camButtons != null) camButtons.start(); if (camThreats != null) camThreats.start(); } }
-    @Override protected void onPause() { controlsMouseCaptured=gameMouseCaptured=false; if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } resumed = false; if (camSensor != null) camSensor.stop(); if (camButtons != null) camButtons.stop(); if (camThreats != null) camThreats.stop(); if (inputDialog != null) inputDialog.dismiss(); releaseTouches(); PadInput.reset(); if (touchOverlay != null) touchOverlay.setInputEnabled(false); if (started) nativeFocus(0); super.onPause(); }
+    @Override protected void onPause() { controlsMouseCaptured=gameMouseCaptured=controlsTouchCaptured=false; if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } resumed = false; if (camSensor != null) camSensor.stop(); if (camButtons != null) camButtons.stop(); if (camThreats != null) camThreats.stop(); if (inputDialog != null) inputDialog.dismiss(); releaseTouches(); PadInput.reset(); if (touchOverlay != null) touchOverlay.setInputEnabled(false); if (started) nativeFocus(0); super.onPause(); }
     @Override protected void onStart() { super.onStart(); if (started) nativeFocus(2); }
     @Override protected void onStop() { if (started) nativeFocus(1); com.xiaoboluo.d2r.widget.HeroWidgetProvider.requestUpdate(this); super.onStop(); }
     @Override protected void onDestroy() { kbUiHandler.removeCallbacks(kbUiPoll); if (displays != null) displays.unregisterDisplayListener(this); if (inputDialog != null) inputDialog.dismiss(); if (current.get() == this) current.clear(); super.onDestroy(); }
-    @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); else { controlsMouseCaptured=gameMouseCaptured=false; releaseTouches(); if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } } }
+    @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); else { controlsMouseCaptured=gameMouseCaptured=controlsTouchCaptured=false; releaseTouches(); if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } } }
 
     @Override public void surfaceCreated(SurfaceHolder h) {}
     @Override public void surfaceChanged(SurfaceHolder h, int format, int w, int ht) {

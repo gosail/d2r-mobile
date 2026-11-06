@@ -42,6 +42,8 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0',src("host/front_mac.m"))
         self.assertIn('controlsMouseCaptured',android)
         self.assertIn('gameMouseCaptured',android)
+        self.assertIn('controlsTouchCaptured',android)
+        self.assertIn('if(controlsTouchCaptured || mouseHitsControls(e))',android)
         self.assertIn('if(mac_controls_hit(v,e) && !mac_mouse_down[0])',src("host/front_mac.m"))
         self.assertIn('if (mac_controls_hit(v,e)) return e; // Native NSScrollView scrolls.',src("host/front_mac.m"))
         self.assertIn('UISegmentedControl *_kbDeviceTabs',ui)

@@ -180,16 +180,18 @@ int main(void) {
     assert(game_right_y==0);
     game_seed("Alice",0);
     assert(dm_pc_input_supported_action(7) && dm_pc_input_supported_action(14));
-    assert(dm_pc_input_supported_action(5)); // Enter, valid in a guest panel
+    // In the original native command table ID 5 is Chat, not UI Enter.
+    // Unsupported chat must not simulate a controller A click in any scene.
+    assert(!dm_pc_input_supported_action(5));
     panel_open=1;
     dm_pc_input_reset();
-    dm_pc_input_event(0x28,1); // native Enter -> confirm
-    assert((game_buttons & DM_BTN_A)!=0);
-    dm_pc_input_event(0x28,0);
+    dm_pc_input_event(0x28,1);
     assert(game_buttons==0);
+    assert(dm_pc_input_latched_command(0x28)==-1);
+    dm_pc_input_event(0x28,0);
     panel_open=0;
     dm_pc_input_event(0x28,1);
-    assert(!(game_buttons&DM_BTN_A)); // no synthetic gameplay click
+    assert(game_buttons==0);
     dm_pc_input_event(0x28,0);
     assert(!dm_pc_input_supported_action(49) && !dm_pc_input_supported_action(50));
     dm_pc_input_event(0x3a,1); // F1 uses native skill 1 -> Switch A

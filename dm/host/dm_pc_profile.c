@@ -53,9 +53,9 @@ static int read_locked(void) {
     dm_keyfile temp={0};int rc=dm_keyfile_read(&temp,fn);
     if(rc==DM_KEYFILE_IO && errno==ENOENT)rc=DM_KEYFILE_NOT_FOUND;
     if(rc==DM_KEYFILE_NOT_FOUND) {
-        // New character only: an independent documented Legacy baseline.
-        // Never copy the player's sample .key into default bindings.
-        rc=dm_keyfile_new_legacy(&temp);
+        // New character: independent Resurrected skill-key preset, never
+        // reuse imported personal bindings as a default.
+        rc=dm_keyfile_new_resurrected(&temp);
         if(rc==DM_KEYFILE_OK)rc=dm_keyfile_write_atomic(&temp,fn);
     }
     if(rc==DM_KEYFILE_OK) {
@@ -91,13 +91,13 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
     dm_fs_profile_unlock();
     return rc;
 }
-int dm_pc_profile_reset_legacy(void) {
+static int reset_with(int (*factory)(dm_keyfile *)) {
     dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);
     int rc=read_locked();
     if(!rc) {
         dm_keyfile defaults={0};
-        rc=dm_keyfile_new_legacy(&defaults);
+        rc=factory(&defaults);
         if(!rc) {
             // Preserve record order and all unknown fields. Only alter known
             // cmdId 0..56 keyboard VK fields, never unknown/extra records.
@@ -130,6 +130,12 @@ int dm_pc_profile_reset_legacy(void) {
     }
     pthread_mutex_unlock(&pc_mu);
     dm_fs_profile_unlock();return rc;
+}
+int dm_pc_profile_reset_legacy(void) {
+    return reset_with(dm_keyfile_new_legacy);
+}
+int dm_pc_profile_reset_resurrected(void) {
+    return reset_with(dm_keyfile_new_resurrected);
 }
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {
     pthread_mutex_lock(&pc_mu);

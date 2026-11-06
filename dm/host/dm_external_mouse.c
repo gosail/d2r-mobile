@@ -130,7 +130,9 @@ void dm_external_mouse_step(void) {
             mouse_hover_valid=0; dm_world_hover_end(); continue;
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
-            dm_world_mouse_map_toggle(); continue;
+            if(dm_kbmap_pc_mode())(void)dm_pc_input_mouse_special(0x100);
+            else dm_world_mouse_map_toggle();
+            continue;
         }
         if (e->op == DM_MOUSE_RIGHT_DOWN) {
             atomic_store(&mouse_active,1); // Right-click alone must run the native use-item pump.

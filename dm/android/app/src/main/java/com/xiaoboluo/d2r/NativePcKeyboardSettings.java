@@ -51,6 +51,7 @@ final class NativePcKeyboardSettings {
         Toast.makeText(activity,message,Toast.LENGTH_LONG).show();
     }
     static void show(Activity activity) {
+        final AlertDialog[] parent={null};
         ScrollView sc=new ScrollView(activity);
         LinearLayout rows=new LinearLayout(activity);
         rows.setPadding(18,12,18,12);rows.setOrientation(LinearLayout.VERTICAL);
@@ -67,7 +68,7 @@ final class NativePcKeyboardSettings {
                 button.setTextColor(Color.WHITE);
                 button.setText(COMMANDS[id]+"\n"+(slot==0?"Primary: ":"Secondary: ")+keyName(vk));
                 line.addView(button,new LinearLayout.LayoutParams(0,-2,1));
-                button.setOnClickListener(v->capture(activity,command,s));
+                button.setOnClickListener(v->capture(activity,parent[0],command,s));
             }
             rows.addView(line);
         }
@@ -77,22 +78,23 @@ final class NativePcKeyboardSettings {
             .setMessage("Restore Legacy keyboard bindings for this character?")
             .setPositiveButton("Restore",(d,w)->{
                 int rc=DmActivity.nativePcResetLegacy();
-                if(rc==0){toast(activity,"Legacy bindings restored; reopen to refresh");}
+                if(rc==0){parent[0].dismiss();show(activity);}
                 else toast(activity,"Cannot save native .key ("+rc+")");
             })
             .setNegativeButton("Cancel",null).show());
         rows.addView(reset);
-        new AlertDialog.Builder(activity).setTitle("Native PC .key · primary / secondary")
-            .setView(sc).setPositiveButton("Done",null).show();
+        parent[0]=new AlertDialog.Builder(activity).setTitle("Native PC .key · primary / secondary")
+            .setView(sc).setPositiveButton("Done",null).create();
+        parent[0].show();
     }
-    private static void capture(Activity activity,int action,int slot) {
+    private static void capture(Activity activity,AlertDialog parent,int action,int slot) {
         AlertDialog dialog=new AlertDialog.Builder(activity)
             .setTitle(COMMANDS[action]+" · "+(slot==0?"Primary":"Secondary"))
             .setMessage("Press a physical keyboard key")
             .setNegativeButton("Cancel",null)
             .setNeutralButton("Clear",(d,w)->{
                 int rc=DmActivity.nativePcBind(action,slot,0xffff);
-                if(rc==0)show(activity);else toast(activity,"Cannot unbind ("+rc+")");
+                if(rc==0){parent.dismiss();show(activity);}else toast(activity,"Cannot unbind ("+rc+")");
             }).create();
         dialog.setOnKeyListener((DialogInterface d,int keyCode,KeyEvent event)->{
             if(event.getAction()!=KeyEvent.ACTION_DOWN || event.getRepeatCount()!=0)return true;
@@ -103,7 +105,7 @@ final class NativePcKeyboardSettings {
                 return true;
             }
             int rc=DmActivity.nativePcBind(action,slot,vk);
-            if(rc==0) { dialog.dismiss();show(activity); }
+            if(rc==0) { dialog.dismiss();parent.dismiss();show(activity); }
             else if(rc==-5)toast(activity,"Binding conflicts with another action");
             else toast(activity,"Cannot save native .key ("+rc+")");
             return true;

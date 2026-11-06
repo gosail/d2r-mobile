@@ -9,10 +9,10 @@ ROOT=Path(__file__).resolve().parents[2]
 def src(path):return (ROOT/path).read_text(encoding="utf-8")
 
 class NativePcKeyContracts(unittest.TestCase):
-    def test_native_keyfile_and_private_emulation_are_disjoint(self):
+    def test_native_keyfile_and_runtime_controller_bridge(self):
         c=src("host/dm_kbmap.c")
-        self.assertIn('"%s/%s/%s.kbm"',c)
-        self.assertIn('"%s/%s/%s.key"',c)
+        self.assertNotIn('.kbm',c)
+        self.assertNotIn('fopen(',c)
         self.assertIn('if(pc_mode)',c)
         self.assertIn('use_native=dm_pc_profile_file_status()==1;',c)
         self.assertIn('else if(!dm_uiscreen_ingame())use_native=0;',c)
@@ -33,7 +33,7 @@ class NativePcKeyContracts(unittest.TestCase):
         hover=src("host/dm_world.c")
         self.assertIn('if (view.immune_mask)',hover)
         self.assertNotIn('if (view.details[0])\n                                strlcat(view.details,dm_lang_zh()?"免疫"',hover)
-        self.assertIn('pcMode=%d',c)
+        self.assertIn('return enabled!=0;',c)
         self.assertIn('dm_pc_profile_select(name)',c)
         self.assertIn('dm_pc_input_reset(); // no stale hero-specific held command',c)
     def test_codecs_are_independent_of_uploaded_character_config(self):

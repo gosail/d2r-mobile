@@ -1,5 +1,5 @@
 // Native PC keyboard actions decoded from the selected character's .key.
-// This is a separate input source from gamepad/touch and legacy .kbm.
+// It uses the guest's original .key while controller .ctl remains independent.
 #pragma once
 #include <stdint.h>
 void dm_pc_input_event(unsigned hid,int pressed);

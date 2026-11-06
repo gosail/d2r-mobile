@@ -20,7 +20,7 @@ static const uint64_t slot_buttons[6] = {
 };
 int dm_pc_input_supported_action(uint32_t id) {
     return id==0 || id==1 || id==4 || id==12 || id==44 || id==54 ||
-           id==38 || id==45 ||
+           id==38 || id==39 || id==40 || id==45 ||
            id==7 || id==23 || id==24 || id==25 || id==26 ||
            id==35 || id==37 || id==56 || (id>=14 && id<=21) ||
            (id>=46 && id<=49);
@@ -50,10 +50,15 @@ static uint64_t command_bits(unsigned id) {
     }
 }
 static void publish_locked(void) {
-    uint64_t bits=0;
-    for(unsigned i=0;i<256;i++)if(down[i])
+    uint64_t bits=0;int32_t right_y=0;
+    for(unsigned i=0;i<256;i++)if(down[i]) {
         bits|=held_mask[i];
-    dm_kb_set(bits,0,0,0,0);
+        // Original PC previous/next-skill commands are implemented by the
+        // existing Switch right-stick skill selector, not fake face buttons.
+        if(command[i]==39)right_y=32767;
+        if(command[i]==40)right_y=-32767;
+    }
+    dm_kb_set(bits,0,0,0,right_y);
 }
 void dm_pc_input_reset(void) {
     pthread_mutex_lock(&input_mu);
@@ -78,6 +83,22 @@ void dm_pc_input_guest_step(void) {
     pthread_mutex_unlock(&input_mu);
     for(unsigned i=0;i<n;i++)
         dm_ui_pc_toggle_panel(batch[i]);
+}
+int dm_pc_input_wheel(int delta) {
+    if(!delta)return 0;
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    uint16_t pseudo=delta>0?0x103:0x104;
+    if(dm_pc_profile_action_for_vk(pseudo,&id,&slot))return 0;
+    if(id==39)return 1;
+    if(id==40)return -1;
+    // The map toggle and panel shortcuts can be emitted as one-shot events.
+    if(id==7 || id==45){dm_world_mouse_map_toggle();return 0;}
+    if(id==0 || id==1 || id==4 || id==12 || id==44 || id==54) {
+        pthread_mutex_lock(&input_mu);
+        if(queue_tail-queue_head<32)panel_queue[queue_tail++%32]=(unsigned char)id;
+        pthread_mutex_unlock(&input_mu);
+    }
+    return 0; // refuse to trigger unverified commands on a scroll event
 }
 void dm_pc_input_event(unsigned hid,int pressed) {
     if(hid>=256)return;

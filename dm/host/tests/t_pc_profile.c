@@ -45,7 +45,7 @@ int main(void) {
     dir("Alice");dir("Bob");dir("Eve");
     assert(dm_pc_profile_select("LateMount")==DM_KEYFILE_OK);
     uint16_t late_vk=0;
-    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_NOT_FOUND);
+    assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_IO);
     dir("LateMount"); // previously cached IO would remain invalid forever
     assert(dm_pc_profile_get(0,0,&late_vk)==DM_KEYFILE_OK && late_vk=='A');
 

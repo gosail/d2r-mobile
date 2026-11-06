@@ -54,6 +54,9 @@ int main(int argc,char **argv) {
       assert(fwrite(native_bytes,1,sizeof native_bytes,nf)==sizeof native_bytes);
       assert(!fclose(nf)); }
     dm_kbmap_select_character("Alice");
+    assert(dm_kbmap_pc_mode()==1); // new characters prefer PC native
+    assert(dm_kbmap_set_pc_mode(0));
+    assert(dm_kbmap_pc_mode()==0);
     assert(dm_kbmap_action(0x1a)==DM_KB_MOVE_UP);
     assert(dm_kbmap_action(0x0d)==0);
     dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
@@ -167,6 +170,13 @@ int main(int argc,char **argv) {
       assert(fgets(line,sizeof line,g));assert(!strcmp(line,"0d=15\n"));assert(!fclose(g)); }
     assert(access(davekbm,F_OK)==0);
     dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
+    assert(dm_kbmap_pc_mode()==0);
+    assert(dm_kbmap_set_pc_mode(1));
+    assert(dm_kbmap_pc_mode()==1);
+    dm_kbmap_select_character("Bob");
+    dm_kbmap_select_character("Alice");
+    assert(dm_kbmap_pc_mode()==1); // mode persists in .kbm, distinct from native .key
+    assert(dm_kbmap_set_pc_mode(0));
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
     assert(dm_kbmap_mouse_action(0)==0);
     char cw[1200];snprintf(cw,sizeof cw,"%s/Charlie/Charlie.kbm",work_dir);

@@ -461,34 +461,25 @@ static NSString *mac_pc_vk_label(int vk) {
     if(!g_mac_keyboard_scroll)return;
     NSView *old=g_mac_keyboard_scroll.documentView;
     if(old)[old removeFromSuperview];
-    CGFloat w=MAX(230,g_mac_keyboard_scroll.contentSize.width-14),rh=36;
-    NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
-    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,(n+6)*rh+12)];
-    for(NSUInteger i=0;i<n+6;i++) {
-        NSString *title;
-        if(i<n) {
-            unsigned usage=mac_key_rows[i].usage;int action=dm_kbmap_action(usage);const char *name="Unbound";
-            for(unsigned k=0;k<sizeof(mac_actions)/sizeof(mac_actions[0]);k++)
-                if(mac_actions[k]==(unsigned)action){name=mac_action_names[k];break;}
-            title=[NSString stringWithFormat:@"%s   →   %s",mac_key_rows[i].name,name];
-        } else if(i<n+3) {
-            unsigned physical=(unsigned)(i-n),role=dm_kbmap_mouse_action(physical);
-            const char *const buttons[]={"鼠标左键 / Left","鼠标右键 / Right","鼠标中键 / Middle"};
-            const char *const roles[]={"主点击 / Primary","次要使用 / Secondary","切换地图 / Map"};
-            title=[NSString stringWithFormat:@"%s   →   %s",buttons[physical],roles[role>=0&&role<3?role:0]];
-        } else if(i==n+3) title=@"恢复此角色模拟手柄键位 / Reset .kbm";
-        else if(i==n+4)title=g_mac_pc_capture_id>=0?
-            [NSString stringWithFormat:@"PC .key: waiting for key · cmd %d / slot %d",g_mac_pc_capture_id,g_mac_pc_capture_slot]:
-            @"PC .key: Original keyboard actions · Primary / Secondary";
-        else title=dm_kbmap_pc_mode()?
-            @"Input Mode: Native PC .key (click to select legacy .kbm)":
-            @"Input Mode: Legacy gamepad emulation (click to select native PC)";
-        NSButton *b=[NSButton buttonWithTitle:title target:self
-           action:i==n+4?@selector(chooseNativeBinding:):@selector(chooseBinding:)];
-        b.tag=i;b.frame=NSMakeRect(8,i*rh+2,w-16,rh-4);
-        b.alignment=NSTextAlignmentLeft;
-        [rows addSubview:b];
-    }
+    CGFloat w=MAX(230,g_mac_keyboard_scroll.contentSize.width-14);
+    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,120)];
+    NSString *name=g_mac_pc_capture_id>=0?
+        [NSString stringWithFormat:@"原生 .key · cmd %d / slot %d · 请按物理键",
+            g_mac_pc_capture_id,g_mac_pc_capture_slot]:
+        @"原生角色 .key · 编辑主键 / 副键";
+    NSButton *entry=[NSButton buttonWithTitle:name target:self
+        action:@selector(chooseNativeBinding:)];
+    entry.frame=NSMakeRect(8,4,w-16,40);
+    entry.alignment=NSTextAlignmentLeft;
+    [rows addSubview:entry];
+    NSTextField *info=[NSTextField labelWithString:
+        @"键盘通过原生 .key 命令模拟游戏操作；手柄沿用 .ctl。"];
+    info.frame=NSMakeRect(10,49,w-20,28);
+    [rows addSubview:info];
+    NSTextField *mouse=[NSTextField labelWithString:
+        @"鼠标左键：交互　右键：使用　中键/滚轮：可在 .key 中绑定"];
+    mouse.frame=NSMakeRect(10,78,w-20,28);
+    [rows addSubview:mouse];
     g_mac_keyboard_scroll.documentView=rows;
 }
 - (void)chooseNativeBinding:(id)sender {
@@ -577,60 +568,7 @@ static NSString *mac_pc_vk_label(int vk) {
     }
 }
 - (void)chooseBinding:(NSButton *)button {
-    NSUInteger i=(NSUInteger)button.tag;
-    NSUInteger n=sizeof(mac_key_rows)/sizeof(mac_key_rows[0]);
-    if(i==n+5) {
-        if(!dm_kbmap_set_pc_mode(!dm_kbmap_pc_mode()))NSBeep();
-        else {
-            memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down);
-            dm_kbmap_reset();push();
-        }
-        [self refresh];return;
-    }
-    if(i==n+3) {
-        NSAlert *confirm=[NSAlert new];
-        confirm.messageText=@"恢复此角色默认键位和鼠标按钮？";
-        [confirm addButtonWithTitle:@"恢复"];[confirm addButtonWithTitle:@"取消"];
-        if([confirm runModal]==NSAlertFirstButtonReturn) {
-            if(dm_kbmap_restore_defaults_checked())[self refresh];
-            else {
-                NSAlert *fail=[NSAlert new];fail.messageText=@"无法保存角色 .kbm";
-                fail.informativeText=@"请先选择角色，检查手柄模拟配置文件是否可写。";
-                [fail addButtonWithTitle:@"确定"];[fail runModal];
-            }
-        }
-        return;
-    }
-    NSPopUpButton *picker=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,350,32) pullsDown:NO];
-    NSString *label;
-    if(i<n) {
-        label=[NSString stringWithUTF8String:mac_key_rows[i].name];
-        for(unsigned j=0;j<sizeof(mac_actions)/sizeof(mac_actions[0]);j++) {
-            [picker addItemWithTitle:[NSString stringWithUTF8String:mac_action_names[j]]];
-            picker.lastItem.tag=mac_actions[j];
-            if(dm_kbmap_action(mac_key_rows[i].usage)==(int)mac_actions[j])
-                [picker selectItemAtIndex:j];
-        }
-    } else {
-        unsigned physical=(unsigned)(i-n);
-        label=@[@"鼠标左键 / Left",@"鼠标右键 / Right",@"鼠标中键 / Middle"][physical];
-        for(NSString *action in @[@"主点击 / Primary",@"次要使用 / Secondary",@"切换地图 / Map"])
-            [picker addItemWithTitle:action];
-        [picker selectItemAtIndex:dm_kbmap_mouse_action(physical)];
-    }
-    NSAlert *dialog=[NSAlert new];dialog.messageText=label;
-    dialog.informativeText=@"键鼠按键映射（保存在当前角色 .key）";
-    dialog.accessoryView=picker;
-    [dialog addButtonWithTitle:@"保存"];[dialog addButtonWithTitle:@"取消"];
-    if([dialog runModal]==NSAlertFirstButtonReturn) {
-        int ok=i<n?dm_kbmap_bind(mac_key_rows[i].usage,(unsigned)picker.selectedItem.tag):
-            dm_kbmap_bind_mouse((unsigned)(i-n),(unsigned)picker.indexOfSelectedItem);
-        if(!ok) {
-            NSAlert *error=[NSAlert new];error.messageText=@"无法保存此角色的 .key";
-            error.informativeText=@"请先选定角色，或检查是否存在其他格式的 .key 文件。";
-            [error addButtonWithTitle:@"确定"];[error runModal];
-        } else [self refresh];
-    }
+    [self chooseNativeBinding:button];
 }
 @end
 // AppKit controls must receive their own pointer events. The normal mouse

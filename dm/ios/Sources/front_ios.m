@@ -312,166 +312,33 @@ static NSString *kbActionLabel(int action) {
         style:UIAlertActionStyleCancel handler:nil]];
     [self.window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
-- (void)kbChooseUsage:(unsigned)usage label:(NSString *)keyName {
-    static const int ids[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
-        16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
-    UIAlertController *pick=[UIAlertController alertControllerWithTitle:keyName
-        message:dm_lang_zh()?@"选择按键功能（独立于手柄）":@"Select keyboard action (separate from controller)"
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++) {
-        int action=ids[i];
-        [pick addAction:[UIAlertAction actionWithTitle:kbActionLabel(action)
-          style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            (void)a;
-            if(!dm_kbmap_bind(usage,(unsigned)action)) {
-                UIAlertController *error=[UIAlertController alertControllerWithTitle:@"Save failed"
-                  message:@"Cannot save the keyboard emulation .kbm for this character" preferredStyle:UIAlertControllerStyleAlert];
-                [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-                [self.window.rootViewController presentViewController:error animated:YES completion:nil];
-            } else [self kbSettingsRefresh];
-          }]];
-    }
-    [pick addAction:[UIAlertAction actionWithTitle:dm_lang_zh()?@"取消":@"Cancel"
-        style:UIAlertActionStyleCancel handler:nil]];
-    pick.popoverPresentationController.sourceView=_kbDeviceTabs;
-    pick.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
-    [self.window.rootViewController presentViewController:pick animated:YES completion:nil];
-}
-- (void)kbMouseChoose:(unsigned)physical {
-    NSArray<NSString *> *titles=@[@"Primary click / 左键交互",
-        @"Secondary use / 右键使用",@"Toggle map / 切换地图"];
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:
-        (physical==0?@"Mouse Left / 鼠标左键":physical==1?@"Mouse Right / 鼠标右键":@"Mouse Middle / 鼠标中键")
-        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for(unsigned role=0;role<3;role++)
-        [sheet addAction:[UIAlertAction actionWithTitle:titles[role] style:UIAlertActionStyleDefault
-          handler:^(UIAlertAction *a) {
-            (void)a;
-            if(dm_kbmap_bind_mouse(physical,role)) [self kbSettingsRefresh];
-        }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"取消":@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView=_kbDeviceTabs;
-    sheet.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
-    [self.window.rootViewController presentViewController:sheet animated:YES completion:nil];
-}
 - (void)kbSettingsOpen {
-    static const unsigned char usages[]={
-        0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
-        0x28,0x29,0x2b,0x2c,0x2e,0x50,0x52,0x4f,0x51,0x1e,0x1f,0x20,0x21,
-        0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x10
-    };
-    NSArray<NSString *> *keys=@[@"W",@"A",@"S",@"D",@"J",@"K",@"U",@"I",@"F",@"G",
-        @"Q",@"E",@"Z",@"C",@"Enter",@"Escape",@"Tab",@"Space",@"=",
-        @"←",@"↑",@"→",@"↓",@"1",@"2",@"3",@"4",
-        @"F1",@"F2",@"F3",@"F4",@"F5",@"F6",@"F7",@"F8",@"M"];
-    UIAlertController *list=[UIAlertController alertControllerWithTitle:
-        (dm_lang_zh()?@"控制 · 键鼠":@"Controls · Keyboard")
-        message:(dm_lang_zh()?@"选择要修改的物理按键":@"Choose a physical key to rebind")
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSUInteger i=0;i<keys.count;i++) {
-        unsigned usage=usages[i]; NSString *label=keys[i];
-        NSString *caption=[NSString stringWithFormat:@"%@  →  %@",label,kbActionLabel(dm_kbmap_action(usage))];
-        [list addAction:[UIAlertAction actionWithTitle:caption style:UIAlertActionStyleDefault
-            handler:^(UIAlertAction *a) {(void)a;[self kbChooseUsage:usage label:label];}]];
-    }
-    NSArray<NSString *> *mouseNames=@[@"Mouse Left / 鼠标左键",@"Mouse Right / 鼠标右键",@"Mouse Middle / 鼠标中键"];
-    NSArray<NSString *> *mouseRoles=@[@"Primary click / 左键交互",
-        @"Secondary use / 右键使用",@"Toggle map / 切换地图"];
-    for(unsigned physical=0;physical<3;physical++) {
-        int role=dm_kbmap_mouse_action(physical);
-        NSString *label=[NSString stringWithFormat:@"%@  →  %@",mouseNames[physical],
-            mouseRoles[role>=0 && role<3?role:0]];
-        [list addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault
-            handler:^(UIAlertAction *a){(void)a;[self kbMouseChoose:physical];}]];
-    }
-    [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复默认键位":@"Restore defaults")
-        style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-            (void)a; if(dm_kbmap_restore_defaults_checked())[self kbSettingsOpen];
-            else [self kbSettingsSaveError];
-        }]];
-    [list addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"关闭":@"Close")
-        style:UIAlertActionStyleCancel handler:nil]];
-    list.popoverPresentationController.sourceView=_kbSettingsButton;
-    list.popoverPresentationController.sourceRect=_kbSettingsButton.bounds;
-    [self.window.rootViewController presentViewController:list animated:YES completion:nil];
+    [self kbPcOpen];
 }
-// These are actual device categories, independent from the native Key 1/Key 2
-// controller *slots*. Keyboard uses our local .key, Controller leaves the
-// game's original KeyBindingMenu/.ctl in place.
 - (void)kbSettingsRefresh {
     if(!_kbBindingScroll)return;
-    for(UIView *v in [_kbBindingScroll.subviews copy])[v removeFromSuperview];
-    static const unsigned char usages[]={
-        0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
-        0x28,0x29,0x2b,0x2c,0x2e,0x50,0x52,0x4f,0x51,0x1e,0x1f,0x20,0x21,
-        0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x10
-    };
-    NSArray<NSString *> *keys=@[@"W",@"A",@"S",@"D",@"J",@"K",@"U",@"I",@"F",@"G",
-        @"Q",@"E",@"Z",@"C",@"Enter",@"Esc",@"Tab",@"Space",@"=",
-        @"←",@"↑",@"→",@"↓",@"1",@"2",@"3",@"4",
-        @"F1",@"F2",@"F3",@"F4",@"F5",@"F6",@"F7",@"F8",@"M"];
-    NSArray<NSString *> *mouse=@[@"鼠标左键 / Left",@"鼠标右键 / Right",@"鼠标中键 / Middle"];
-    NSArray<NSString *> *roles=@[@"主点击 / Primary",@"次要使用 / Secondary",@"切换地图 / Map"];
-    CGFloat w=_kbBindingScroll.bounds.size.width, rowHeight=46, y=0;
+    for(UIView *view in [_kbBindingScroll.subviews copy])[view removeFromSuperview];
+    CGFloat w=_kbBindingScroll.bounds.size.width;
     if(w<10)return;
-    for(NSUInteger i=0;i<keys.count+6;i++) {
-        UIButton *row=[UIButton buttonWithType:UIButtonTypeSystem];
-        row.frame=CGRectMake(8,y+3,w-16,rowHeight-6);
-        row.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
-        row.contentEdgeInsets=UIEdgeInsetsMake(0,12,0,8);
-        row.backgroundColor=[UIColor colorWithWhite:.20 alpha:.94];
-        row.layer.cornerRadius=6; row.titleLabel.font=[UIFont systemFontOfSize:15];
-        NSString *title;
-        if(i<keys.count)title=[NSString stringWithFormat:@"%@     →     %@",keys[i],kbActionLabel(dm_kbmap_action(usages[i]))];
-        else if(i<keys.count+3) {
-            unsigned phys=(unsigned)(i-keys.count);
-            int role=dm_kbmap_mouse_action(phys);
-            title=[NSString stringWithFormat:@"%@     →     %@",mouse[phys],roles[role>=0 && role<3?role:0]];
-        } else if(i==keys.count+3)title=dm_lang_zh()?@"恢复此角色的默认键鼠配置":@"Reset this character's keyboard/mouse";
-        else if(i==keys.count+4)title=g_pc_capture_action>=0?
-            [NSString stringWithFormat:@"PC .key · cmd %d (%@) · 请按物理键",g_pc_capture_action,g_pc_capture_slot?@"Secondary":@"Primary"]:
-            @"PC .key · 57 native commands · Primary / Secondary";
-        else title=dm_kbmap_pc_mode()?
-            @"Input mode: Native PC .key (tap for controller emulation)":
-            @"Input mode: Legacy HID emulation (tap for native PC)";
-        [row setTitle:title forState:UIControlStateNormal];
-        [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        row.tag=(NSInteger)i;
-        [row addTarget:self action:@selector(kbBindingTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [_kbBindingScroll addSubview:row];y+=rowHeight;
-    }
-    _kbBindingScroll.contentSize=CGSizeMake(w,y+6);
-}
-- (void)kbBindingTapped:(UIButton *)row {
-    static const unsigned char usages[]={
-        0x1a,0x04,0x16,0x07,0x0d,0x0e,0x18,0x0c,0x09,0x0a,0x14,0x08,0x1d,0x06,
-        0x28,0x29,0x2b,0x2c,0x2e,0x50,0x52,0x4f,0x51,0x1e,0x1f,0x20,0x21,
-        0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x10
-    };
-    NSArray<NSString *> *labels=@[@"W",@"A",@"S",@"D",@"J",@"K",@"U",@"I",@"F",@"G",
-        @"Q",@"E",@"Z",@"C",@"Enter",@"Esc",@"Tab",@"Space",@"=",
-        @"←",@"↑",@"→",@"↓",@"1",@"2",@"3",@"4",
-        @"F1",@"F2",@"F3",@"F4",@"F5",@"F6",@"F7",@"F8",@"M"];
-    NSInteger i=row.tag;
-    if(i<(NSInteger)labels.count)[self kbChooseUsage:usages[i] label:labels[i]];
-    else if(i<(NSInteger)labels.count+3)[self kbMouseChoose:(unsigned)(i-labels.count)];
-    else if(i==(NSInteger)labels.count+4)[self kbPcOpen];
-    else if(i==(NSInteger)labels.count+5) {
-        if(dm_kbmap_set_pc_mode(!dm_kbmap_pc_mode()))[self kbSettingsRefresh];
-        else [self kbSettingsSaveError];
-    } else {
-        UIAlertController *confirm=[UIAlertController alertControllerWithTitle:
-            (dm_lang_zh()?@"恢复默认？":@"Restore defaults?")
-            message:nil preferredStyle:UIAlertControllerStyleAlert];
-        [confirm addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"取消":@"Cancel")
-            style:UIAlertActionStyleCancel handler:nil]];
-        [confirm addAction:[UIAlertAction actionWithTitle:(dm_lang_zh()?@"恢复":@"Reset")
-            style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
-                (void)a;if(dm_kbmap_restore_defaults_checked())[self kbSettingsRefresh];
-                else [self kbSettingsSaveError];
-            }]];
-        [self.window.rootViewController presentViewController:confirm animated:YES completion:nil];
-    }
+    UIButton *edit=[UIButton buttonWithType:UIButtonTypeSystem];
+    edit.frame=CGRectMake(8,8,w-16,46);
+    edit.backgroundColor=[UIColor colorWithWhite:.20 alpha:.94];
+    edit.layer.cornerRadius=6;
+    [edit setTitle:g_pc_capture_action>=0?
+        [NSString stringWithFormat:@"原生 .key · cmd %d · 请按物理键",g_pc_capture_action]:
+        @"原生角色 .key · 主键 / 副键" forState:UIControlStateNormal];
+    [edit setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [edit addTarget:self action:@selector(kbPcOpen) forControlEvents:UIControlEventTouchUpInside];
+    [_kbBindingScroll addSubview:edit];
+    UILabel *hint=[[UILabel alloc] initWithFrame:CGRectMake(12,68,w-24,110)];
+    hint.numberOfLines=0;
+    hint.textColor=UIColor.whiteColor;
+    hint.font=[UIFont systemFontOfSize:14];
+    hint.text=dm_lang_zh()?
+        @"键盘从角色原生 .key 读取动作并模拟游戏输入；手柄继续使用 .ctl。\n左键交互、右键使用；中键和滚轮可在 .key 中绑定。":
+        @"Keyboard commands use the original .key and input bridge; controller uses .ctl.\nLeft clicks, right uses; middle/wheel use .key bindings.";
+    [_kbBindingScroll addSubview:hint];
+    _kbBindingScroll.contentSize=CGSizeMake(w,190);
 }
 - (void)kbDeviceSwitched:(UISegmentedControl *)sender {
     g_pc_capture_action=g_pc_capture_slot=-1;

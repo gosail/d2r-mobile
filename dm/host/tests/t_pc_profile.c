@@ -14,6 +14,11 @@
 static char root[1024], save_dir[1100];
 static uint64_t game_buttons;
 static int map_toggles,panel_open;
+static unsigned panel_events[57];
+void dm_ui_pc_toggle_panel(unsigned id) {
+    assert(id<57);
+    panel_events[id]++;
+}
 void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
     (void)lx;(void)ly;(void)rx;(void)ry;game_buttons=b;
 }
@@ -110,6 +115,22 @@ int main(void) {
     dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_A);
     dm_pc_input_reset();assert(game_buttons==0);
     assert(dm_pc_input_latched_command(0x0e)==-1);
+    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    dm_pc_input_event(0x0c,1); // I -> inventory cmd 1
+    dm_pc_input_event(0x0c,1);
+    dm_pc_input_guest_step();
+    assert(panel_events[1]==1);
+    dm_pc_input_event(0x0c,0);
+    assert(dm_pc_profile_bind(1,0,'K',NULL,NULL)==DM_KEYFILE_OK);
+    dm_pc_input_event(0x0c,1); // old physical key must be inert
+    dm_pc_input_guest_step();assert(panel_events[1]==1);
+    dm_pc_input_event(0x0c,0);
+    dm_pc_input_event(0x0e,1); // new physical K must open native inventory panel
+    dm_pc_input_guest_step();assert(panel_events[1]==2);
+    dm_pc_input_event(0x0e,0);
+    dm_pc_input_event(0x0e,1);
+    dm_pc_input_reset(); // character change/focus loss removes queued UI work
+    dm_pc_input_guest_step();assert(panel_events[1]==2);
     assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
     char backup[1220];snprintf(backup,sizeof backup,"%s.bak",alice);
     assert(access(backup,F_OK)==0);

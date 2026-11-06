@@ -277,7 +277,7 @@ static int mac_hid_usage(unsigned short c) {
 static void on_key(NSEvent *e, int down) {
     int usage=mac_hid_usage(e.keyCode);
     if(usage<0)return;
-    // Use the exact same native .key / legacy .kbm selection, latched
+    // Use native .key commands with menu-time controller fallback, latched
     // release and keyboard channel as iPadOS and Android. The Mac's
     // independent g_in pad channel remains reserved for mouse and wheel.
     dm_kbmap_key_event((unsigned)usage,down);

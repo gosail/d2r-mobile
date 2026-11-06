@@ -77,7 +77,11 @@ void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int
         mouse_queue[(mouse_tail - 1) % 128].op == op)
         mouse_queue[(mouse_tail - 1) % 128] = e;
     else if (mouse_tail - mouse_head == 128) {
+        // A burst of hover/drag events may overflow the queue. Drop the
+        // gesture atomically including its physical-button latches so the
+        // next genuine press is not mistaken for a still-held old press.
         mouse_overflow = 1; mouse_head = mouse_tail = 0;
+        memset(g_mouse_physical_down,0,sizeof g_mouse_physical_down);
     } else mouse_queue[mouse_tail++ % 128] = e;
     pthread_mutex_unlock(&mouse_mu);
 }

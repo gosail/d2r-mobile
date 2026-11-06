@@ -44,6 +44,15 @@ int main(int argc,char **argv) {
     snprintf(alice_work,sizeof alice_work,"%s/Alice",work_dir);assert(!mkdir(alice_work,0700));
     snprintf(bob,sizeof bob,"%s/Bob",save_dir);assert(!mkdir(bob,0700));
     snprintf(bob_work,sizeof bob_work,"%s/Bob",work_dir);assert(!mkdir(bob_work,0700));
+    // A native PC file must never be replaced with mobile HID text.
+    char native_key[1200],native_work[1200];
+    unsigned char native_bytes[]={0x25,0,0,0,0,0,65,0,1,0,0,0,
+                                  0,0,0,0,67,0,0,0,0,0};
+    snprintf(native_key,sizeof native_key,"%s/Alice/Alice.key",save_dir);
+    snprintf(native_work,sizeof native_work,"%s/Alice/Alice.key",work_dir);
+    { FILE *nf=fopen(native_key,"wb");assert(nf);
+      assert(fwrite(native_bytes,1,sizeof native_bytes,nf)==sizeof native_bytes);
+      assert(!fclose(nf)); }
     dm_kbmap_select_character("Alice");
     assert(dm_kbmap_action(0x1a)==DM_KB_MOVE_UP);
     assert(dm_kbmap_action(0x0d)==0);
@@ -74,8 +83,8 @@ int main(int argc,char **argv) {
     assert(!dm_kbmap_bind(256,1));
     assert(!dm_kbmap_bind(2,99));
     char fn[1200],fw[1200],ctl[1200];
-    snprintf(fn,sizeof fn,"%s/Alice/Alice.key",save_dir);
-    snprintf(fw,sizeof fw,"%s/Alice/Alice.key",work_dir);
+    snprintf(fn,sizeof fn,"%s/Alice/Alice.kbm",save_dir);
+    snprintf(fw,sizeof fw,"%s/Alice/Alice.kbm",work_dir);
     snprintf(ctl,sizeof ctl,"%s/Alice/Alice.ctl",save_dir);
     { FILE *c=fopen(ctl,"wb");assert(c);assert(fwrite("NATIVE_CTL",1,10,c)==10);fclose(c); }
     FILE *f=fopen(fn,"r");assert(f);char line[128];assert(fgets(line,sizeof line,f));
@@ -99,7 +108,7 @@ int main(int argc,char **argv) {
     dm_kbmap_controls_event("PanelManager","ClosePanel","SettingsPanel");
     assert(!dm_kbmap_controls_visible());
     // Switch characters: no global bindings leak into another hero.
-    char bobkey[1200];snprintf(bobkey,sizeof bobkey,"%s/Bob/Bob.key",save_dir);
+    char bobkey[1200];snprintf(bobkey,sizeof bobkey,"%s/Bob/Bob.kbm",save_dir);
     { FILE *f2=fopen(bobkey,"wb");assert(f2);fputs("LEGACY_BINARY\n",f2);fclose(f2); }
     dm_kbmap_select_character("Bob");assert(dm_kbmap_action(0x0d)==0);
     assert(!dm_kbmap_restore_defaults_checked()); // cannot erase another format's .key
@@ -112,6 +121,10 @@ int main(int argc,char **argv) {
     dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
     dm_kbmap_pre_commit(work_dir);
     { FILE *w=fopen(fw,"rb");assert(w);assert(fgets(line,sizeof line,w));fclose(w);assert(!strcmp(line,"FOREIGN_WORK\n")); }
+    { FILE *nf=fopen(native_key,"rb");assert(nf);
+      unsigned char got[sizeof native_bytes];
+      assert(fread(got,1,sizeof got,nf)==sizeof got);assert(!fclose(nf));
+      assert(!memcmp(got,native_bytes,sizeof got)); }
     remove(fw); // restore a writable mobile-owned work file
     // Old global sw_keyboard.txt is only a read-only migration source.
     char oldglob[1200],charlie[1200],charliew[1200],charliekey[1200];
@@ -119,19 +132,35 @@ int main(int argc,char **argv) {
     { FILE *g=fopen(oldglob,"wb");assert(g);fputs("D2RMobileKeyboard=1\n0d=15\n",g);fclose(g); }
     snprintf(charlie,sizeof charlie,"%s/Charlie",save_dir);assert(!mkdir(charlie,0700));
     snprintf(charliew,sizeof charliew,"%s/Charlie",work_dir);assert(!mkdir(charliew,0700));
-    snprintf(charliekey,sizeof charliekey,"%s/Charlie/Charlie.key",save_dir);
+    snprintf(charliekey,sizeof charliekey,"%s/Charlie/Charlie.kbm",save_dir);
     dm_kbmap_select_character("Charlie");
     assert(dm_kbmap_action(0x0d)==15);
     assert(dm_kbmap_bind(0x0e,7));
     { FILE *g=fopen(oldglob,"rb");assert(g);assert(fgets(line,sizeof line,g));fclose(g);assert(!strcmp(line,"D2RMobileKeyboard=1\n")); }
     assert(access(charliekey,F_OK)==0);
+    // Old private per-character .key is read-only migration input.
+    char dave[1200],davew[1200],davekey[1200],davekbm[1200];
+    snprintf(dave,sizeof dave,"%s/Dave",save_dir);assert(!mkdir(dave,0700));
+    snprintf(davew,sizeof davew,"%s/Dave",work_dir);assert(!mkdir(davew,0700));
+    snprintf(davekey,sizeof davekey,"%s/Dave/Dave.key",save_dir);
+    snprintf(davekbm,sizeof davekbm,"%s/Dave/Dave.kbm",save_dir);
+    { FILE *g=fopen(davekey,"wb");assert(g);
+      assert(fputs("D2RMobileKeyboard=1\n0d=15\n",g)>=0);assert(!fclose(g)); }
+    dm_kbmap_select_character("Dave");
+    assert(dm_kbmap_action(0x0d)==15);
+    assert(dm_kbmap_bind(0x0e,7));
+    { FILE *g=fopen(davekey,"rb");assert(g);
+      assert(fgets(line,sizeof line,g));assert(!strcmp(line,"D2RMobileKeyboard=1\n"));
+      assert(fgets(line,sizeof line,g));assert(!strcmp(line,"0d=15\n"));assert(!fclose(g)); }
+    assert(access(davekbm,F_OK)==0);
     dm_kbmap_select_character("Alice");assert(dm_kbmap_action(0x0d)==15);
     dm_kbmap_restore_defaults();assert(dm_kbmap_action(0x0d)==0);
     assert(dm_kbmap_mouse_action(0)==0);
-    char cw[1200];snprintf(cw,sizeof cw,"%s/Charlie/Charlie.key",work_dir);
+    char cw[1200];snprintf(cw,sizeof cw,"%s/Charlie/Charlie.kbm",work_dir);
     remove(fn);remove(fw);remove(ctl);remove(bobkey);
+    remove(native_key);remove(native_work);remove(davekey);remove(davekbm);
     remove(charliekey);remove(cw);remove(oldglob);
-    rmdir(alice);rmdir(alice_work);rmdir(bob);rmdir(bob_work);rmdir(charlie);rmdir(charliew);
+    rmdir(alice);rmdir(alice_work);rmdir(bob);rmdir(bob_work);rmdir(charlie);rmdir(charliew);rmdir(dave);rmdir(davew);
     rmdir(save_dir);rmdir(work_dir);rmdir(root);
     puts("portable keyboard bindings: PASS");
     return 0;

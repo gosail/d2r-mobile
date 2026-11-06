@@ -99,6 +99,13 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
     dm_fs_profile_unlock();
     return rc;
 }
+int dm_pc_profile_file_status(void) {
+    uint16_t probe=0;
+    int rc=dm_pc_profile_get(0,0,&probe);
+    if(rc==DM_KEYFILE_OK)return 1;
+    if(rc==DM_KEYFILE_NOT_FOUND || rc==DM_KEYFILE_IO)return 0;
+    return -1;
+}
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {
     dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);

@@ -2,6 +2,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "dm_keyfile.h"
 #include "dm_pc_profile.h"
+#include "dm_pc_input.h"
+#include "dm_input.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,6 +12,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 static char root[1024], save_dir[1100];
+static uint64_t game_buttons;
+static int map_toggles,panel_open;
+void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
+    (void)lx;(void)ly;(void)rx;(void)ry;game_buttons=b;
+}
+void dm_world_mouse_map_toggle(void) {map_toggles++;}
+int dm_uiscreen_ingame(void) {return 1;}
+int dm_uiscreen_panel(void) {return panel_open;}
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}
 const char *dm_save_commitdir(void) {return save_dir;}
@@ -67,6 +77,40 @@ int main(void) {
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
+    dm_pc_input_reset();
+    assert(dm_pc_input_supported_action(7) && dm_pc_input_supported_action(14));
+    assert(dm_pc_input_supported_action(49) && !dm_pc_input_supported_action(50));
+    dm_pc_input_event(0x3a,1); // F1 uses native skill 1 -> Switch A
+    assert(game_buttons==DM_BTN_A && dm_pc_input_latched_command(0x3a)==14);
+    dm_pc_input_event(0x3a,1);assert(game_buttons==DM_BTN_A);
+    dm_pc_input_event(0x3a,0);assert(game_buttons==0);
+    dm_pc_input_event(0x40,1); // F7 is skill7 -> first alternate slot
+    assert(game_buttons==(DM_BTN_ZL|DM_BTN_A));
+    dm_pc_input_event(0x40,0);assert(game_buttons==0);
+    dm_pc_input_event(0x1e,1); // potion column 1
+    assert(game_buttons==DM_BTN_LEFT);
+    dm_pc_input_event(0x1e,0);assert(game_buttons==0);
+    dm_pc_input_event(0x2b,1); // Tab map: one toggle per keydown
+    dm_pc_input_event(0x2b,1);assert(map_toggles==1);
+    dm_pc_input_event(0x2b,0);assert(game_buttons==0);
+    dm_pc_input_event(0x29,1);
+    assert(game_buttons==DM_BTN_PLUS);
+    panel_open=1;
+    dm_pc_input_event(0x1e,1); // Escape must remain latched when panel appears.
+    assert((game_buttons&DM_BTN_PLUS)!=0);
+    dm_pc_input_event(0x1e,0);
+    dm_pc_input_event(0x29,0);panel_open=0;assert(game_buttons==0);
+    assert(dm_pc_profile_bind(14,0,'K',NULL,NULL)==DM_KEYFILE_OK);
+    dm_pc_input_event(0x3a,1);assert(game_buttons==0); // old F1 no longer fires
+    dm_pc_input_event(0x3a,0);
+    dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_A);
+    dm_pc_input_event(0x0e,0);assert(game_buttons==0);
+    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    assert(dm_pc_profile_bind(14,0,'K',NULL,NULL)==DM_KEYFILE_OK);
+    dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_A);
+    dm_pc_input_reset();assert(game_buttons==0);
+    assert(dm_pc_input_latched_command(0x0e)==-1);
+    assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
     char backup[1220];snprintf(backup,sizeof backup,"%s.bak",alice);
     assert(access(backup,F_OK)==0);
     // Existing unknown format is read but never overwritten or converted.

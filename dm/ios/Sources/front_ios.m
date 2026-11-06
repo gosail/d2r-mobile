@@ -262,16 +262,27 @@ static NSString *pcKeyName(int vk) {
         "Skill 9","Skill 10","Skill 11","Skill 12","Skill 13","Skill 14","Skill 15","Skill 16",
         "Hireling","Say 8","Escape"
     };
+    if(dm_pc_profile_file_status()!=1) {
+        [self kbSettingsSaveError];return;
+    }
     UIAlertController *list=[UIAlertController alertControllerWithTitle:@"Native PC .key"
        message:@"Original Diablo II commands · primary / secondary"
        preferredStyle:UIAlertControllerStyleActionSheet];
     for(unsigned cmd=0;cmd<57;cmd++) {
         uint16_t key=0xffff;int ok=dm_pc_profile_get(cmd,0,&key);
-        if(ok) { [self kbSettingsSaveError];return; }
+        if(ok!=DM_KEYFILE_OK && ok!=DM_KEYFILE_NOT_FOUND) {
+            [self kbSettingsSaveError];return;
+        }
         NSString *state=dm_pc_input_supported_action(cmd)?@"":@" · ⚠ runtime pending";
-        NSString *title=[NSString stringWithFormat:@"%02u  %s · %@%@",cmd,names[cmd],pcKeyName(key),state];
-        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
-            handler:^(UIAlertAction *a){(void)a;[self kbPcSlot:cmd];}]];
+        NSString *title=ok==DM_KEYFILE_OK?
+            [NSString stringWithFormat:@"%02u  %s · %@%@",cmd,names[cmd],pcKeyName(key),state]:
+            [NSString stringWithFormat:@"%02u  %s · not in guest .key",cmd,names[cmd]];
+        UIAlertAction *item=[UIAlertAction actionWithTitle:title
+            style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                (void)a;[self kbPcSlot:cmd];
+            }];
+        if(ok==DM_KEYFILE_NOT_FOUND)item.enabled=NO;
+        [list addAction:item];
     }
     [list addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     list.popoverPresentationController.sourceView=_kbDeviceTabs;

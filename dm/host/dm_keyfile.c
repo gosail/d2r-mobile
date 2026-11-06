@@ -97,6 +97,69 @@ int dm_keyfile_set(dm_keyfile *f,uint32_t id,unsigned slot,uint16_t code) {
     if(!p)return DM_KEYFILE_NOT_FOUND;
     store16(p+4,code);return DM_KEYFILE_OK;
 }
+// Indexed by original D2Client command ID (0..56), NOT by row position in
+// any imported file. Independent classic/D2R Legacy documented baseline.
+// 0xffff means unbound, 0x100..0x104 are game-private mouse/wheel codes.
+typedef struct { uint16_t primary,secondary; } dm_legacy_pair;
+static const dm_legacy_pair dm_legacy[57]={
+    {0x41,0x43}, {0x49,0x42}, {0x50,0xffff}, {0x4d,0xffff},
+    {0x51,0xffff}, {0x0d,0xffff}, {0x48,0xffff}, {0x09,0x100},
+    {0x78,0xffff}, {0x79,0xffff}, {0x7a,0xffff}, {0x7b,0xffff},
+    {0x54,0xffff}, {0x53,0xffff},
+    {0x70,0xffff}, {0x71,0xffff}, {0x72,0xffff}, {0x73,0xffff},
+    {0x74,0xffff}, {0x75,0xffff}, {0x76,0xffff}, {0x77,0xffff},
+    {0xc0,0xffff}, {0x31,0xffff}, {0x32,0xffff}, {0x33,0xffff},
+    {0x34,0xffff}, {0x60,0xffff}, {0x61,0xffff}, {0x62,0xffff},
+    {0x63,0xffff}, {0x64,0xffff}, {0x65,0xffff}, {0x66,0xffff},
+    {0x11,0xffff}, {0x52,0x102}, {0x10,0xffff}, {0x12,0x101},
+    {0x20,0xffff}, {0x103,0xffff}, {0x104,0xffff},
+    {0x4e,0xffff}, {0x2c,0xffff}, {0x5a,0xffff}, {0x57,0xffff},
+    {0x56,0xffff},
+    {0xffff,0xffff}, {0xffff,0xffff}, {0xffff,0xffff}, {0xffff,0xffff},
+    {0xffff,0xffff}, {0xffff,0xffff}, {0xffff,0xffff}, {0xffff,0xffff},
+    {0x4f,0xffff}, {0x67,0xffff}, {0x1b,0xffff}
+};
+int dm_keyfile_new_legacy(dm_keyfile *out) {
+    if(!out)return DM_KEYFILE_INVALID;
+    enum { COUNT=sizeof dm_legacy/sizeof dm_legacy[0], BYTES=2+COUNT*2*10 };
+    uint8_t buf[BYTES];memset(buf,0,sizeof buf);
+    store16(buf,0x25);
+    for(unsigned id=0;id<COUNT;id++)for(unsigned slot=0;slot<2;slot++) {
+        uint8_t *p=buf+2+(id*2+slot)*10;
+        // command ID and DWORD slot are little-endian.
+        store16(p,(uint16_t)id);
+        store16(p+4,slot?dm_legacy[id].secondary:dm_legacy[id].primary);
+        store16(p+6,slot?0:1);
+    }
+    return dm_keyfile_parse(out,buf,sizeof buf);
+}
+int dm_keyfile_lookup_vk(const dm_keyfile *f,uint16_t vk,uint32_t *id,unsigned *slot) {
+    if(!f || !f->raw || !id || !slot || vk==0xffff)return DM_KEYFILE_INVALID;
+    for(size_t i=0;i<f->records;i++) {
+        const uint8_t *p=f->raw+HEADER_BYTES+i*RECORD_BYTES;
+        if(le16(p+4)==vk) {
+            *id=le32(p);*slot=le32(p+6)==1 ? 0u:1u;
+            return DM_KEYFILE_OK;
+        }
+    }
+    return DM_KEYFILE_NOT_FOUND;
+}
+int dm_keyfile_bind_checked(dm_keyfile *f,uint32_t id,unsigned slot,uint16_t vk,
+                            uint32_t *conflicting_id,unsigned *conflicting_slot) {
+    if(!f || !f->raw || slot>1)return DM_KEYFILE_INVALID;
+    if(!record(f,id,slot))return DM_KEYFILE_NOT_FOUND;
+    if(vk!=0xffff)for(size_t i=0;i<f->records;i++) {
+        const uint8_t *p=f->raw+HEADER_BYTES+i*RECORD_BYTES;
+        uint32_t other=le32(p);
+        unsigned other_slot=le32(p+6)==1?0u:1u;
+        if(le16(p+4)==vk && (other!=id || other_slot!=slot)) {
+            if(conflicting_id)*conflicting_id=other;
+            if(conflicting_slot)*conflicting_slot=other_slot;
+            return DM_KEYFILE_CONFLICT;
+        }
+    }
+    return dm_keyfile_set(f,id,slot,vk);
+}
 int dm_keyfile_dirty(const dm_keyfile *f) {
     return f && f->raw && f->baseline &&
         memcmp(f->raw,f->baseline,f->size)!=0;

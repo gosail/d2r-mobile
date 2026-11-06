@@ -99,52 +99,6 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
     dm_fs_profile_unlock();
     return rc;
 }
-static int reset_with(int (*factory)(dm_keyfile *)) {
-    dm_fs_profile_lock();
-    pthread_mutex_lock(&pc_mu);
-    int rc=read_locked();
-    if(!rc) {
-        dm_keyfile defaults={0};
-        rc=factory(&defaults);
-        if(!rc) {
-            // Preserve record order and all unknown fields. Only alter known
-            // cmdId 0..56 keyboard VK fields, never unknown/extra records.
-            size_t n=0;const uint8_t *bytes=dm_keyfile_data(&profile,&n);
-            unsigned char *backup=malloc(n?n:1);
-            if(!backup)rc=DM_KEYFILE_IO;
-            else {
-                memcpy(backup,bytes,n);
-                for(uint32_t id=0;!rc && id<57;id++)
-                    for(unsigned slot=0;slot<2;slot++) {
-                        uint16_t vk;
-                        if(!dm_keyfile_get(&defaults,id,slot,&vk) &&
-                           dm_keyfile_get(&profile,id,slot,&vk)!=DM_KEYFILE_OK)
-                            rc=DM_KEYFILE_UNSUPPORTED;
-                        // Fetch separately (do not reuse overwritten vk).
-                        if(!rc) {
-                            (void)dm_keyfile_get(&defaults,id,slot,&vk);
-                            rc=dm_keyfile_set(&profile,id,slot,vk);
-                        }
-                    }
-                if(!rc) {
-                    char fn[1200];
-                    rc=path(fn)?dm_keyfile_write_atomic(&profile,fn):DM_KEYFILE_INVALID;
-                }
-                if(rc)memcpy(profile.raw,backup,n);
-                free(backup);
-            }
-        }
-        dm_keyfile_free(&defaults);
-    }
-    pthread_mutex_unlock(&pc_mu);
-    dm_fs_profile_unlock();return rc;
-}
-int dm_pc_profile_reset_legacy(void) {
-    return reset_with(dm_keyfile_new_legacy);
-}
-int dm_pc_profile_reset_resurrected(void) {
-    return reset_with(dm_keyfile_new_resurrected);
-}
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {
     dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);

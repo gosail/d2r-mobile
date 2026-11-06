@@ -63,6 +63,13 @@ final class KeyboardSettings {
         if(scroll==null || scroll.getChildCount()==0)return;
         LinearLayout content=(LinearLayout)scroll.getChildAt(0);
         content.removeAllViews();
+        // PC command bindings are an independent .key page; the legacy
+        // HID->Switch editor below continues to use character .kbm.
+        Button nativeKeys=new Button(activity);
+        nativeKeys.setAllCaps(false);
+        nativeKeys.setText("PC / Diablo II .key · 57 actions, two key slots");
+        nativeKeys.setOnClickListener(v->NativePcKeyboardSettings.show(activity));
+        content.addView(nativeKeys);
         int pad=(int)(6*activity.getResources().getDisplayMetrics().density);
         for(int i=0;i<KEYS.length+4;i++) {
             final int index=i;

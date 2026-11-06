@@ -70,6 +70,19 @@ final class KeyboardSettings {
         nativeKeys.setText("PC / Diablo II .key · 57 actions, two key slots");
         nativeKeys.setOnClickListener(v->NativePcKeyboardSettings.show(activity));
         content.addView(nativeKeys);
+        Button mode=new Button(activity);
+        mode.setAllCaps(false);
+        mode.setText(DmActivity.nativePcMode()?
+            "Mode: Native PC .key — choose legacy emulation":
+            "Mode: Legacy HID controller emulation — choose PC .key");
+        mode.setOnClickListener(v->{
+            boolean next=!DmActivity.nativePcMode();
+            if(DmActivity.nativePcSetMode(next)) {
+                mode.setText(next?"Mode: Native PC .key — choose legacy emulation":
+                    "Mode: Legacy HID controller emulation — choose PC .key");
+            } else Toast.makeText(activity,"Cannot save input mode",Toast.LENGTH_LONG).show();
+        });
+        content.addView(mode);
         int pad=(int)(6*activity.getResources().getDisplayMetrics().density);
         for(int i=0;i<KEYS.length+4;i++) {
             final int index=i;

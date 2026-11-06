@@ -249,8 +249,15 @@ static void on_key(NSEvent *e, int down) {
     if(u<0) return;
     if((int)g_mac_keys_down[u]==!!down) return;
     if(down) {
-        g_mac_actions[u]=(unsigned char)dm_kbmap_action((unsigned)u);
-        if(g_mac_actions[u]==DM_KB_MAP) dm_world_mouse_map_toggle();
+        int action=dm_kbmap_action((unsigned)u);
+        // Match iPad/Android: the action is captured at key-down, not
+        // reinterpreted midway through a held key when a menu opens.
+        if(action==DM_KB_ENTER)
+            action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0;
+        else if(action==DM_KB_ESCAPE)
+            action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:1;
+        g_mac_actions[u]=(unsigned char)action;
+        if(action==DM_KB_MAP) dm_world_mouse_map_toggle();
         g_mac_keys_down[u]=1;
     } else g_mac_keys_down[u]=0;
     g_btn=0;g_w=g_a=g_s=g_d=0;
@@ -262,8 +269,7 @@ static void on_key(NSEvent *e, int down) {
         else if(action==DM_KB_MOVE_LEFT) {g_a=1;used=1;}
         else if(action==DM_KB_MOVE_DOWN) {g_s=1;used=1;}
         else if(action==DM_KB_MOVE_RIGHT) {g_d=1;used=1;}
-        else if(action==DM_KB_ENTER) {g_btn|=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_A;used=1;}
-        else if(action==DM_KB_ESCAPE) {g_btn|=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_B;used=1;}
+        // Enter/Esc are already resolved and latched at key-down.
         else if(action==DM_KB_MAP)used=1;
         else if(action>=DM_KB_SKILL1 && action<=DM_KB_SKILL8) {
             static const unsigned btn[]={1,2,3,7};

@@ -659,6 +659,15 @@ static void w_hover_step(uint8_t *b) {
                                 rank=(f&0x0a)?2:(f&0x04)?1:0;
                             }
                             view.tier=rank;
+                            // Always show a verified monster category when
+                            // known. Exact random affix names remain owned by
+                            // the game's native MonsterHealth/SetInfo title.
+                            if(rank>0 && rank<=3) {
+                                static const char *zh_tier[]={"","冠军","精英","首领"};
+                                static const char *en_tier[]={"","Champion","Unique","Boss"};
+                                strlcpy(view.details,dm_lang_zh()?zh_tier[rank]:en_tier[rank],
+                                        sizeof view.details);
+                            }
                             const int stat_id[6]={36,37,39,41,43,45};
                             const char *en[6]={"Physical","Magic","Fire","Lightning","Cold","Poison"};
                             const char *zh[6]={"物理","魔法","火焰","闪电","冰冷","毒素"};

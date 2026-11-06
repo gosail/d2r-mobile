@@ -209,7 +209,13 @@ void dm_external_mouse_step(void) {
         }
     }
     if (!mouse_world_ok()) {
-        mouse_down = mouse_world = mouse_repeat = 0; mouse_seq = 0;
+        // Closing a world session stops walk/attack immediately. A pressed
+        // inventory/stash/equipment mouse button is different: it must stay
+        // held across frames until the corresponding mouse-up or cancel.
+        // Clearing mouse_down here used to drop every inventory drag after
+        // just one frame, silently converting later moves into hover.
+        mouse_world = mouse_repeat = 0; mouse_seq = 0;
+        if (!mouse_ui) mouse_down = 0;
         dm_world_mouse_stop();
     }
     // Re-evaluate stationary pointer hover across panel open/close, without

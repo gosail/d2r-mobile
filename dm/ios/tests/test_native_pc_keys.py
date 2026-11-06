@@ -32,7 +32,7 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn('dm_pc_profile_action_for_hid(hid,&id,&slot)',c)
         self.assertIn('held_mask[hid]',c)
         self.assertIn('DM_BTN_ZL',c)
-        self.assertIn('slot_buttons[6]',c)
+        self.assertIn('slot_buttons[4]',c)
         self.assertIn('dm_pc_input_guest_step',c)
         self.assertIn('dm_kb_set(bits,0,0,0,right_y)',c)
         self.assertIn('dm_pc_input_wheel(int delta)',c)

@@ -15,6 +15,8 @@
 #include "../host/dm.h"
 #include "../host/dm_input.h"
 #include "../host/dm_kbmap.h"
+#include "../host/dm_pc_profile.h"
+#include "../host/dm_keyfile.h"
 #include "../host/front.h"
 #include "../host/hle.h"
 #include <android/log.h>
@@ -469,6 +471,23 @@ JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseBind(JNI
 // Local keyboard controls; used by the button on the native Controls tab.
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbControlsVisible(JNIEnv *e,jclass c) {
     (void)e;(void)c;return dm_kbmap_controls_visible();
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcGet(JNIEnv *e,jclass c,jint action,jint slot) {
+    (void)e;(void)c;uint16_t vk=0xffff;
+    if(action<0 || slot<0 || dm_pc_profile_get((uint32_t)action,(unsigned)slot,&vk))
+        return -1;
+    return (jint)vk;
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcBind(JNIEnv *e,jclass c,jint action,jint slot,jint vk) {
+    (void)e;(void)c;
+    if(action<0 || slot<0 || vk<0 || vk>65535)return DM_KEYFILE_INVALID;
+    return dm_pc_profile_bind((uint32_t)action,(unsigned)slot,(uint16_t)vk,NULL,NULL);
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcResetLegacy(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_pc_profile_reset_legacy();
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcVkFromHid(JNIEnv *e,jclass c,jint usage) {
+    (void)e;(void)c;return usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);
 }
 JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbAction(JNIEnv *e,jclass c,jint usage) {
     (void)e;(void)c;return usage<0 ? DM_KB_UNBOUND : dm_kbmap_action((unsigned)usage);

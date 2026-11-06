@@ -85,11 +85,24 @@ final class NativePcKeyboardSettings {
             .setView(sc).setPositiveButton("Done",null).create();
         parent[0].show();
     }
+    private static void mouseChoice(Activity activity,AlertDialog parent,int action,int slot) {
+        // Only pseudo keys backed by real events on all three platforms.
+        final int[] vkCodes={0x100,0x103,0x104};
+        final String[] labels={"Mouse middle (0x100)","Wheel up (0x103)","Wheel down (0x104)"};
+        new AlertDialog.Builder(activity).setTitle(COMMANDS[action]+" · mouse/wheel")
+            .setItems(labels,(d,index)->{
+                int rc=DmActivity.nativePcBind(action,slot,vkCodes[index]);
+                if(rc==0) {parent.dismiss();show(activity);}
+                else if(rc==-5)toast(activity,"This mouse binding is already used by another action; clear it there first");
+                else toast(activity,"Cannot save .key ("+rc+")");
+            }).setNegativeButton("Cancel",null).show();
+    }
     private static void capture(Activity activity,AlertDialog parent,int action,int slot) {
         AlertDialog dialog=new AlertDialog.Builder(activity)
             .setTitle(COMMANDS[action]+" · "+(slot==0?"Primary":"Secondary"))
-            .setMessage("Press a physical keyboard key")
+            .setMessage("Press a physical keyboard key, or choose a mouse/wheel input")
             .setNegativeButton("Cancel",null)
+            .setPositiveButton("Mouse / Wheel",(d,w)->mouseChoice(activity,parent,action,slot))
             .setNeutralButton("Clear",(d,w)->{
                 int rc=DmActivity.nativePcBind(action,slot,0xffff);
                 if(rc==0){parent.dismiss();show(activity);}else toast(activity,"Cannot unbind ("+rc+")");

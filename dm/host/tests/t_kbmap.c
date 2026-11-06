@@ -14,7 +14,8 @@
 #include <unistd.h>
 #include <sys/wait.h>
 static char root[1024],save_dir[1100],work_dir[1100];
-static uint64_t buttons;
+static uint64_t buttons,guest_samples;
+uint64_t dm_input_samples(void) { return guest_samples; }
 static int32_t left_x,left_y;
 static unsigned maps,pc_native_panels;
 static int game_ingame=1;
@@ -65,9 +66,9 @@ int main(void) {
     dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
     dm_kbmap_key_event(0x1a,0);assert(left_y==0);
     // After guest .key exists, keyboard X resolves native Skill 1, then
-    // uses the existing verified controller skill B input.
+    // uses the original SkillButton1 A binding (including its assigned skill).
     game_seed("Alice");
-    dm_kbmap_key_event(0x1b,1);assert(buttons & DM_BTN_B);
+    dm_kbmap_key_event(0x1b,1);assert(buttons & DM_BTN_A);
     dm_kbmap_key_event(0x1b,0);assert(buttons==0);
     char worksidecar[1200],savedsidecar[1200];
     snprintf(worksidecar,sizeof worksidecar,"%s/Alice/Alice.kbm",work_dir);

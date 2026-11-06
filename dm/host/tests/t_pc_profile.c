@@ -12,7 +12,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 static char root[1024], save_dir[1100],work_dir[1100];
-static uint64_t game_buttons;
+static uint64_t game_buttons,guest_samples;
+uint64_t dm_input_samples(void) {return guest_samples;}
 static int32_t game_right_y;
 static int map_toggles,panel_open,poisoned;static unsigned native_writers;
 static unsigned panel_events[57];
@@ -221,14 +222,32 @@ int main(void) {
     dm_pc_input_event(0x28,1);
     assert(game_buttons==0);
     dm_pc_input_event(0x28,0);
-    assert(!dm_pc_input_supported_action(49) && !dm_pc_input_supported_action(50));
+    assert(dm_pc_input_supported_action(49) && !dm_pc_input_supported_action(50));
     dm_pc_input_event(0x3a,1); // F1 uses native skill 1 -> Switch A
-    assert(game_buttons==DM_BTN_B && dm_pc_input_latched_command(0x3a)==14);
-    dm_pc_input_event(0x3a,1);assert(game_buttons==DM_BTN_B);
+    assert(game_buttons==DM_BTN_A && dm_pc_input_latched_command(0x3a)==14);
+    dm_pc_input_event(0x3a,1);assert(game_buttons==DM_BTN_A);
     dm_pc_input_event(0x3a,0);assert(game_buttons==0);
-    dm_pc_input_event(0x40,1); // F7 is skill7 -> first alternate slot
-    assert(game_buttons==(DM_BTN_ZL|DM_BTN_Y));
+    dm_pc_input_event(0x40,1); // F7 is skill7 -> ZL + A
+    assert(game_buttons==DM_BTN_ZL); // modifier first
+    guest_samples++;dm_pc_input_guest_step();assert(game_buttons==DM_BTN_ZL);
+    guest_samples++;dm_pc_input_guest_step();
+    assert(game_buttons==(DM_BTN_ZL|DM_BTN_A));
     dm_pc_input_event(0x40,0);assert(game_buttons==0);
+    // Very quick F7 key tap: ZL leads, the A tap must still be delivered.
+    dm_pc_input_event(0x40,1);assert(game_buttons==DM_BTN_ZL);
+    dm_pc_input_event(0x40,0);assert(game_buttons==DM_BTN_ZL);
+    guest_samples+=2;dm_pc_input_guest_step();
+    assert(game_buttons==(DM_BTN_ZL|DM_BTN_A));
+    guest_samples+=2;dm_pc_input_guest_step();assert(game_buttons==0);
+    // Skill 6 maps to ZR, not to a guessed fourth legacy skill button.
+    dm_pc_input_event(0x3f,1);assert(game_buttons==DM_BTN_ZR);
+    dm_pc_input_event(0x3f,0);assert(game_buttons==0);
+    // Native commands 46–49 are skill 9–12, using the second group.
+    assert(dm_pc_profile_bind(46,0,'J',NULL,NULL)==DM_KEYFILE_OK);
+    dm_pc_input_event(0x0d,1);assert(game_buttons==DM_BTN_ZL);
+    guest_samples+=2;dm_pc_input_guest_step();
+    assert(game_buttons==(DM_BTN_ZL|DM_BTN_Y));
+    dm_pc_input_event(0x0d,0);assert(game_buttons==0);
     dm_pc_input_event(0x1e,1); // potion column 1
     assert(game_buttons==DM_BTN_LEFT);
     dm_pc_input_event(0x1e,0);assert(game_buttons==0);
@@ -252,11 +271,11 @@ int main(void) {
     assert(dm_pc_profile_bind(14,0,'K',NULL,NULL)==DM_KEYFILE_OK);
     dm_pc_input_event(0x3a,1);assert(game_buttons==0); // old F1 no longer fires
     dm_pc_input_event(0x3a,0);
-    dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_B);
+    dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_A);
     dm_pc_input_event(0x0e,0);assert(game_buttons==0);
     game_seed("Alice",0);
     assert(dm_pc_profile_bind(14,0,'K',NULL,NULL)==DM_KEYFILE_OK);
-    dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_B);
+    dm_pc_input_event(0x0e,1);assert(game_buttons==DM_BTN_A);
     dm_pc_input_reset();assert(game_buttons==0);
     assert(dm_pc_input_latched_command(0x0e)==-1);
     game_seed("Alice",0);

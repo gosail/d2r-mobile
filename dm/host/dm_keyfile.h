@@ -39,6 +39,9 @@ int dm_keyfile_dirty(const dm_keyfile *file);
 // Generated from an independent documented baseline, never from a user's .key.
 // Resurrected's different skill-key preset must not be guessed from this table.
 int dm_keyfile_new_legacy(dm_keyfile *out);
+// Resurrected number-row skills (1–0, - and =); conflicting legacy potions
+// are unbound until confirmed separately by the user.
+int dm_keyfile_new_resurrected(dm_keyfile *out);
 int dm_keyfile_lookup_vk(const dm_keyfile *file,uint16_t vk,uint32_t *id,unsigned *slot);
 // Reject duplicate native VK mappings across the entire record set.
 // Unbound 0xFFFF is allowed in either slot.

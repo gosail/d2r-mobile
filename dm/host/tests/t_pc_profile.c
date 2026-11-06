@@ -81,6 +81,28 @@ int main(void) {
     assert(access(committed_late,F_OK)!=0); // uncommitted game file stays in worktree
     game_seed("Alice",1);
     game_seed("Bob",0);
+    // The codec supports guest files with different paired-record counts.
+    // A missing numeric ID must not make all other commands uneditable.
+    dir("Trim");
+    dm_keyfile original_trim={0};
+    assert(dm_keyfile_new_legacy(&original_trim)==DM_KEYFILE_OK);
+    size_t original_len=0;
+    const uint8_t *full=dm_keyfile_data(&original_trim,&original_len);
+    assert(original_len>=42);
+    char trim_path[1200];path("Trim",trim_path);
+    FILE *trim_out=fopen(trim_path,"wb");assert(trim_out);
+    assert(fwrite(full,1,2,trim_out)==2);
+    assert(fwrite(full+22,1,20,trim_out)==20); // action ID 1 only
+    assert(!fclose(trim_out));dm_keyfile_free(&original_trim);
+    assert(dm_pc_profile_select("Trim")==DM_KEYFILE_OK);
+    assert(dm_pc_profile_file_status()==1);
+    uint16_t trimmed_vk=0;
+    assert(dm_pc_profile_get(0,0,&trimmed_vk)==DM_KEYFILE_NOT_FOUND);
+    assert(dm_pc_profile_get(1,0,&trimmed_vk)==DM_KEYFILE_OK &&
+           trimmed_vk=='I');
+    assert(dm_pc_profile_bind(1,0,'Z',NULL,NULL)==DM_KEYFILE_OK);
+    assert(dm_pc_profile_get(1,0,&trimmed_vk)==DM_KEYFILE_OK &&
+           trimmed_vk=='Z');
 
     assert(dm_pc_vk_from_hid(0x04)=='A');
     assert(dm_pc_vk_from_hid(0x1e)=='1');

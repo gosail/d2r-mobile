@@ -57,9 +57,11 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('DmActivity.nativeKbBind(KEYS[idx],ACTIONS[which])',editor)
     def test_local_non_pc_config(self):
         c=src("host/dm_kbmap.c")
-        self.assertIn("%s/%s/%s.key",c)
+        self.assertIn("%s/%s/%s.kbm",c)
         self.assertIn("dm_kbmap_select_character",c)
         self.assertIn("foreign_format=1",c)
+        self.assertIn('"%s/%s/%s.key"',c) # old private format is read-only
+        self.assertIn("rewind(candidate);f=candidate;",c)
         self.assertIn("dm_kbmap_pre_commit",c)
         pages=src("host/dm_pages.c")
         fs=src("host/hle_fs.c")

@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "dm_input.h"
 #include "dm_kbmap.h"
+#include "dm_pc_input.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -14,7 +15,7 @@
 static char root[1024],save_dir[1100],work_dir[1100];
 static uint64_t buttons;
 static int32_t left_x,left_y;
-static unsigned maps;
+static unsigned maps,pc_native_panels;
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}
 const char *dm_save_commitdir(void) {return save_dir;}
@@ -24,7 +25,7 @@ void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
     (void)rx;(void)ry;buttons=b;left_x=lx;left_y=ly;
 }
 void dm_world_mouse_map_toggle(void) {maps++;}
-void dm_ui_pc_toggle_panel(unsigned id) {(void)id;}
+void dm_ui_pc_toggle_panel(unsigned id) {if(id==0)pc_native_panels++;}
 int dm_uiscreen_ingame(void) {return 1;}
 int dm_uiscreen_panel(void) {return 0;}
 int main(int argc,char **argv) {
@@ -55,7 +56,20 @@ int main(int argc,char **argv) {
       assert(fwrite(native_bytes,1,sizeof native_bytes,nf)==sizeof native_bytes);
       assert(!fclose(nf)); }
     dm_kbmap_select_character("Alice");
-    assert(dm_kbmap_pc_mode()==1); // new characters prefer PC native
+    assert(dm_kbmap_pc_mode()==1); // default is original game PC mode
+    // The guest has not created its .key yet: all three platform bridges
+    // keep physical keyboard navigation alive through legacy controller HID.
+    dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
+    dm_kbmap_key_event(0x1a,0);assert(left_y==0);
+    // The original game creates its binary .key inside save.work.
+    { FILE *nf=fopen(native_work,"wb");assert(nf);
+      assert(fwrite(native_bytes,1,sizeof native_bytes,nf)==sizeof native_bytes);
+      assert(!fclose(nf)); }
+    dm_kbmap_key_event(0x04,1);
+    dm_pc_input_guest_step();
+    assert(pc_native_panels==1); // HID A now means native command 0
+    dm_kbmap_key_event(0x04,0);
+    assert(!unlink(native_work));
     assert(dm_kbmap_set_pc_mode(0));
     assert(dm_kbmap_pc_mode()==0);
     assert(dm_kbmap_action(0x1a)==DM_KB_MOVE_UP);

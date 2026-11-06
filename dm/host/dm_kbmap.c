@@ -4,6 +4,7 @@
 // Native .key lossless binary codec lives separately in dm_keyfile.{h,c}.
 #include "dm_kbmap.h"
 #include "dm_pc_profile.h"
+#include "dm_pc_input.h"
 #include "dm_input.h"
 #include "dm_world.h"
 #include "dm_uiscreen.h"
@@ -27,6 +28,7 @@ static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char map[256],def[256],down[256],active[256];
 static unsigned char mouse_map[3]={0,1,2};
 static int inited,loaded,foreign_format;
+static int native_pc_mode=1; // new character: PC key semantics; legacy .kbm remains opt-in
 static char hero[64]; // selected character, protected by km_mu
 static void defaults(unsigned char *m) {
     memset(m,DM_KB_UNBOUND,256);
@@ -78,7 +80,7 @@ void dm_kbmap_select_character(const char *name) {
         snprintf(hero,sizeof hero,"%s",name);
         memcpy(map,def,sizeof map);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;
         memset(down,0,sizeof down);memset(active,0,sizeof active);
-        loaded=foreign_format=0;
+        loaded=foreign_format=0;native_pc_mode=1;
         // load on first read, so a newly mounted save is visible.
         dm_kb_clear();
     }
@@ -113,12 +115,15 @@ static void load_locked(void) {
         if(len>0 && (size_t)len<sizeof old)f=fopen(old,"rb");
         if(!f)return;
     }
+    native_pc_mode=0; // migrate a previous controller-emulation profile faithfully
     char line[128];
     if(!fgets(line,sizeof line,f) || strcmp(line,"D2RMobileKeyboard=1\n")) {
         // An unrecognized private .kbm belongs to its owner; refuse to overwrite.
         foreign_format=1;fclose(f);return;
     }
     while(fgets(line,sizeof line,f)) {
+        if(!strcmp(line,"pcMode=1\n")){native_pc_mode=1;continue;}
+        if(!strcmp(line,"pcMode=0\n")){native_pc_mode=0;continue;}
         unsigned usage=0,action=0;char extra=0;
         if(sscanf(line,"mouse%u=%u %c",&usage,&action,&extra)==2) {
             if(usage<3 && action<3) mouse_map[usage]=(unsigned char)action;
@@ -145,6 +150,7 @@ static int save_to(const char *root) {
     if(snprintf(tmp,sizeof tmp,"%s.tmp",fn)<=0)return 0;
     FILE *f=fopen(tmp,"wb");if(!f)return 0;
     int ok=fputs("D2RMobileKeyboard=1\n",f)>=0;
+    if(ok)ok=fprintf(f,"pcMode=%d\n",native_pc_mode)!=-1;
     for(unsigned i=0;ok && i<256;i++)if(map[i]!=def[i])
         ok=fprintf(f,"%02x=%u\n",i,(unsigned)map[i])>0;
     for(unsigned i=0;ok && i<3;i++)if(mouse_map[i]!=i)
@@ -242,6 +248,23 @@ void dm_kbmap_pre_commit(const char *workdir) {
     pthread_mutex_unlock(&km_mu);
 }
 
+int dm_kbmap_pc_mode(void) {
+    pthread_mutex_lock(&km_mu);
+    load_locked();int v=native_pc_mode;
+    pthread_mutex_unlock(&km_mu);return v;
+}
+int dm_kbmap_set_pc_mode(int enabled) {
+    dm_fs_profile_lock();
+    pthread_mutex_lock(&km_mu);
+    load_locked();
+    int old=native_pc_mode;native_pc_mode=!!enabled;
+    int ok=save_locked();
+    if(!ok)native_pc_mode=old;
+    pthread_mutex_unlock(&km_mu);
+    dm_fs_profile_unlock();
+    if(ok)dm_kbmap_reset(); // flush held edges from the previous mapping
+    return ok;
+}
 int dm_kbmap_action(unsigned usage) {
     if(usage>=256)return DM_KB_UNBOUND;
     pthread_mutex_lock(&km_mu);load_locked();
@@ -251,8 +274,11 @@ int dm_kbmap_bind(unsigned usage,unsigned action) {
     if(usage>=256 || !valid(action))return 0;
     dm_fs_profile_lock();
     pthread_mutex_lock(&km_mu);load_locked();
-    unsigned char before=map[usage];map[usage]=(unsigned char)action;
-    int ok=save_locked();if(!ok)map[usage]=before;
+    unsigned char before=map[usage];int before_mode=native_pc_mode;
+    map[usage]=(unsigned char)action;
+    native_pc_mode=0; // Editing HID->controller explicitly selects that input mode.
+    int ok=save_locked();
+    if(!ok){map[usage]=before;native_pc_mode=before_mode;}
     pthread_mutex_unlock(&km_mu);
     dm_fs_profile_unlock();return ok;
 }
@@ -260,6 +286,8 @@ int dm_kbmap_restore_defaults_checked(void) {
     dm_fs_profile_lock();
     pthread_mutex_lock(&km_mu);load_locked();
     unsigned char previous[256],previous_mouse[3];
+    int previous_mode=native_pc_mode;
+    native_pc_mode=0; // The legacy mapping's Reset controls legacy mode.
     memcpy(previous,map,sizeof previous);
     memcpy(previous_mouse,mouse_map,sizeof previous_mouse);
     memcpy(map,def,256);mouse_map[0]=0;mouse_map[1]=1;mouse_map[2]=2;
@@ -267,6 +295,7 @@ int dm_kbmap_restore_defaults_checked(void) {
     if(!ok) {
         memcpy(map,previous,sizeof previous);
         memcpy(mouse_map,previous_mouse,sizeof previous_mouse);
+        native_pc_mode=previous_mode;
     }
     pthread_mutex_unlock(&km_mu);
     dm_fs_profile_unlock();
@@ -275,11 +304,16 @@ int dm_kbmap_restore_defaults_checked(void) {
 void dm_kbmap_restore_defaults(void) { (void)dm_kbmap_restore_defaults_checked(); }
 void dm_kbmap_reset(void) {
     pthread_mutex_lock(&km_mu);memset(down,0,256);memset(active,0,256);
-    pthread_mutex_unlock(&km_mu);dm_kb_clear();
+    pthread_mutex_unlock(&km_mu);dm_pc_input_reset();dm_kb_clear();
 }
 void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;
     pthread_mutex_lock(&km_mu);load_locked();
+    if(native_pc_mode) {
+        pthread_mutex_unlock(&km_mu);
+        dm_pc_input_event(usage,pressed);
+        return;
+    }
     if((int)down[usage]==!!pressed) { pthread_mutex_unlock(&km_mu);return; }
     if(pressed) {
         unsigned a=map[usage];

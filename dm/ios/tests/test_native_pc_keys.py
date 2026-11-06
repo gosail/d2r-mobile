@@ -28,6 +28,16 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn("le32(p+6)",c)
         self.assertIn("O_CREAT|O_EXCL",c)
         self.assertIn("link(temp,path)",c)
+        self.assertIn("patch_guest_keyfile(f,path)",c)
+        self.assertIn("pwrite(fd,f->raw+pos+wrote",c)
+        profile=src("host/dm_pc_profile.c")
+        self.assertIn("dm_save_workdir()",profile)
+        self.assertNotIn("dm_keyfile_new_resurrected(&temp)",profile)
+        self.assertNotIn("dm_keyfile_new_legacy(&temp)",profile)
+        self.assertIn("int rc=dm_keyfile_read(&temp,fn);",profile)
+        self.assertIn("dm_keyfile_free(&profile);",profile)
+        self.assertIn("void dm_kbmap_pre_commit(const char *workdir) { (void)workdir; }",
+                      src("host/dm_kbmap.c"))
         self.assertNotIn("SummonMancer",c)
     def test_native_input_mapping_is_latched_and_gamepad_separate(self):
         c=src("host/dm_pc_input.c")

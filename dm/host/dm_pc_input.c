@@ -84,6 +84,20 @@ void dm_pc_input_guest_step(void) {
     for(unsigned i=0;i<n;i++)
         dm_ui_pc_toggle_panel(batch[i]);
 }
+int dm_pc_input_mouse_special(unsigned pseudo_vk) {
+    if(pseudo_vk<0x100 || pseudo_vk>0x102)return 0;
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    if(dm_pc_profile_action_for_vk((uint16_t)pseudo_vk,&id,&slot))return 0;
+    if(id==7 || id==45){dm_world_mouse_map_toggle();return 1;}
+    if(id==0 || id==1 || id==4 || id==12 || id==44 || id==54) {
+        pthread_mutex_lock(&input_mu);
+        int ok=queue_tail-queue_head<32;
+        if(ok)panel_queue[queue_tail++%32]=(unsigned char)id;
+        pthread_mutex_unlock(&input_mu);
+        return ok;
+    }
+    return 0;
+}
 int dm_pc_input_wheel(int delta) {
     if(!delta)return 0;
     uint32_t id=UINT32_MAX;unsigned slot=0;

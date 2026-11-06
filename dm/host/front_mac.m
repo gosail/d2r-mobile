@@ -205,8 +205,7 @@ double front_display_refresh(char *name, size_t n) {
 - (void)keys:(id)s { (void)s; show_keys(); }
 - (void)share:(id)s { (void)s; share_logs_ui(); }
 @end
-static uint64_t g_btn, g_mouse_btn; // independent held channels
-static int g_w, g_a, g_s, g_d;
+static uint64_t g_mouse_btn; // pointer channel; all physical keyboard keys use dm_kb_set
 
 void *front_metal_layer(void) { return (__bridge void *)g_layer; }
 // 原版 16:9 常数，行为不变；DM_GAME_RES=宽x高（主机模式，掌机按 720/900 同比）只供与 iOS 宽屏对拍
@@ -221,12 +220,11 @@ uint64_t front_game_res(int docked) {
 static NSPoint g_test_last;   // 合成鼠标脚本：上一条带坐标的指令落在视图里的点（dragto 从这里起拖） | synthetic mouse script: the point in the view where the last instruction with coordinates landed (dragto starts dragging from here)
 static int g_wheel;   // 滚轮：+1 / −1 = 右摇杆向上 / 向下推一小会儿（原版手柄版用右摇杆滚列表） | Wheel: +1 / -1 = push the right stick up / down for a short while (the original gamepad UI scrolls lists with the right stick)
 static void push(void) {
-    int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
-    dm_input_set(g_btn | g_mouse_btn, lx, ly, 0, g_wheel * 32767);
+    dm_input_set(g_mouse_btn, 0, 0, 0, g_wheel * 32767);
 }
 // USB HID usage adapter for AppKit virtual-key codes; same local binding
 // file as iPad/Android. Default J/K/U/I, WASD etc. remain unchanged.
-static unsigned char g_mac_keys_down[256],g_mac_actions[256];
+// The same HID-to-guest dispatcher is shared by AppKit, UIKit and Android.
 static unsigned char g_mac_modifier_down[256];
 static int mac_hid_usage(unsigned short c) {
     switch(c) {
@@ -277,48 +275,13 @@ static int mac_hid_usage(unsigned short c) {
     return -1;
 }
 static void on_key(NSEvent *e, int down) {
-    int u=mac_hid_usage(e.keyCode);
-    if(u<0) return;
-    if(dm_kbmap_pc_mode()){
-        // Native PC .key is the sole keyboard dispatcher in this mode.
-        // Never let old .kbm actions keep firing after a rebind.
-        dm_kbmap_key_event((unsigned)u,down);
-        if(down)dm_padmode_request_glyph(DM_GLYPH_KBD);
-        return;
-    }
-    if((int)g_mac_keys_down[u]==!!down) return;
-    if(down) {
-        int action=dm_kbmap_action((unsigned)u);
-        // Match iPad/Android: the action is captured at key-down, not
-        // reinterpreted midway through a held key when a menu opens.
-        if(action==DM_KB_ENTER)
-            action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0;
-        else if(action==DM_KB_ESCAPE)
-            action=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:1;
-        g_mac_actions[u]=(unsigned char)action;
-        if(action==DM_KB_MAP) dm_world_mouse_map_toggle();
-        g_mac_keys_down[u]=1;
-    } else g_mac_keys_down[u]=0;
-    g_btn=0;g_w=g_a=g_s=g_d=0;
-    int used=0;
-    for(unsigned k=0;k<256;k++)if(g_mac_keys_down[k]) {
-        int action=g_mac_actions[k];
-        if(action<16) { g_btn|=1ull<<action;used=1; }
-        else if(action==DM_KB_MOVE_UP) {g_w=1;used=1;}
-        else if(action==DM_KB_MOVE_LEFT) {g_a=1;used=1;}
-        else if(action==DM_KB_MOVE_DOWN) {g_s=1;used=1;}
-        else if(action==DM_KB_MOVE_RIGHT) {g_d=1;used=1;}
-        // Enter/Esc are already resolved and latched at key-down.
-        else if(action==DM_KB_MAP)used=1;
-        else if(action>=DM_KB_SKILL1 && action<=DM_KB_SKILL8) {
-            static const unsigned btn[]={1,2,3,7};
-            int slot=action-DM_KB_SKILL1;
-            if(slot>=4)g_btn|=DM_BTN_ZL;
-            g_btn|=1ull<<btn[slot%4];used=1;
-        }
-    }
-    if(down && used)dm_padmode_request_glyph(DM_GLYPH_KBD);
-    push();
+    int usage=mac_hid_usage(e.keyCode);
+    if(usage<0)return;
+    // Use the exact same native .key / legacy .kbm selection, latched
+    // release and keyboard channel as iPadOS and Android. The Mac's
+    // independent g_in pad channel remains reserved for mouse and wheel.
+    dm_kbmap_key_event((unsigned)usage,down);
+    if(down)dm_padmode_request_glyph(DM_GLYPH_KBD);
 }
 
 // flagsChanged is how AppKit delivers modifier *edges*; ordinary keyDown
@@ -393,8 +356,12 @@ static void mac_secondary_pointer(NSView *view,NSEvent *event,int physical,int p
     if(press) {
         float ux,uy,wx,wy;
         if(mac_mouse_ui_pos(view,event,&ux,&uy,&wx,&wy) &&
-           dm_ui_free_cursor() && ux>=0 && ux<=1 && uy>=0 && uy<=1 &&
-           dm_ui_item_at_now(ux,uy)==1) {
+           dm_ui_free_cursor() && ux>=0 && ux<=1 && uy>=0 && uy<=1) {
+            // Host thread may only enqueue. ui_use_pump() on the guest
+            // thread performs the exact item hit-test (and rejects empty
+            // cells/vendor goods). Never dereference game widgets from
+            // AppKit's event thread.
+
             dm_ui_mouse_right_use(ux,uy);return;
         }
         mac_mouse_secondary[physical]=1;
@@ -484,10 +451,9 @@ static NSString *mac_pc_vk_label(int vk) {
     g_mac_keyboard_mode=sender==g_mac_keyboard_tab;
     g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
     // Flush any held game key when switching from gameplay to the editor.
-    memset(g_mac_keys_down,0,sizeof g_mac_keys_down);
     memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down);
     dm_kbmap_reset();
-    g_btn=0;g_w=g_a=g_s=g_d=0;push();
+    push();
     if(g_mac_keyboard_panel)g_mac_keyboard_panel.hidden=!g_mac_keyboard_mode;
     if(g_mac_keyboard_mode)[self refresh];
 }
@@ -599,8 +565,8 @@ static NSString *mac_pc_vk_label(int vk) {
     if(i==n+5) {
         if(!dm_kbmap_set_pc_mode(!dm_kbmap_pc_mode()))NSBeep();
         else {
-            memset(g_mac_keys_down,0,sizeof g_mac_keys_down);
-            g_btn=0;g_w=g_a=g_s=g_d=0;push();
+            memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down);
+            dm_kbmap_reset();push();
         }
         [self refresh];return;
     }
@@ -775,6 +741,8 @@ void front_run(void (*guest)(void)) {
             // from keyDown and previously bypassed the editor guard.
             if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
                 !g_mac_keyboard_panel.hidden) return e;
+            if(g_mac_keyboard_mode && g_mac_keyboard_panel &&
+               !g_mac_keyboard_panel.hidden) return e; // UI editor owns keys
             if(e.type==NSEventTypeFlagsChanged) {
                 mac_modifier_changed(e);
                 return e;
@@ -947,7 +915,7 @@ void front_run(void (*guest)(void)) {
                   LOG("DM_TEST_COVER：盖上 %.1f 秒，游戏窗口%s是主窗口", dur, win.isKeyWindow ? "" : "不");
                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dur * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [c orderOut:nil]; LOG("DM_TEST_COVER：拿开"); });
               }); }
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = g_mouse_btn = 0; g_w = g_a = g_s = g_d = 0; memset(g_mac_keys_down,0,sizeof g_mac_keys_down); memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down); dm_kbmap_reset(); memset(mac_mouse_down,0,sizeof mac_mouse_down); memset(mac_mouse_secondary,0,sizeof mac_mouse_secondary); mac_mouse_primary_owner=-1; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_mouse_btn = 0; memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down); dm_kbmap_reset(); memset(mac_mouse_down,0,sizeof mac_mouse_down); memset(mac_mouse_secondary,0,sizeof mac_mouse_secondary); mac_mouse_primary_owner=-1; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
         [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(1); }];
         [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
         [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];

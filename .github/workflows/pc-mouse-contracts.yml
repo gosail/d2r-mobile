@@ -31,6 +31,12 @@ jobs:
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_keyfile.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
           /tmp/dm_test_keyboard
+      - name: Exercise physical mouse pick-up and explicit placement through touch state machine
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -I dm/host -I dm/ios/Sources \
+            dm/ios/tests/t_touch_controls.c dm/ios/Sources/dm_touch_controls.c \
+            -lm -o /tmp/dm_test_touch_controls
+          /tmp/dm_test_touch_controls
       - name: Real iPadOS/Android mouse panel drag and cancel lifecycle
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host \

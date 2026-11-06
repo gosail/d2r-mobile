@@ -28,6 +28,8 @@ void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void); 
 #include "../../host/dm_world.h"
 #include "../../host/dm_external_mouse.h"
 #include "../../host/dm_kbmap.h"
+#include "../../host/dm_pc_profile.h"
+#include "../../host/dm_keyfile.h"
 #include "../../host/dm_uiscreen.h"
 #include "../../host/dm_actions.h"
 #include "../../host/dm_i18n.h"
@@ -162,6 +164,92 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
 + (Class)layerClass { return CAMetalLayer.class; }
 // Keyboard editor belongs to the Controls tab; controller's native
 // KeyBindingMenu is left in place and continues to save gamepad mappings.
+// A physical key is captured only after a user explicitly chooses a native
+// command and primary/secondary slot. It never enters the controller bridge.
+static int g_pc_capture_action=-1,g_pc_capture_slot=-1;
+static NSString *pcKeyName(int vk) {
+    if(vk<0)return @"Unavailable";
+    if(vk==0xffff)return @"—";
+    if(vk>='A' && vk<='Z')return [NSString stringWithFormat:@"%c",vk];
+    if(vk>='0' && vk<='9')return [NSString stringWithFormat:@"%c",vk];
+    if(vk>=0x70 && vk<=0x7b)return [NSString stringWithFormat:@"F%d",vk-0x70+1];
+    if(vk==0x09)return @"Tab";
+    if(vk==0x0d)return @"Enter";
+    if(vk==0x1b)return @"Escape";
+    if(vk==0x10)return @"Shift";
+    if(vk==0x11)return @"Ctrl";
+    if(vk==0x12)return @"Alt";
+    if(vk==0x20)return @"Space";
+    return [NSString stringWithFormat:@"VK %04X",vk];
+}
+- (void)kbPcSlot:(unsigned)command {
+    uint16_t primary=0xffff,secondary=0xffff;
+    (void)dm_pc_profile_get(command,0,&primary);
+    (void)dm_pc_profile_get(command,1,&secondary);
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:
+        [NSString stringWithFormat:@"Native PC command %u",command] message:
+        @"Choose a slot, then press a physical key (or clear it)."
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for(unsigned slot=0;slot<2;slot++) {
+        uint16_t v=slot?secondary:primary;
+        NSString *title=[NSString stringWithFormat:@"%@ · %@",slot?@"Secondary":@"Primary",pcKeyName(v)];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction *a) {
+                (void)a;
+                g_pc_capture_action=(int)command;g_pc_capture_slot=(int)slot;
+                [self kbSettingsRefresh];
+                [self becomeFirstResponder];
+            }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Clear primary" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *a){(void)a;
+            if(dm_pc_profile_bind(command,0,0xffff,NULL,NULL)==DM_KEYFILE_OK)[self kbSettingsRefresh];
+            else [self kbSettingsSaveError];
+        }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Clear secondary" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *a){(void)a;
+            if(dm_pc_profile_bind(command,1,0xffff,NULL,NULL)==DM_KEYFILE_OK)[self kbSettingsRefresh];
+            else [self kbSettingsSaveError];
+        }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView=_kbDeviceTabs;
+    sheet.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
+    [self.window.rootViewController presentViewController:sheet animated:YES completion:nil];
+}
+- (void)kbPcOpen {
+    static const char *const names[57]={
+        "Character","Inventory","Party","Message Log","Quests","Chat","Help","Automap",
+        "Center Automap","Fade Automap","Party Automap","Party Names","Skill Tree","Skill Bar",
+        "Skill 1","Skill 2","Skill 3","Skill 4","Skill 5","Skill 6","Skill 7","Skill 8",
+        "Show Belt","Potion 1","Potion 2","Potion 3","Potion 4",
+        "Say 1","Say 2","Say 3","Say 4","Say 5","Say 6","Say 7",
+        "Run Hold","Toggle Run","Stand Still","Show Items","Close Panels",
+        "Previous Skill","Next Skill","Clear Messages","Screenshot","Portraits",
+        "Weapon Swap","Minimap Toggle",
+        "Skill 9","Skill 10","Skill 11","Skill 12","Skill 13","Skill 14","Skill 15","Skill 16",
+        "Hireling","Say 8","Escape"
+    };
+    UIAlertController *list=[UIAlertController alertControllerWithTitle:@"Native PC .key"
+       message:@"Original Diablo II commands · primary / secondary"
+       preferredStyle:UIAlertControllerStyleActionSheet];
+    for(unsigned cmd=0;cmd<57;cmd++) {
+        uint16_t key=0xffff;int ok=dm_pc_profile_get(cmd,0,&key);
+        if(ok) { [self kbSettingsSaveError];return; }
+        NSString *title=[NSString stringWithFormat:@"%02u  %s · %@",cmd,names[cmd],pcKeyName(key)];
+        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction *a){(void)a;[self kbPcSlot:cmd];}]];
+    }
+    [list addAction:[UIAlertAction actionWithTitle:@"Restore Legacy defaults" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *a) {
+            (void)a;
+            if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK)[self kbSettingsSaveError];
+            else [self kbSettingsRefresh];
+        }]];
+    [list addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    list.popoverPresentationController.sourceView=_kbDeviceTabs;
+    list.popoverPresentationController.sourceRect=_kbDeviceTabs.bounds;
+    [self.window.rootViewController presentViewController:list animated:YES completion:nil];
+}
 static NSString *kbActionLabel(int action) {
     static const int ids[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
         16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
@@ -287,7 +375,7 @@ static NSString *kbActionLabel(int action) {
     NSArray<NSString *> *roles=@[@"主点击 / Primary",@"次要使用 / Secondary",@"切换地图 / Map"];
     CGFloat w=_kbBindingScroll.bounds.size.width, rowHeight=46, y=0;
     if(w<10)return;
-    for(NSUInteger i=0;i<keys.count+4;i++) {
+    for(NSUInteger i=0;i<keys.count+5;i++) {
         UIButton *row=[UIButton buttonWithType:UIButtonTypeSystem];
         row.frame=CGRectMake(8,y+3,w-16,rowHeight-6);
         row.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
@@ -300,7 +388,10 @@ static NSString *kbActionLabel(int action) {
             unsigned phys=(unsigned)(i-keys.count);
             int role=dm_kbmap_mouse_action(phys);
             title=[NSString stringWithFormat:@"%@     →     %@",mouse[phys],roles[role>=0 && role<3?role:0]];
-        } else title=dm_lang_zh()?@"恢复此角色的默认键鼠配置":@"Reset this character's keyboard/mouse";
+        } else if(i==keys.count+3)title=dm_lang_zh()?@"恢复此角色的默认键鼠配置":@"Reset this character's keyboard/mouse";
+        else title=g_pc_capture_action>=0?
+            [NSString stringWithFormat:@"PC .key · cmd %d (%@) · 请按物理键",g_pc_capture_action,g_pc_capture_slot?@"Secondary":@"Primary"]:
+            @"PC .key · 57 native commands · Primary / Secondary";
         [row setTitle:title forState:UIControlStateNormal];
         [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         row.tag=(NSInteger)i;
@@ -322,6 +413,7 @@ static NSString *kbActionLabel(int action) {
     NSInteger i=row.tag;
     if(i<(NSInteger)labels.count)[self kbChooseUsage:usages[i] label:labels[i]];
     else if(i<(NSInteger)labels.count+3)[self kbMouseChoose:(unsigned)(i-labels.count)];
+    else if(i==(NSInteger)labels.count+4)[self kbPcOpen];
     else {
         UIAlertController *confirm=[UIAlertController alertControllerWithTitle:
             (dm_lang_zh()?@"恢复默认？":@"Restore defaults?")
@@ -337,6 +429,7 @@ static NSString *kbActionLabel(int action) {
     }
 }
 - (void)kbDeviceSwitched:(UISegmentedControl *)sender {
+    g_pc_capture_action=g_pc_capture_slot=-1;
     BOOL keyboard=sender.selectedSegmentIndex==0;
     dm_kbmap_reset(); // clear held keys before editor takes first responder
     _kbKeyboardPanel.hidden=!keyboard;
@@ -381,6 +474,19 @@ static NSString *kbActionLabel(int action) {
     if(self.window) [self becomeFirstResponder];
 }
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    if(g_pc_capture_action>=0) {
+        if(@available(iOS 13.4,*))for(UIPress *p in presses)if(p.key) {
+            int vk=dm_pc_vk_from_hid((unsigned)p.key.keyCode);
+            if(vk<0)continue;
+            int rc=dm_pc_profile_bind((unsigned)g_pc_capture_action,(unsigned)g_pc_capture_slot,(uint16_t)vk,NULL,NULL);
+            if(rc==DM_KEYFILE_OK) {
+                g_pc_capture_action=g_pc_capture_slot=-1;
+                [self kbSettingsRefresh];
+            } else [self kbSettingsSaveError];
+            break;
+        }
+        return;
+    }
     if(_kbDeviceTabs && !_kbDeviceTabs.hidden && _kbDeviceTabs.selectedSegmentIndex==0) {
         [super pressesBegan:presses withEvent:event];return;
     }
@@ -396,6 +502,7 @@ static NSString *kbActionLabel(int action) {
     if(!handled) [super pressesBegan:presses withEvent:event];
 }
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    if(g_pc_capture_action>=0)return;
     if(_kbDeviceTabs && !_kbDeviceTabs.hidden && _kbDeviceTabs.selectedSegmentIndex==0) {
         [super pressesEnded:presses withEvent:event];return;
     }

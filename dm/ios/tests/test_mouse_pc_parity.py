@@ -24,6 +24,11 @@ class PhysicalMouseParity(unittest.TestCase):
         self.assertIn("dm_ui_mouse_right_use(e->ux,e->uy)", mouse)
         self.assertIn("ci.container==DM_ITEM_AT_SHOP", cursor)
         self.assertIn("dm_ui_item_at_now(nx,ny)", cursor)
+        # On macOS NSEvent monitors run on the AppKit UI thread. Only
+        # dm_cursor's guest game thread may examine original game widgets.
+        mac=self.get("host/front_mac.m")
+        self.assertNotIn("dm_ui_item_at_now(ux,uy)",mac)
+        self.assertIn("dm_ui_mouse_right_use(ux,uy);return;",mac)
 
     def test_middle_map_each_platform(self):
         shared = self.get("host/dm_external_mouse.c")

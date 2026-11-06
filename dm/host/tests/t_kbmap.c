@@ -24,6 +24,7 @@ void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
     (void)rx;(void)ry;buttons=b;left_x=lx;left_y=ly;
 }
 void dm_world_mouse_map_toggle(void) {maps++;}
+void dm_ui_pc_toggle_panel(unsigned id) {(void)id;}
 int dm_uiscreen_ingame(void) {return 1;}
 int dm_uiscreen_panel(void) {return 0;}
 int main(int argc,char **argv) {

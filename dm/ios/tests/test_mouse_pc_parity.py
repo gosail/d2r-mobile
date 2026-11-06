@@ -56,6 +56,7 @@ class PhysicalMouseParity(unittest.TestCase):
         self.assertIn("stat(unit,stat_id[z],0)>=100", world)
         self.assertIn("view.immune_mask", world)
         self.assertIn("view.tier", world)
+        self.assertIn("strlcpy(view.details,dm_lang_zh()?zh_tier[rank]:en_tier[rank]", world)
 
 
     def test_monster_hold_is_bound_to_original_id(self):
@@ -76,6 +77,8 @@ class PhysicalMouseParity(unittest.TestCase):
         self.assertIn("physical_mouse_owns_item()", cursor)
         self.assertIn("dm_ui_hover_now(x,y);", cursor)
         self.assertIn("g_live_hover_latest", mac)
+        self.assertIn("controlsMouseCaptured",self.get("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
+        self.assertIn("gameMouseCaptured",self.get("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
         self.assertIn("fresh ? fresh : atomic_load(&g_live_hover_latest)", mac)
 
 if __name__ == "__main__":

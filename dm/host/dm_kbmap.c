@@ -1,6 +1,7 @@
-// Shared keyboard binding/persistence layer for macOS defaults, iOS and Android.
-// Per-character file: <save root>/<hero>/<hero>.key, using D2RMobileKeyboard=1.
-// The game's native <hero>.ctl is left entirely under its own control.
+// Keyboard-to-Switch-controller emulation (NOT native Diablo II PC actions).
+// Its private per-character <hero>.kbm must never occupy native <hero>.key.
+// Legacy mobile text .key files are read ONLY as migration input and never overwritten.
+// Native .key lossless binary codec lives separately in dm_keyfile.{h,c}.
 #include "dm_kbmap.h"
 #include "dm_input.h"
 #include "dm_world.h"
@@ -58,7 +59,7 @@ static int hero_name_ok(const char *name) {
 }
 static int filename_at(char *out,size_t n,const char *root) {
     if(!root || !*root || !hero_name_ok(hero))return 0;
-    int len=snprintf(out,n,"%s/%s/%s.key",root,hero,hero);
+    int len=snprintf(out,n,"%s/%s/%s.kbm",root,hero,hero);
     return len>0 && (size_t)len<n;
 }
 static int filename(char *out,size_t n) {
@@ -86,8 +87,21 @@ static void load_locked(void) {
     loaded=1;
     FILE *f=fopen(fn,"rb");
     if(!f) {
-        // One-time, read-only compatibility with this project's previous
-        // global keyboard file. A changed binding is written per hero.
+        // Existing private .key belongs to an earlier D2R Mobile revision.
+        // Probe only the exact text signature; never parse or touch native binary.
+        char previous[1152],mark[128];const char *root=dm_save_commitdir();
+        int n=root?snprintf(previous,sizeof previous,"%s/%s/%s.key",root,hero,hero):0;
+        if(n>0 && (size_t)n<sizeof previous) {
+            FILE *candidate=fopen(previous,"rb");
+            if(candidate) {
+                if(fgets(mark,sizeof mark,candidate) &&
+                   !strcmp(mark,"D2RMobileKeyboard=1\n")) f=candidate;
+                else fclose(candidate);
+            }
+        }
+    }
+    if(!f) {
+        // Older global legacy config is also a read-only migration source.
         char old[1152];const char *root=dm_save_commitdir();
         int len=root?snprintf(old,sizeof old,"%s/../sw_keyboard.txt",root):0;
         if(len>0 && (size_t)len<sizeof old)f=fopen(old,"rb");

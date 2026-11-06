@@ -51,7 +51,6 @@ static int read_locked(void) {
     if(loaded)return load_result;
     char fn[1200];if(!path(fn))return DM_KEYFILE_NOT_FOUND;
     dm_keyfile temp={0};int rc=dm_keyfile_read(&temp,fn);
-    if(rc==DM_KEYFILE_IO && errno==ENOENT)rc=DM_KEYFILE_NOT_FOUND;
     if(rc==DM_KEYFILE_NOT_FOUND) {
         // New character: independent Resurrected skill-key preset, never
         // reuse imported personal bindings as a default.
@@ -61,14 +60,23 @@ static int read_locked(void) {
     if(rc==DM_KEYFILE_OK) {
         dm_keyfile_free(&profile);profile=temp;
     } else dm_keyfile_free(&temp);
-    loaded=1;load_result=rc;
+    // A role can be selected before its save directory is mounted. Retry
+    // transient FS errors; never cache a missing directory for the session.
+    loaded=(rc==DM_KEYFILE_OK || rc==DM_KEYFILE_INVALID ||
+            rc==DM_KEYFILE_UNSUPPORTED || rc==DM_KEYFILE_CONFLICT);
+    load_result=rc;
     return rc;
 }
 int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk) {
+    // The lazy first read can create a new .key. Serialize it with guest
+    // transactional worktree swaps exactly like an explicit rebind.
+    dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);
     int rc=read_locked();
     if(!rc)rc=dm_keyfile_get(&profile,id,slot,vk);
-    pthread_mutex_unlock(&pc_mu);return rc;
+    pthread_mutex_unlock(&pc_mu);
+    dm_fs_profile_unlock();
+    return rc;
 }
 int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
                        uint32_t *conflict,unsigned *conflict_slot) {
@@ -138,10 +146,13 @@ int dm_pc_profile_reset_resurrected(void) {
     return reset_with(dm_keyfile_new_resurrected);
 }
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {
+    dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);
     int rc=read_locked();
     if(!rc)rc=dm_keyfile_lookup_vk(&profile,vk,id,slot);
-    pthread_mutex_unlock(&pc_mu);return rc;
+    pthread_mutex_unlock(&pc_mu);
+    dm_fs_profile_unlock();
+    return rc;
 }
 int dm_pc_vk_from_hid(unsigned u) {
     if(u>=0x04 && u<=0x1d)return 'A'+(int)(u-0x04);

@@ -125,6 +125,9 @@ int main(void) {
     dm_pc_input_reset();assert(game_buttons==0);
     assert(dm_pc_input_latched_command(0x0e)==-1);
     assert(dm_pc_profile_reset_legacy()==DM_KEYFILE_OK);
+    dm_pc_input_event(0x1a,1); // W: original guest weapon-swap action
+    dm_pc_input_guest_step();assert(panel_events[44]==1);
+    dm_pc_input_event(0x1a,0);
     dm_pc_input_event(0x0c,1); // I -> inventory cmd 1
     dm_pc_input_event(0x0c,1);
     dm_pc_input_guest_step();

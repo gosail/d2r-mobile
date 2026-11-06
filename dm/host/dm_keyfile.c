@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-enum { HEADER_BYTES=2, RECORD_BYTES=10, MAX_BYTES=1024*1024 };
+enum { HEADER_BYTES=2, RECORD_BYTES=10, MAX_BYTES=1024*1024, MAX_RECORDS=4096 };
 static uint16_t le16(const uint8_t *p) {
     return (uint16_t)((unsigned)p[0] | ((unsigned)p[1]<<8));
 }
@@ -30,16 +30,17 @@ static int validate(const uint8_t *raw,size_t len) {
     if(le16(raw)!=0x0025)return DM_KEYFILE_UNSUPPORTED;
     size_t n=(len-HEADER_BYTES)/RECORD_BYTES;
     if(n%2)return DM_KEYFILE_INVALID;
+    if(n>MAX_RECORDS)return DM_KEYFILE_UNSUPPORTED;
     // Every observed operation has exactly one flag 1 and one flag 0.
     // Reject ambiguous/unknown layouts instead of guessing and corrupting them.
     for(size_t i=0;i<n;i++) {
         const uint8_t *p=raw+HEADER_BYTES+i*RECORD_BYTES;
-        uint32_t id=le32(p);uint16_t flag=le16(p+6);
+        uint32_t id=le32(p),flag=le32(p+6);
         if(flag>1)return DM_KEYFILE_UNSUPPORTED;
         unsigned matches=0,seen=0;
         for(size_t j=0;j<n;j++) {
             const uint8_t *q=raw+HEADER_BYTES+j*RECORD_BYTES;
-            if(le32(q)==id){matches++;seen|=1u<<le16(q+6);}
+            if(le32(q)==id){matches++;uint32_t slot=le32(q+6);if(slot>1)return DM_KEYFILE_UNSUPPORTED;seen|=1u<<slot;}
         }
         if(matches!=2 || seen!=3)return DM_KEYFILE_INVALID;
     }
@@ -80,7 +81,7 @@ static uint8_t *record(const dm_keyfile *f,uint32_t id,unsigned slot) {
     if(!f || !f->raw || slot>1)return NULL;
     for(size_t i=0;i<f->records;i++) {
         uint8_t *p=f->raw+HEADER_BYTES+i*RECORD_BYTES;
-        if(le32(p)==id && le16(p+6)==(uint16_t)(slot?0:1))return p;
+        if(le32(p)==id && le32(p+6)==(uint32_t)(slot?0:1))return p;
     }
     return NULL;
 }

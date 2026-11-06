@@ -327,6 +327,7 @@ static NSString *kbActionLabel(int action) {
 }
 - (void)kbDeviceSwitched:(UISegmentedControl *)sender {
     BOOL keyboard=sender.selectedSegmentIndex==0;
+    dm_kbmap_reset(); // clear held keys before editor takes first responder
     _kbKeyboardPanel.hidden=!keyboard;
     if(keyboard)[self kbSettingsRefresh];
 }
@@ -369,6 +370,9 @@ static NSString *kbActionLabel(int action) {
     if(self.window) [self becomeFirstResponder];
 }
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    if(_kbDeviceTabs && !_kbDeviceTabs.hidden && _kbDeviceTabs.selectedSegmentIndex==0) {
+        [super pressesBegan:presses withEvent:event];return;
+    }
     BOOL handled=NO;
     if(@available(iOS 13.4,*)) for(UIPress *p in presses)
         if(p.key != nil) {
@@ -381,6 +385,9 @@ static NSString *kbActionLabel(int action) {
     if(!handled) [super pressesBegan:presses withEvent:event];
 }
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    if(_kbDeviceTabs && !_kbDeviceTabs.hidden && _kbDeviceTabs.selectedSegmentIndex==0) {
+        [super pressesEnded:presses withEvent:event];return;
+    }
     BOOL handled=NO;
     if(@available(iOS 13.4,*)) for(UIPress *p in presses)
         if(p.key != nil) {

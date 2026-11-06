@@ -392,6 +392,9 @@ static int g_mac_keyboard_mode;
 @implementation DmMacKeyboardEditor
 - (void)chooseDevice:(id)sender {
     g_mac_keyboard_mode=sender==g_mac_keyboard_tab;
+    // Flush any held game key when switching from gameplay to the editor.
+    memset(g_mac_keys_down,0,sizeof g_mac_keys_down);
+    g_btn=0;g_w=g_a=g_s=g_d=0;push();
     if(g_mac_keyboard_panel)g_mac_keyboard_panel.hidden=!g_mac_keyboard_mode;
     if(g_mac_keyboard_mode)[self refresh];
 }
@@ -574,6 +577,8 @@ void front_run(void (*guest)(void)) {
         [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;   // 只吃游戏窗口的键；软键盘输入框等其他窗口照常收字 | Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
             if (e.modifierFlags & NSEventModifierFlagCommand) return e;   // 带 ⌘ 的留给菜单（⌘Q、⌃⌘F） | Keys with ⌘ are left to the menu (⌘Q, ⌃⌘F)
+            if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
+                !g_mac_keyboard_panel.hidden) return e; // editor owns navigation
             if (!e.isARepeat) on_key(e, e.type == NSEventTypeKeyDown);
             return nil;   // 吃掉，免得系统提示音 | Swallow it to avoid the system beep
         }];

@@ -238,6 +238,10 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     // (#178: connecting a controller after installing a new version, before the import, crashed it). The system handles them as on any other screen
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
         if (libraryLoaded && PadInput.onKey(e)) return true;
+        // The keyboard editor and its choice dialogs own keyboard navigation.
+        // Never cast a spell because the user pressed Enter/arrow in the UI.
+        if(kbKeyboardMode && kbDeviceTabs!=null &&
+           kbDeviceTabs.getVisibility()==View.VISIBLE)return super.dispatchKeyEvent(e);
         if (libraryLoaded && started && (inputDialog == null || !inputDialog.isShowing()) && KeyboardInput.onKey(e)) return true;
         return super.dispatchKeyEvent(e);
     }

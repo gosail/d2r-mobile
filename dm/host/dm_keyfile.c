@@ -135,6 +135,25 @@ int dm_keyfile_new_legacy(dm_keyfile *out) {
     }
     return dm_keyfile_parse(out,buf,sizeof buf);
 }
+int dm_keyfile_new_resurrected(dm_keyfile *out) {
+    int rc=dm_keyfile_new_legacy(out);
+    if(rc)return rc;
+    // Resurrected skill profile: keys 1..0, - and = for Skill 1..12.
+    // The original 1.13c Legacy potion 1..4 bindings must be cleared first.
+    for(uint32_t id=23;id<=26;id++) {
+        rc=dm_keyfile_set(out,id,0,0xffff);
+        if(rc)break;
+    }
+    for(uint32_t i=0;!rc && i<12;i++) {
+        uint32_t id=i<8?14+i:46+(i-8);
+        uint16_t vk=i<9?(uint16_t)('1'+i):
+            i==9?'0':i==10?0xbd:0xbb;
+        rc=dm_keyfile_set(out,id,0,vk);
+    }
+    if(!rc)memcpy(out->baseline,out->raw,out->size);
+    if(rc)dm_keyfile_free(out);
+    return rc;
+}
 int dm_keyfile_lookup_vk(const dm_keyfile *f,uint16_t vk,uint32_t *id,unsigned *slot) {
     if(!f || !f->raw || !id || !slot || vk==0xffff)return DM_KEYFILE_INVALID;
     for(size_t i=0;i<f->records;i++) {

@@ -526,17 +526,18 @@ static NSString *mac_pc_vk_label(int vk) {
         g_mac_pc_capture_slot=(int)slot.indexOfSelectedItem;
         [self refresh];
     } else if(response==NSAlertThirdButtonReturn) {
-        if(dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,(unsigned)slot.indexOfSelectedItem,0xffff,NULL,NULL)!=DM_KEYFILE_OK) {
+        if(dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,(unsigned)slot.indexOfSelectedItem,0xffff,NULL,NULL)!=DM_KEYFILE_OK ||
+           !dm_kbmap_set_pc_mode(1)) {
             NSAlert *fail=[NSAlert new];fail.messageText=@"Could not clear binding";[fail runModal];
         }
         [self refresh];
     } else if(response==NSAlertThirdButtonReturn+1) {
-        if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK){
+        if(dm_pc_profile_reset_legacy()!=DM_KEYFILE_OK || !dm_kbmap_set_pc_mode(1)){
             NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Legacy defaults";[fail runModal];
         }
         [self refresh];
     } else if(response==NSAlertThirdButtonReturn+2) {
-        if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK){
+        if(dm_pc_profile_reset_resurrected()!=DM_KEYFILE_OK || !dm_kbmap_set_pc_mode(1)){
             NSAlert *fail=[NSAlert new];fail.messageText=@"Could not restore Resurrected skills";[fail runModal];
         }
         [self refresh];
@@ -712,7 +713,7 @@ void front_run(void (*guest)(void)) {
                 if(vk>=0 && !(e.modifierFlags & NSEventModifierFlagCommand)) {
                     int rc=dm_pc_profile_bind((uint32_t)g_mac_pc_capture_id,
                         (unsigned)g_mac_pc_capture_slot,(uint16_t)vk,NULL,NULL);
-                    if(rc==DM_KEYFILE_OK){
+                    if(rc==DM_KEYFILE_OK && dm_kbmap_set_pc_mode(1)){
                         g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
                         [g_mac_keyboard_editor refresh];
                     } else NSBeep(); // conflict or save failure, stay in capture

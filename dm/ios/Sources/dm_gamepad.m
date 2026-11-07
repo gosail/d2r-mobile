@@ -23,6 +23,7 @@
 #import <GameController/GameController.h>
 #include "dm_input.h"
 #include "dm_padmap.h"
+#include "dm_kbmap.h"
 #include "hle.h"
 
 static void (*g_on_mode)(int pad);
@@ -86,7 +87,12 @@ static void drop(const void *who) {   // 这个手柄没了：只拿掉它那一
     if(!g_external_preferred)set_mode(0);
 }
 void dm_gamepad_touched(void) {
+    // A real finger becomes the active input owner. Release any latched
+    // keyboard stick/button bits so an arrow held before this touch does
+    // not keep the character moving behind the touch UI.
+    int was_external=g_external_preferred;
     g_external_preferred=0;
+    if(was_external)dm_kbmap_reset();
     if (g_pad_mode) { g_need_center = 1; set_mode(0); apply(); }
 }   // 前端：碰了屏幕。摇杆此刻偏着的话要先回中才重新接管 | Front end: the screen was touched. If a stick is deflected right now it must return to center before taking over again
 void dm_gamepad_reset(void) {   // 前端：失活 / 进后台 / 来电 | Front end: resign active / enter background / incoming call

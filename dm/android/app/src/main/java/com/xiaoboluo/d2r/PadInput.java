@@ -104,7 +104,9 @@ final class PadInput {
 
     // 玩家碰了屏幕：手柄布局 → 触屏布局，并等摇杆回中（iOS 的 dm_gamepad_touched） | The player touched the screen (iOS dm_gamepad_touched)
     static void onTouch() {
+        boolean wasExternal=externalPreferred;
         externalPreferred = false;
+        if(wasExternal)DmActivity.nativeKeyboardReset();
         if (!padMode) return;
         needCenter = true;
         setMode(false);

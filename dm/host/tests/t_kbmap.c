@@ -110,6 +110,15 @@ int main(void) {
     pad=fopen(ctl,"rb");assert(pad);
     char val[11]={0};assert(fread(val,1,10,pad)==10);
     assert(!memcmp(val,"NATIVE_CTL",10));assert(!fclose(pad));
+    // Even an unsupported native file cannot turn dedicated movement
+    // arrows into a random controller shortcut or disable walking.
+    char broken[1200];snprintf(broken,sizeof broken,"%s/Alice/Alice.key",work_dir);
+    FILE *bad=fopen(broken,"wb");assert(bad);
+    assert(fwrite("BROKEN",1,6,bad)==6);assert(!fclose(bad));
+    dm_kbmap_key_event(0x52,1);assert(left_y==32767 && buttons==0);
+    dm_kbmap_key_event(0x52,0);assert(left_y==0);
+    dm_kbmap_key_event(0x04,1);assert(left_x==0 && left_y==0 && buttons==0);
+    dm_kbmap_key_event(0x04,0);
     dm_kbmap_controls_event("SettingsPanelMessage","CheckChanges","KeyBindingMenu");
     assert(dm_kbmap_controls_visible());
     dm_kbmap_controls_event("PanelManager","ClosePanel","SettingsPanel");

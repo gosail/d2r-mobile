@@ -118,8 +118,11 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
         return;
     }
     if(pressed && !was_legacy) {
-        int status=dm_uiscreen_ingame()?dm_pc_profile_file_status():0;
-        if(status==1) {
+        int ingame=dm_uiscreen_ingame();
+        int arrow=usage==0x50 || usage==0x52 ||
+                  usage==0x4f || usage==0x51;
+        int status=ingame?dm_pc_profile_file_status():0;
+        if(status==1 || (ingame && arrow && (status<0 || seen_native))) {
             // The guest .key is authoritative in a run. An earlier menu/
             // missing-file WASD fallback must not coexist with its native
             // action (e.g. A moving left while opening Character).
@@ -131,7 +134,7 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
                 memset(active,0,sizeof active);
                 dm_kb_clear();
             }
-            native_seen=1;
+            if(status==1)native_seen=1;
             native_held[usage]=1;
             pthread_mutex_unlock(&km_mu);
             dm_pc_input_event(usage,1);

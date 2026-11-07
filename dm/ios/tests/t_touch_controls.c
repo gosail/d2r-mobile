@@ -326,7 +326,7 @@ static void mouse_item_pickup_placement(void) {
     dm_tc_pointer_item(&s,1);
     dm_tc_end_at(&s,0,1.08);
     CHECK(s.mouse_pick_pending && s.pulse_button==0);
-    dm_tc_tick(&s,1.48);
+    dm_tc_tick(&s,1.50); // strictly after 0.4s double-click window
     CHECK(!s.mouse_pick_pending && s.pulse_button==DM_BTN_A && s.pulse_epoch!=0);
     NEAR(s.pointer_x,300,0.001);
     CHECK(dm_tc_pulse_end(&s,s.pulse_epoch));

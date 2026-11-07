@@ -435,6 +435,34 @@ INGAME = {
         ('close', 'TouchClose', '"anchor": { "x": 0.5 }, "rect": { "x": 1594, "y": 58, "scale": 1.2 }, "filename": "PANEL\\\\HUD_02\\\\front_panel", "hoveredFrame": 0, "onClickMessage": "PanelManager:ClosePanel:TouchNoop"', 'playerinventoryoriginallayouthd.json')]),
 }
 
+
+# PC keyboard/mouse enters the native controller layout. Reuse the existing
+# in-game close buttons for its panel resources too, without replacing the
+# controller inventory/skills layouts (and their item/skill interactions).
+# PauseLayout / PauseLayoutGarden already receive TouchClose in pad_pause().
+# Include the waypoint: dm_cursor.c routes its out-of-panel X to native Back.
+PAD_PC_CLOSE_PAGES = (
+    'controller/vendorpanellayouthd.json',
+    'controller/bankexpansionlayouthd.json',
+    'controller/characterstatspanelhd.json',
+    'controller/advancedstatspanelhd.json',
+    'controller/console/switch/playerinventoryexpansionlayouthd.json',
+    'controller/skillstreepanelhd.json',
+    'controller/questlogpanelexpansionhd.json',
+    'controller/hiremenupanelhd.json',
+    'controller/imbueitemspanelhd.json',
+    'controller/hirelinginventorypanelhd.json',
+    'controller/waypointspanelexpansionhd.json',
+    'controller/console/settingspanelhd.json',
+)
+def _pc_native_close(rel):
+    source, items = INGAME[rel]
+    close = [v for v in items if (v[1] or v[0]) in ('TouchClose', 'CloseButton', 'close')]
+    if len(close) != 1:
+        raise ValueError('Expected one native close widget for %s; got %d' % (rel, len(close)))
+    return source, close
+PAD_PC_CLOSE = {rel: _pc_native_close(rel) for rel in PAD_PC_CLOSE_PAGES}
+
 # 局内呈现（第 ③ 步）：不加按钮、只改摆放的那部分。每项：手柄版布局 → 变换函数(文本) → (新文本, 改了几处)
 # In-game presentation (step ③): the part that adds no buttons and only changes placement. Each entry: controller layout → transform function(text) → (new text, number of places changed)
 def _char_no_stamina(s):
@@ -1456,11 +1484,15 @@ def _widget_block(s, name):
 # button_blank). The controller layout does not carry over "Repair All" (hold the left stick on the original controller scheme) or the gamble
 # page refresh (the original controller scheme has its own key)
 PAD_VENDOR = {'controller/vendorpanellayouthd.json': ('vendorpanellayouthd.json', [INGAME['controller/vendorpanellayouthd.json'][1][0], INGAME['controller/vendorpanellayouthd.json'][1][1]])}
-def build_ingame(romfs, outdir, spec=None, present=True):   # present=False：不套触屏的摆放变换（给手柄版布局插按钮用） | present=False: do not apply the touch placement transform (used for inserting buttons into the controller layout)
+def build_ingame(romfs, outdir, spec=None, present=True, base_overrides=None):   # present=False：不套触屏的摆放变换（给手柄版布局插按钮用） | present=False: do not apply the touch placement transform (used for inserting buttons into the controller layout)
     """局内面板插回原生按钮。返回 ({包内逻辑路径(小写): 本地文件}, 插了几个)。 | Insert native buttons back into the in-game panels. Returns ({logical path in package (lowercase): local file}, number inserted)."""
     repl = {}; total = 0
     for rel, (src, items) in (INGAME if spec is None else spec).items():
         path, text = read_layout(romfs, rel); _, base = read_layout(romfs, src); add = ''
+        # In the pad pass, retain preceding additions such as the pouch,
+        # 14-column stash, rune list and settings tabs. Only graft the X.
+        if base_overrides and path.lower() in base_overrides:
+            with open(base_overrides[path.lower()], encoding='utf-8') as f: text = f.read()
         if present and rel in PRESENT: text = PRESENT[rel](text)[0]   # 同一份布局在 PRESENT 里也改了摆放：先套那里的变换 | The same layout also has its placement changed in PRESENT: apply that transform first
         for name, new_name, override, *alt in items:
             b = _widget_block(read_layout(romfs, alt[0])[1] if alt else base, name)   # 第 4 项 = 这个控件另取自哪份键鼠版布局（资料片版继承经典版，按钮写在经典版那份里） | Item 4 = which other keyboard-and-mouse layout this widget is taken from (the expansion version inherits the classic version, and the button is written in the classic one)

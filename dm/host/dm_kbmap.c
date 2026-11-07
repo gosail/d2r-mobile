@@ -19,6 +19,9 @@ static int inited;
 // Once this character has a valid guest .key, never fall back to the old map just
 // because the guest is temporarily rewriting or committing its profile.
 static int native_seen;
+static _Atomic int external_owner;
+void dm_kbmap_external_owner(int on) { atomic_store(&external_owner,!!on); }
+int dm_kbmap_is_external_owner(void) { return atomic_load(&external_owner); }
 static const int native_pc_mode=1;
 static char hero[64];
 static void defaults(unsigned char *m) {
@@ -93,6 +96,7 @@ int dm_kbmap_bind(unsigned usage,unsigned action) {
 int dm_kbmap_restore_defaults_checked(void) { return 0; }
 void dm_kbmap_restore_defaults(void) {}
 void dm_kbmap_reset(void) {
+    dm_kbmap_external_owner(0);
     pthread_mutex_lock(&km_mu);
     memset(down,0,sizeof down);memset(active,0,sizeof active);
     memset(native_held,0,sizeof native_held);
@@ -101,6 +105,7 @@ void dm_kbmap_reset(void) {
 }
 void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;
+    if(pressed)dm_kbmap_external_owner(1);
     pthread_mutex_lock(&km_mu);
     load_locked();
     int was_native=native_held[usage],was_legacy=down[usage];

@@ -77,6 +77,13 @@ void dm_kb_clear(void) {
     atomic_store(&g_kb_latch,0);
 }
 void dm_pad_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
+    // The physical controller takes visual ownership on explicit input;
+    // standalone HID tests need not link the optional keyboard module.
+    extern void dm_kbmap_external_owner(int) __attribute__((weak));
+    if(dm_kbmap_external_owner && (buttons || lx>8192 || lx< -8192 ||
+           ly>8192 || ly< -8192 || rx>8192 || rx< -8192 ||
+           ry>8192 || ry< -8192))
+        dm_kbmap_external_owner(0);
     uint64_t old = atomic_exchange(&g_pad_btn, buttons); atomic_fetch_or(&g_pad_latch, buttons & ~old);
     atomic_store(&g_pad_axes, (uint64_t)(uint16_t)lx | (uint64_t)(uint16_t)ly << 16 | (uint64_t)(uint16_t)rx << 32 | (uint64_t)(uint16_t)ry << 48);
 }

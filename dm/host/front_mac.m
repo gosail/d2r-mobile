@@ -382,6 +382,7 @@ static void mac_secondary_pointer(NSView *view,NSEvent *event,int physical,int p
 }
 static void mac_mouse_physical(NSView *view,NSEvent *event,int physical,int phase) {
     // phase 0=down,1=drag,2=up
+    dm_kbmap_external_owner(1);
     if(phase==0) {
         if(mac_mouse_down[physical])return;
         mac_mouse_down[physical]=1;
@@ -729,7 +730,7 @@ void front_run(void (*guest)(void)) {
                     int hint=dm_mouse_pointer_hint();
                     [ (hint==2?NSCursor.closedHandCursor:hint==1?NSCursor.openHandCursor:NSCursor.arrowCursor) set];
                     if(e.type==NSEventTypeMouseExited)dm_touch_host_live(3,-1,-1);
-                    else mac_primary_pointer(v,e,3);
+                    else { dm_kbmap_external_owner(1);mac_primary_pointer(v,e,3); }
                 }
                 return e;
             }

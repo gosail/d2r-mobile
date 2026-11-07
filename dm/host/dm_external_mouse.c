@@ -43,6 +43,8 @@ static int g_mouse_physical_down[3];
 int dm_external_mouse_active(void) { return atomic_load(&mouse_active); }
 void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int arg) {
     if (op < DM_MOUSE_DOWN || op > DM_MOUSE_MIDDLE_UP) return;
+    if(op!=DM_MOUSE_LEAVE && op!=DM_MOUSE_HOVER_END)
+        dm_kbmap_external_owner(1);
     if (!isfinite(ux) || !isfinite(uy) || !isfinite(wx) || !isfinite(wy)) op = DM_MOUSE_LEAVE;
     pthread_mutex_lock(&mouse_mu);
     // Translate physical button roles once at press time; release uses the

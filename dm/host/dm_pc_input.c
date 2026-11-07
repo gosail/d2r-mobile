@@ -54,9 +54,15 @@ int dm_pc_input_supported_action(uint32_t id) {
            id==7 || id==23 || id==24 || id==25 || id==26 ||
            id==35 || id==36 || id==37 || id==56 || skill_slot(id)>=0;
 }
+// Only 12 native controller slots are verified. Expose the actual button
+// masks for the guest skill-binding modal instead of duplicating their order.
+uint64_t dm_pc_input_skill_buttons(uint32_t id) {
+    int slot=skill_slot(id);
+    return slot>=0?slot_buttons[slot%6] | (slot>=6?DM_BTN_ZL:0):0;
+}
 static uint64_t command_bits(unsigned id) {
     int slot=skill_slot(id);
-    if(slot>=0)return slot_buttons[slot%6] | (slot>=6?DM_BTN_ZL:0);
+    if(slot>=0)return dm_pc_input_skill_buttons(id);
     switch(id) {
     case 23:return DM_BTN_LEFT;
     case 24:return DM_BTN_UP;
@@ -234,6 +240,13 @@ void dm_pc_input_event(unsigned hid,int pressed) {
             (unsigned char)id:UNMAPPED;
         held_mask[hid]=command[hid]==UNMAPPED?0:command_bits(command[hid]);
         skill_phase[hid]=PH_IDLE;
+        // With the physical pointer over an actual skill icon, pressing its
+        // assigned PC shortcut enters the guest's own controller bind modal.
+        // This key-down must NOT also cast its old skill.
+        if(skill_slot(command[hid])>=0 && dm_ui_pc_skill_bind_request(command[hid])) {
+            command[hid]=UNMAPPED;
+            held_mask[hid]=0;
+        }
         if(skill_slot(command[hid])>=6) {
             skill_phase[hid]=PH_ZL_LEAD;
             skill_sample[hid]=dm_input_samples();

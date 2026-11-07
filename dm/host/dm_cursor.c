@@ -5,6 +5,8 @@
 #include "dm.h"
 #include "dm_uiscreen.h"
 #include "dm_input.h"
+#include "dm_pc_input.h"
+#include "dm_kbmap.h"
 #include "dm_hud.h"
 #include "dm_actions.h"
 #include "dm_cursor_item.h"
@@ -181,9 +183,21 @@ int dm_mouse_pointer_hint(void) {
     if (dm_hud_held()) return 2;
     return atomic_load(&g_free_pub) ? atomic_load(&g_mouse_item_hover) : 0;
 }
+// Physical mouse skill hover is captured only on the guest game thread.
+static _Atomic uint64_t g_pc_skill_hover, g_pc_skill_bind_req;
+static void pc_skill_hover_note(module_t *m,int x,int y);
+void dm_ui_pc_skill_hover_end(void) { atomic_store(&g_pc_skill_hover,0); }
+int dm_ui_pc_skill_bind_request(uint32_t id) {
+    if (!dm_pc_input_skill_buttons(id)) return 0;
+    uint64_t xy=atomic_load(&g_pc_skill_hover);
+    if (!(xy >> 63)) return 0;
+    uint64_t want=((uint64_t)id << 32) | (xy & 0xffffffffu), empty=0;
+    return atomic_compare_exchange_strong(&g_pc_skill_bind_req,&empty,want);
+}
 // 真鼠标悬停复用原版焦点重算；不能套触屏的「胖手指」吸附，否则空格旁也会冒出邻格说明。
 // Real mouse hover reuses the game's focus refresh, bypassing touch's fat-finger snap so empty cells do not show a neighbor's tooltip.
 int dm_ui_mouse_hover_now(float nx, float ny) {
+    dm_ui_pc_skill_hover_end();
     module_t *m = main_module();
     uint64_t waiting = atomic_load(&g_a_wait);
     if (!m || dm_cursor_pending() || (waiting && now_ns() - waiting < 300000000ull) || !free_cursor_page(m)) {
@@ -213,6 +227,7 @@ int dm_ui_mouse_hover_now(float nx, float ny) {
     int item=ok && nx>=0 && nx<=1 && ny>=0 && ny<=1 &&
              dm_cursor_item(&hover_item) && hover_item.container!=DM_ITEM_AT_SHOP;
     atomic_store(&g_mouse_item_hover,item?1:0);
+    if(ok && !item && !dm_hud_held()) pc_skill_hover_note(m,x,y);
     if (getenv("DM_TEST_HOVER_LOG")) { dm_cursor_item_info ci = {0}; int found = dm_cursor_item(&ci); LOG("鼠标悬停刷新：(%d,%d) → %d 物品 %s id %u", x, y, ok, found ? ci.code : "-", ci.id); }
     return ok;
 }
@@ -750,6 +765,29 @@ static int bd_skill_walk(uint64_t w, uint64_t xy, int dep) {
     if (!ch || n > 256) return 0;
     for (uint64_t i = 0; i < n; i++) if (bd_skill_walk(*(uint64_t *)(ch + 8 * i), xy, dep + 1)) return 1;
     return 0;
+}
+// PC mouse hit-testing deliberately does not update touch binding state.
+// It checks the same native skill widget hit entry as bd_skill_walk,
+// and never activates a hidden panel or a covered skill icon.
+static int pc_skill_hit_walk(uint64_t w,uint64_t xy,int dep) {
+    if(!w || dep>14 || !*(uint8_t *)(w+0x50))return 0;
+    const char *nm=(const char *)*(uint64_t *)(w+8);
+    if(nm && !strncmp(nm,"SkillButton",11) && strncmp(nm,"SkillButtonC",12)) {
+        uint64_t fn=*(uint64_t *)(*(uint64_t *)w+0x48);
+        return fn && (((int (*)(uint64_t,uint64_t))fn)(w,xy)&1);
+    }
+    uint64_t ch=*(uint64_t *)(w+0x58), n=*(uint64_t *)(w+0x60);
+    if(!ch || n>256)return 0;
+    for(uint64_t i=0;i<n;i++)if(pc_skill_hit_walk(*(uint64_t *)(ch+8*i),xy,dep+1))return 1;
+    return 0;
+}
+static void pc_skill_hover_note(module_t *m,int x,int y) {
+    uint64_t root=*(uint64_t *)(m->base+0x2f05458);
+    uint64_t tree=root?ui_find(root,"SkillsTreePanel",0):0;
+    uint64_t xy=(uint64_t)(uint32_t)x | ((uint64_t)(uint32_t)y<<32);
+    if(tree && *(uint8_t *)(tree+0x50) && !modal_any(root,1,NULL) &&
+       x>=0 && x<=65535 && y>=0 && y<=65535 && pc_skill_hit_walk(tree,xy,0))
+        atomic_store(&g_pc_skill_hover,(1ull<<63)|((uint64_t)x<<16)|(uint32_t)y);
 }
 // 属性页的四个「+」（CharacterStatsPanel > LevelUpInfo > Strength / Dex / Vitality / EnergyPointButton）：点一下游戏当场加 1 点、不可撤销。
 // 「先选中、再确认」：技能图标与这四个「+」点一下只移光标（选中、出说明），再点同一个才加点（属性当场加 1，技能稍后由 dm_skill_add_selected 加）；

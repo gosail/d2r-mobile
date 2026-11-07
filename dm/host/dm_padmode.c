@@ -535,6 +535,8 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
     extern int dm_kbmap_is_external_owner(void);
     extern int dm_pc_profile_hud_snapshot(uint16_t [10],uint16_t [6]);
     int owner=dm_kbmap_is_external_owner();
+    extern int dm_pc_input_second_group(void);
+    int second_bank=owner && dm_pc_input_second_group();
     uint16_t main_vk[10],alt_vk[6];
     int status=owner?dm_pc_profile_hud_snapshot(main_vk,alt_vk):0;
     int native=status==1;
@@ -549,16 +551,22 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
         if(owner && status>=0) {
             char first[24]={0},second[24]={0};
             if(native) {
-                pc_key_name(first,main_vk[i]);
-                if(i<6)pc_key_name(second,alt_vk[i]);
+                // Only show the active six-slot bank. Holding Command
+                // also drives the game's native ZL bank so the skill ICONS
+                // and their key captions change together.
+                if(i<6 && second_bank) {
+                    pc_key_name(first,alt_vk[i]);
+                    if(!first[0]) {
+                        char key[24]={0};pc_key_name(key,main_vk[i]);
+                        if(key[0])snprintf(first,sizeof first,"Cmd+%.18s",key);
+                    }
+                } else pc_key_name(first,main_vk[i]);
             } else {
                 // Temporary default before the guest writes its .key.
-                if(i<6)snprintf(first,sizeof first,"F%d",i+1);
+                if(i<6)snprintf(first,sizeof first,"F%d",i+1+(second_bank?6:0));
                 else snprintf(first,sizeof first,"%d",i-5);
             }
-            if(first[0] && second[0] && strcmp(first,second))
-                snprintf(label,sizeof label,"%s / %s",first,second);
-            else strlcpy(label,first,sizeof label);
+            strlcpy(label,first,sizeof label);
         }
         size_t len=strlen(label);uint64_t oldp=rd8(w+0x88);
         if(rd8(w+0x90)==len && (!len || (oldp && !memcmp((void *)(uintptr_t)oldp,label,len))))continue;
@@ -571,31 +579,64 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
 // underlying controller .ctl, and restore original widget visibility when
 // a real pad takes over. Match named prompt widgets only; do not hide the
 // clickable page tabs or entire panels.
+// The controller frame can contain several *ButtonPrompt widgets with
+// identical names under different panels. A single pm_find() masked only the
+// first match and left the upper-right R cap visible. Keep weak generation-
+// checked references to *every* prompt that we hide and restore them when
+// a physical controller regains ownership. Native TouchClose is untouched.
+enum { PC_PROMPT_MAX=256 };
+static dm_wref g_pc_prompt_ref[PC_PROMPT_MAX];
+static unsigned g_pc_prompt_n;
+static int pc_prompt_is_pad_label(const char *nm) {
+    if(!nm)return 0;
+    size_t n=strlen(nm);
+    if(n>=12 && !strcmp(nm+n-12,"ButtonPrompt"))return 1;
+    return !strcmp(nm,"LBButtonPrompt") || !strcmp(nm,"RBButtonPrompt") ||
+           !strcmp(nm,"LTButtonPrompt") || !strcmp(nm,"RTButtonPrompt") ||
+           !strcmp(nm,"LeftBumperPrompt") || !strcmp(nm,"RightBumperPrompt");
+}
+static void pc_prompt_walk(uint64_t w,int dep) {
+    if(!w || dep>12)return;
+    const char *nm=(const char *)(uintptr_t)rd8(w+8);
+    if(pc_prompt_is_pad_label(nm)) {
+        uint8_t *visible=(uint8_t *)(uintptr_t)(w+0x50);
+        if(*visible) {
+            int seen=0;
+            for(unsigned k=0;k<g_pc_prompt_n;k++)
+                if(dm_wref_get(&g_pc_prompt_ref[k])==w){seen=1;break;}
+            if(!seen) {
+                unsigned slot=g_pc_prompt_n;
+                if(slot>=PC_PROMPT_MAX) {
+                    for(slot=0;slot<g_pc_prompt_n;slot++)
+                        if(!dm_wref_get(&g_pc_prompt_ref[slot]))break;
+                }
+                if(slot<PC_PROMPT_MAX) {
+                    dm_wref_set(&g_pc_prompt_ref[slot],w);
+                    if(slot==g_pc_prompt_n)g_pc_prompt_n++;
+                }
+            }
+            *visible=0;
+        }
+    }
+    uint64_t ch=rd8(w+0x58),n=rd8(w+0x60);
+    if(!ch || n>256)return;
+    for(uint64_t i=0;i<n;i++)pc_prompt_walk(rd8(ch+i*8),dep+1);
+}
 static void pc_panel_prompts(uint8_t *b,uint64_t frame) {
     if(frame%3)return;
     extern int dm_kbmap_is_external_owner(void);
-    static const char *const names[]={
-        "LeftButtonPrompt","RightButtonPrompt",
-        "LBButtonPrompt","RBButtonPrompt",
-        "LTButtonPrompt","RTButtonPrompt",
-        "LeftBumperPrompt","RightBumperPrompt"
-    };
-    static uint64_t saved[sizeof names/sizeof names[0]];
-    static uint8_t restore[sizeof names/sizeof names[0]];
     int active=g_cur && dm_kbmap_is_external_owner();
     uint64_t root=rd8((uint64_t)(uintptr_t)(b+0x2f05458));
-    if(!root)return;
-    for(unsigned i=0;i<sizeof names/sizeof names[0];i++) {
-        uint64_t w=pm_find(root,names[i],0);
-        if(w!=saved[i]){saved[i]=w;restore[i]=0;}
-        if(!w)continue;
-        uint8_t *visible=(uint8_t *)(uintptr_t)(w+0x50);
-        if(active) {
-            if(*visible){restore[i]=1;*visible=0;}
-        } else if(restore[i]) {
-            *visible=1;restore[i]=0;
+    if(active && root){pc_prompt_walk(root,0);return;}
+    for(unsigned i=0;i<g_pc_prompt_n;i++) {
+        uint64_t w=dm_wref_get(&g_pc_prompt_ref[i]);
+        if(w) {
+            uint8_t *visible=(uint8_t *)(uintptr_t)(w+0x50);
+            if(!*visible)*visible=1;
         }
+        dm_wref_set(&g_pc_prompt_ref[i],0);
     }
+    g_pc_prompt_n=0;
 }
 static void diff_text(uint8_t *b, uint64_t frame) {   // 游戏主线程：菜单开着时每 6 帧核一次这行的字（只写我们自己的 TouchPadDiffTxt，文字控件虚表 main+0x20ba4c8，同 dm_pouch.c w_text） | Game main thread: while the menu is open, check this row's text every 6 frames (only writes our own TouchPadDiffTxt; text widget vtable main+0x20ba4c8, same as w_text in dm_pouch.c)
     if (!g_cur || !atomic_load(&g_pause_open) || frame % 6) return;

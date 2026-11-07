@@ -2107,6 +2107,11 @@ static void ui_bind_pump(uint64_t root, uint64_t fr) {
 // omits the UISwitcher border, page tabs and the shared close button.
 static int g_pc_full_page_pending;
 static uint64_t g_pc_full_page_started;
+static int pc_native_merc_tab_visible(uint64_t root) {
+    uint64_t tabs=root?ui_find(root,"UISwitcherTabs",0):0;
+    uint64_t item=tabs?ui_find(tabs,"Image4",0):0;
+    return item && *(uint8_t *)(item+0x50) && *(uint8_t *)(item+0x51);
+}
 static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
     if(!g_pc_full_page_pending)return;
     if(!dm_uiscreen_ingame()){g_pc_full_page_pending=0;return;}
@@ -2124,8 +2129,8 @@ static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
     // selection are initialized. Retry on subsequent guest frames.
     if(n<=0 || n>16 || cur<0 || cur>=n)return;
     g_pc_full_page_pending=0;
-    if(to>=n) {
-        LOG("【红】PC 功能页：目标 %d 不在原版页签范围 %d（当前 %d）",to,n,cur);
+    if(to>=n || (to==4 && !pc_native_merc_tab_visible(root))) {
+        LOG("PC 功能页：目标 %d 不可用（原生页数 %d；佣兵页可能隐藏）",to,n);
         return;
     }
     if(cur!=to) {
@@ -3518,7 +3523,8 @@ void dm_ui_pc_toggle_panel(unsigned command_id) {
     uint64_t us=ui_find(root,"UISwitcher",0);
     if(us && *(uint8_t *)(us+0x50)) {
         int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
-        if(target>=n || n<=0 || n>16 || cur<0 || cur>=n)return;
+        if(target>=n || n<=0 || n>16 || cur<0 || cur>=n ||
+           (target==4 && !pc_native_merc_tab_visible(root)))return;
         g_pc_full_page_pending=0;
         if(cur==target) {
             // Closing the entire native frame also clears its overlays and

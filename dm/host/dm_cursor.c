@@ -2101,6 +2101,32 @@ static void ui_bind_pump(uint64_t root, uint64_t fr) {
 // trigger the native Y binding popup and press its corresponding slot.
 // No new skill mapping or character save format is introduced. The 13..16
 // actions remain unsupported until native slots are actually verified.
+// Native full-function-page keyboard navigation (quest/character/inventory/
+// skill/mercenary). Never open an inner content panel on its own: doing so
+// omits the UISwitcher border, page tabs and the shared close button.
+static int g_pc_full_page_pending;
+static uint64_t g_pc_full_page_started;
+static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
+    if(!g_pc_full_page_pending || !m || !root)return;
+    if(fr-g_pc_full_page_started>90) {
+        LOG("【红】PC 功能页：原版 UISwitcher 未出现，放弃切页");
+        g_pc_full_page_pending=0;
+        return;
+    }
+    uint64_t us=ui_find(root,"UISwitcher",0);
+    if(!us || !*(uint8_t *)(us+0x50))return;
+    int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
+    int to=g_pc_full_page_pending-1;
+    g_pc_full_page_pending=0;
+    if(n<=0 || n>16 || to>=n || cur<0 || cur>=n) {
+        LOG("【红】PC 功能页：目标 %d 不在原版页签范围 %d（当前 %d）",to,n,cur);
+        return;
+    }
+    if(cur!=to) {
+        ((void (*)(uint64_t,int,int))(m->base+0x405898))(us,to,to>cur);
+        LOG("PC 功能页：通过原版 UISwitcher 从第 %d 页切到第 %d 页",cur,to);
+    }
+}
 static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
     static int phase; // 0 idle, 1 wait native popup, 2 ZL lead, 3 wait close
     static uint64_t begun,at,buttons,modal_opened;
@@ -3101,7 +3127,7 @@ void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线
                 else fix = 0; }
             if (th) { ui_auto_key(th); tnext = fr + 8; } } } }
     { module_t *pm = main_module(); uint64_t proot = 0; if (pm) { memcpy(&proot, pm->base + 0x2f05458, 8); int32_t pw = *(int32_t *)(pm->base + 0x211da38), phh = *(int32_t *)(pm->base + 0x211da3c);
-        static uint64_t pf = UINT64_MAX; if (proot && pw > 0 && phh > 0 && pf != fr) { pf = fr; { static int dd; const char *dn; if (!dd && (dn = getenv("DM_UI_DUMP")) && atomic_load(&g_taps_base) && fr >= atomic_load(&g_taps_base) + (getenv("DM_UI_DUMP_AT") ? atoi(getenv("DM_UI_DUMP_AT")) : 45)) { dd = 1; ui_dump(proot, 0, dn, 0, pm); } } int tm = ui_touch_mode(); if (tm) ui_wtap_pump(pm, proot, pw, phh); if (tm) ui_long_pump(); ui_target_pump(pm, fr); if (tm) ui_use_pump(); if (tm) ui_buy_pump(pw, phh); ui_item_pump(proot, pw, phh); ui_ptr_pump(pm, proot, pw, phh); if (tm) ui_drag_pump(pm, proot, pw, phh); UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh); { int lu = atomic_load(&g_load_up); dm_uiscreen_set_ingame(ui_panel(proot, "HUDPanel") && !(lu < 0 ? ui_find(proot, "LoadScreenPanel", 0) != 0 : lu)); } ui_safe_pump(pm, proot, fr); ui_lift_pump(proot, fr); ui_note_dock_pump(proot); ui_trove_tabs_pump(pm, proot, fr); ui_minimap_pump(pm, proot, pw, phh, fr); ui_map_pump(pm, proot); ui_map_geom_pump(pm, proot); ui_boss_pct_pump(pm, proot); ui_npcdlg_pump(proot); ui_map_center(pm, proot, *(volatile int32_t *)(pm->base + 0x2d5c748)); if (tm) ui_bind_pump(proot, fr); ui_pc_skill_bind_pump(proot, fr); if (tm) swaptab_pump(proot); if (tm) ui_mercpg_pump(pm, proot, fr); ui_widestash_pump(proot); mv_audit_pump(proot, fr); ui_pages_pump(pm, proot); } } }
+        static uint64_t pf = UINT64_MAX; if (proot && pw > 0 && phh > 0 && pf != fr) { pf = fr; { static int dd; const char *dn; if (!dd && (dn = getenv("DM_UI_DUMP")) && atomic_load(&g_taps_base) && fr >= atomic_load(&g_taps_base) + (getenv("DM_UI_DUMP_AT") ? atoi(getenv("DM_UI_DUMP_AT")) : 45)) { dd = 1; ui_dump(proot, 0, dn, 0, pm); } } int tm = ui_touch_mode(); if (tm) ui_wtap_pump(pm, proot, pw, phh); if (tm) ui_long_pump(); ui_target_pump(pm, fr); if (tm) ui_use_pump(); if (tm) ui_buy_pump(pw, phh); ui_item_pump(proot, pw, phh); ui_ptr_pump(pm, proot, pw, phh); if (tm) ui_drag_pump(pm, proot, pw, phh); UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh); { int lu = atomic_load(&g_load_up); dm_uiscreen_set_ingame(ui_panel(proot, "HUDPanel") && !(lu < 0 ? ui_find(proot, "LoadScreenPanel", 0) != 0 : lu)); } ui_safe_pump(pm, proot, fr); ui_lift_pump(proot, fr); ui_note_dock_pump(proot); ui_trove_tabs_pump(pm, proot, fr); ui_minimap_pump(pm, proot, pw, phh, fr); ui_map_pump(pm, proot); ui_map_geom_pump(pm, proot); ui_boss_pct_pump(pm, proot); ui_npcdlg_pump(proot); ui_map_center(pm, proot, *(volatile int32_t *)(pm->base + 0x2d5c748)); if (tm) ui_bind_pump(proot, fr); ui_pc_skill_bind_pump(proot, fr); ui_pc_full_page_pump(pm,proot,fr); if (tm) swaptab_pump(proot); if (tm) ui_mercpg_pump(pm, proot, fr); ui_widestash_pump(proot); mv_audit_pump(proot, fr); ui_pages_pump(pm, proot); } } }
     if (atomic_load(&g_fe_name_open) && atomic_load(&g_ut_phase) == 2) {   // 起名页：点输入框（底板 / 文本框）= 重新弹系统键盘，不发鼠标点击 | naming page: tapping the input box (backplate / text box) = pop up the system keyboard again, no mouse click is sent
         module_t *nm = main_module(); uint64_t nroot = 0; if (nm) memcpy(&nroot, nm->base + 0x2f05458, 8); uint64_t pn = nroot ? ui_find(nroot, "CharacterCreateNamePanel", 0) : 0;
         if (pn && nm) { int32_t w = *(int32_t *)(nm->base + 0x211da38), h = *(int32_t *)(nm->base + 0x211da3c); uint64_t v = atomic_load(&g_ut_xy);
@@ -3417,22 +3443,40 @@ void dm_ui_pc_toggle_panel(unsigned command_id) {
         dm_swapskill_manual_request();
         return;
     }
-    const char *panel=NULL;
+    // Original UISwitcher tabs, not directly opened content widgets:
+    // Quest 0, Character 1, Inventory 2, Skills 3, Mercenary 4.
+    int target=-1;
     switch(command_id) {
-    case 0:panel="CharacterStatsPanel";break;
-    case 1:panel="PlayerInventoryExpansionLayout";break;
-    case 4:panel="QuestLogPanelExpansion";break;
-    case 12:panel="SkillsTreePanel";break;
-    case 54:panel="HirelingInventoryPanel";break;
+    case 4:target=0;break;
+    case 0:target=1;break;
+    case 1:target=2;break;
+    case 12:target=3;break;
+    case 54:target=4;break;
     default:return;
     }
     module_t *m=main_module();uint64_t root=0;
     if(!m)return;
     memcpy(&root,m->base+0x2f05458,8);
     if(!root)return;
-    uint64_t current=ui_panel(root,panel);
-    int visible=current && *(uint8_t *)(current+0x50);
-    fe_send("PanelManager",visible?"ClosePanel":"OpenPanel",panel);
+    uint64_t us=ui_find(root,"UISwitcher",0);
+    if(us && *(uint8_t *)(us+0x50)) {
+        int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
+        if(target>=n || n<=0 || n>16 || cur<0 || cur>=n)return;
+        g_pc_full_page_pending=0;
+        if(cur==target) {
+            // Closing the entire native frame also clears its overlays and
+            // preserves the original game's controller / touch state.
+            fe_send("PanelManager","ClosePanel","UISwitcher");
+        } else
+            ((void (*)(uint64_t,int,int))(m->base+0x405898))(us,target,target>cur);
+        return;
+    }
+    // Another modal/vendor/stash owns the UI: do not stack UISwitcher
+    // over it. A normal gameplay key press opens the entire function frame.
+    if(dm_uiscreen_panel() || g_pc_full_page_pending)return;
+    g_pc_full_page_pending=target+1;
+    g_pc_full_page_started=dm_guest_frame();
+    dm_ui_key_pulse(DM_BTN_PLUS,5);
 }
 // ---------- 一键重开（暂停菜单「一键重开」= 保存 + 登出 + 同难度登入；标准：不慢于正常进局，只出现开门读取画面，不露主菜单 / 选角页） ----------
 // 只走原版的路：替玩家发原版「保存并退出」(PausePanelMessage:ExitGame；退出时的存档提交都在 ToFrontEnd 之前完成) → 回到前端（ToFrontEnd）的下一帧

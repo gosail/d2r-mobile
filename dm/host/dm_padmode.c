@@ -536,7 +536,8 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
     extern int dm_pc_profile_file_status(void);
     extern int dm_pc_profile_get(uint32_t,unsigned,uint16_t *);
     int owner=dm_kbmap_is_external_owner();
-    int native=owner && dm_pc_profile_file_status()==1;
+    int status=owner?dm_pc_profile_file_status():0;
+    int native=status==1;
     uint64_t root=rd8((uint64_t)(uintptr_t)(b+0x2f05458));
     if(!root)return;
     static const unsigned main_ids[6]={14,15,17,16,18,19};
@@ -547,7 +548,7 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
         else snprintf(nm,sizeof nm,"TouchPcKeyBelt%d",i-5);
         uint64_t w=pm_find(root,nm,0);
         if(!w || rd8(w)-(uint64_t)(uintptr_t)b!=0x20ba4c8)continue;
-        if(owner) {
+        if(owner && status>=0) {
             char first[24]={0},second[24]={0};
             if(native) {
                 unsigned id=i<6?main_ids[i]:(unsigned)(23+i-6);
@@ -576,6 +577,37 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
         ((void (*)(uint64_t))(b+0xadc434))(w);
     }
 }
+// Suppress gamepad-only button caps in upper panel corners while the
+// physical mouse/keyboard owns the layout. Never delete or rewrite the
+// underlying controller .ctl, and restore original widget visibility when
+// a real pad takes over. Match named prompt widgets only; do not hide the
+// clickable page tabs or entire panels.
+static void pc_panel_prompts(uint8_t *b,uint64_t frame) {
+    if(frame%3)return;
+    extern int dm_kbmap_is_external_owner(void);
+    static const char *const names[]={
+        "LeftButtonPrompt","RightButtonPrompt",
+        "LBButtonPrompt","RBButtonPrompt",
+        "LTButtonPrompt","RTButtonPrompt",
+        "LeftBumperPrompt","RightBumperPrompt"
+    };
+    static uint64_t saved[sizeof names/sizeof names[0]];
+    static uint8_t restore[sizeof names/sizeof names[0]];
+    int active=g_cur && dm_kbmap_is_external_owner();
+    uint64_t root=rd8((uint64_t)(uintptr_t)(b+0x2f05458));
+    if(!root)return;
+    for(unsigned i=0;i<sizeof names/sizeof names[0];i++) {
+        uint64_t w=pm_find(root,names[i],0);
+        if(w!=saved[i]){saved[i]=w;restore[i]=0;}
+        if(!w)continue;
+        uint8_t *visible=(uint8_t *)(uintptr_t)(w+0x50);
+        if(active) {
+            if(*visible){restore[i]=1;*visible=0;}
+        } else if(restore[i]) {
+            *visible=1;restore[i]=0;
+        }
+    }
+}
 static void diff_text(uint8_t *b, uint64_t frame) {   // 游戏主线程：菜单开着时每 6 帧核一次这行的字（只写我们自己的 TouchPadDiffTxt，文字控件虚表 main+0x20ba4c8，同 dm_pouch.c w_text） | Game main thread: while the menu is open, check this row's text every 6 frames (only writes our own TouchPadDiffTxt; text widget vtable main+0x20ba4c8, same as w_text in dm_pouch.c)
     if (!g_cur || !atomic_load(&g_pause_open) || frame % 6) return;
     uint64_t w = pm_find(rd8((uint64_t)(uintptr_t)(b + 0x2f05458)), "TouchPadDiffTxt", 0); if (!w || rd8(w) - (uint64_t)(uintptr_t)b != 0x20ba4c8) return;
@@ -599,6 +631,7 @@ void dm_padmode_step(uint8_t *b, uint64_t frame) {   // 游戏主线程每帧（
         int ok = dm_ui_hover_now(x, y); LOG("测试 padcur：手柄光标放到 (%d,%d) → %d", x, y, ok); } }
     diff_text(b, frame);
     pc_hud_keys(b, frame);
+    pc_panel_prompts(b, frame);
     legend_pump(b, frame);
     if (g_have) hint_pump();
     void dm_oe_ui_opmode(int m); int dm_opmode(void);

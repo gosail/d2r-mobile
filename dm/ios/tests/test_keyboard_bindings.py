@@ -54,6 +54,8 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('TouchPcKeySkill%d',src("ios/tools/gen_hud_v4.py"))
         self.assertIn('TouchPcKeyBelt%d',src("ios/tools/gen_hud_v4.py"))
         self.assertIn('pc_hud_keys(b, frame);',src("host/dm_padmode.c"))
+        self.assertIn('pc_panel_prompts(b, frame);',src("host/dm_padmode.c"))
+        self.assertIn('*visible=1;restore[i]=0;',src("host/dm_padmode.c"))
         self.assertIn('dm_pc_profile_get(alt,0,&vk)',src("host/dm_padmode.c"))
         self.assertIn('dm_kbmap_external_owner(1)',src("host/dm_external_mouse.c"))
         self.assertIn('dm_kbmap_reset();',src("ios/Sources/dm_gamepad.m"))

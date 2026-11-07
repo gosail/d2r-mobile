@@ -224,6 +224,21 @@ int main(void) {
     assert(game_right_y==0);
     game_seed("Alice",0);
     assert(dm_pc_input_supported_action(7) && dm_pc_input_supported_action(14));
+    // PC stand-still must remain the native .key command (Shift by default),
+    // not controller ZL or a synthesized second row of skill bindings.
+    assert(dm_pc_input_supported_action(36));
+    dm_pc_input_reset();
+    dm_pc_input_event(0xe1,1); // left Shift
+    assert(dm_pc_input_stand_still() && game_buttons==0);
+    dm_pc_input_event(0xe5,1); // right Shift also held
+    dm_pc_input_event(0xe1,0);
+    assert(dm_pc_input_stand_still() && game_buttons==0);
+    dm_pc_input_event(0xe5,0);
+    assert(!dm_pc_input_stand_still());
+    dm_pc_input_event(0xe1,1);
+    dm_pc_input_reset();
+    assert(!dm_pc_input_stand_still());
+
     // In the original native command table ID 5 is Chat, not UI Enter.
     // Unsupported chat must not simulate a controller A click in any scene.
     assert(!dm_pc_input_supported_action(5));

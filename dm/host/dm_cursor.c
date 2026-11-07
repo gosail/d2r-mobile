@@ -2093,6 +2093,79 @@ static void ui_bind_pump(uint64_t root, uint64_t fr) {
         dm_ui_key_pulse(DM_BTN_B, 4); tries++; pressed = fr; break;
     }
 }
+// Physical PC shortcut binding follows the original controller UI transaction:
+// mouse hover a skill in SkillsTreePanel, press the .key's skill shortcut,
+// trigger the native Y binding popup and press its corresponding slot.
+// No new skill mapping or character save format is introduced. The 13..16
+// actions remain unsupported until native slots are actually verified.
+static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
+    static int phase; // 0 idle, 1 wait native popup, 2 ZL lead, 3 wait close
+    static uint64_t begun,at,buttons;
+    static uint64_t original_hover;
+    uint64_t tree=root?ui_find(root,"SkillsTreePanel",0):0;
+    int visible=tree && *(uint8_t *)(tree+0x50);
+    uint64_t md=root?ui_find(root,"ButtonBindingModal",0):0;
+    int modal=md && *(uint8_t *)(md+0x50);
+    int dm_padmode_busy(void);
+    if(!visible || !dm_uiscreen_ingame() || !dm_kbmap_is_external_owner() ||
+       dm_padmode_busy() || dm_ui_bind_active()) {
+        atomic_store(&g_pc_skill_hover,0);
+        atomic_store(&g_pc_skill_bind_req,0);
+        if(phase && modal)dm_ui_key_pulse(DM_BTN_MINUS,4);
+        phase=0;
+        return;
+    }
+    if(!phase) {
+        uint64_t req=atomic_exchange(&g_pc_skill_bind_req,0);
+        if(!req || modal || modal_any(root,1,NULL))return;
+        uint32_t id=(uint32_t)(req>>32);
+        buttons=dm_pc_input_skill_buttons(id);
+        original_hover=(1ull<<63)|(req&0xffffffffu);
+        if(!buttons || atomic_load(&g_pc_skill_hover)!=original_hover)return;
+        int x=(int)((req>>16)&0xffff),y=(int)(req&0xffff);
+        uint64_t xy=(uint64_t)(uint32_t)x | ((uint64_t)(uint32_t)y<<32);
+        // Recheck native widget identity and panel visibility on the guest
+        // thread; the keyboard thread must never dereference guest pointers.
+        if(!pc_skill_hit_walk(tree,xy,0) || dm_hud_held() ||
+           !dm_ui_hover_now(x,y))return;
+        dm_ui_key_pulse(DM_BTN_Y,5); // native "bind selected skill"
+        begun=at=fr; phase=1;
+        return;
+    }
+    if(phase==1) {
+        // If the target pointer changed before the popup opened, cancel the
+        // transaction; never bind the newly hovered skill by accident.
+        if(!modal) {
+            if(atomic_load(&g_pc_skill_hover)!=original_hover || fr-begun>60)
+                phase=0;
+            return;
+        }
+        if(buttons&DM_BTN_ZL) {
+            dm_ui_key_pulse(DM_BTN_ZL,30);
+            at=fr+10;phase=2;
+        } else {
+            dm_ui_key_pulse(buttons,6);
+            at=fr;phase=3;
+        }
+        return;
+    }
+    if(phase==2) {
+        if(!modal){phase=0;return;}
+        if(fr>=at) {
+            // The native UI requires ZL to be sampled before the face key.
+            dm_ui_key_pulse(buttons,6);
+            at=fr;phase=3;
+        }
+        return;
+    }
+    if(phase==3) {
+        if(!modal){phase=0;return;}
+        if(fr-at>60) {
+            dm_ui_key_pulse(DM_BTN_MINUS,4); // native cancellation, never guess
+            phase=0;
+        }
+    }
+}
 // ---------- 全屏地图 ↔ 右上角小地图：运行时切，不落盘（读反汇编） ----------
 // 「透视地图尺寸」是配置变量 AutoMapMode（对象 main+0x2d479e8，值在 +0xC：0 全屏 / 1 微缩放左 / 2 微缩放右；注册处 main+0x30d2a8），注册时带变更回调 main+0x40f780(int 档)：
 //   [main+0x2d5e8f0] = 档 == 1（放左）；[main+0x2d5c748] = 档 != 0（是否微缩）；变了就调 main+0x411540 重排地图、把卷动量 [0x2d5e910 / 914] 清零。
@@ -3018,7 +3091,7 @@ void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线
                 else fix = 0; }
             if (th) { ui_auto_key(th); tnext = fr + 8; } } } }
     { module_t *pm = main_module(); uint64_t proot = 0; if (pm) { memcpy(&proot, pm->base + 0x2f05458, 8); int32_t pw = *(int32_t *)(pm->base + 0x211da38), phh = *(int32_t *)(pm->base + 0x211da3c);
-        static uint64_t pf = UINT64_MAX; if (proot && pw > 0 && phh > 0 && pf != fr) { pf = fr; { static int dd; const char *dn; if (!dd && (dn = getenv("DM_UI_DUMP")) && atomic_load(&g_taps_base) && fr >= atomic_load(&g_taps_base) + (getenv("DM_UI_DUMP_AT") ? atoi(getenv("DM_UI_DUMP_AT")) : 45)) { dd = 1; ui_dump(proot, 0, dn, 0, pm); } } int tm = ui_touch_mode(); if (tm) ui_wtap_pump(pm, proot, pw, phh); if (tm) ui_long_pump(); ui_target_pump(pm, fr); if (tm) ui_use_pump(); if (tm) ui_buy_pump(pw, phh); ui_item_pump(proot, pw, phh); ui_ptr_pump(pm, proot, pw, phh); if (tm) ui_drag_pump(pm, proot, pw, phh); UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh); { int lu = atomic_load(&g_load_up); dm_uiscreen_set_ingame(ui_panel(proot, "HUDPanel") && !(lu < 0 ? ui_find(proot, "LoadScreenPanel", 0) != 0 : lu)); } ui_safe_pump(pm, proot, fr); ui_lift_pump(proot, fr); ui_note_dock_pump(proot); ui_trove_tabs_pump(pm, proot, fr); ui_minimap_pump(pm, proot, pw, phh, fr); ui_map_pump(pm, proot); ui_map_geom_pump(pm, proot); ui_boss_pct_pump(pm, proot); ui_npcdlg_pump(proot); ui_map_center(pm, proot, *(volatile int32_t *)(pm->base + 0x2d5c748)); if (tm) ui_bind_pump(proot, fr); if (tm) swaptab_pump(proot); if (tm) ui_mercpg_pump(pm, proot, fr); ui_widestash_pump(proot); mv_audit_pump(proot, fr); ui_pages_pump(pm, proot); } } }
+        static uint64_t pf = UINT64_MAX; if (proot && pw > 0 && phh > 0 && pf != fr) { pf = fr; { static int dd; const char *dn; if (!dd && (dn = getenv("DM_UI_DUMP")) && atomic_load(&g_taps_base) && fr >= atomic_load(&g_taps_base) + (getenv("DM_UI_DUMP_AT") ? atoi(getenv("DM_UI_DUMP_AT")) : 45)) { dd = 1; ui_dump(proot, 0, dn, 0, pm); } } int tm = ui_touch_mode(); if (tm) ui_wtap_pump(pm, proot, pw, phh); if (tm) ui_long_pump(); ui_target_pump(pm, fr); if (tm) ui_use_pump(); if (tm) ui_buy_pump(pw, phh); ui_item_pump(proot, pw, phh); ui_ptr_pump(pm, proot, pw, phh); if (tm) ui_drag_pump(pm, proot, pw, phh); UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh); { int lu = atomic_load(&g_load_up); dm_uiscreen_set_ingame(ui_panel(proot, "HUDPanel") && !(lu < 0 ? ui_find(proot, "LoadScreenPanel", 0) != 0 : lu)); } ui_safe_pump(pm, proot, fr); ui_lift_pump(proot, fr); ui_note_dock_pump(proot); ui_trove_tabs_pump(pm, proot, fr); ui_minimap_pump(pm, proot, pw, phh, fr); ui_map_pump(pm, proot); ui_map_geom_pump(pm, proot); ui_boss_pct_pump(pm, proot); ui_npcdlg_pump(proot); ui_map_center(pm, proot, *(volatile int32_t *)(pm->base + 0x2d5c748)); if (tm) ui_bind_pump(proot, fr); ui_pc_skill_bind_pump(proot, fr); if (tm) swaptab_pump(proot); if (tm) ui_mercpg_pump(pm, proot, fr); ui_widestash_pump(proot); mv_audit_pump(proot, fr); ui_pages_pump(pm, proot); } } }
     if (atomic_load(&g_fe_name_open) && atomic_load(&g_ut_phase) == 2) {   // 起名页：点输入框（底板 / 文本框）= 重新弹系统键盘，不发鼠标点击 | naming page: tapping the input box (backplate / text box) = pop up the system keyboard again, no mouse click is sent
         module_t *nm = main_module(); uint64_t nroot = 0; if (nm) memcpy(&nroot, nm->base + 0x2f05458, 8); uint64_t pn = nroot ? ui_find(nroot, "CharacterCreateNamePanel", 0) : 0;
         if (pn && nm) { int32_t w = *(int32_t *)(nm->base + 0x211da38), h = *(int32_t *)(nm->base + 0x211da3c); uint64_t v = atomic_load(&g_ut_xy);

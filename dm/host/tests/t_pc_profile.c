@@ -17,6 +17,12 @@ uint64_t dm_input_samples(void) {return guest_samples;}
 static int32_t game_right_y,game_left_x,game_left_y;
 static int map_toggles,panel_open,poisoned;static unsigned native_writers;
 static unsigned panel_events[57];
+static int capture_skill, last_bound_skill=-1;
+int dm_ui_pc_skill_bind_request(uint32_t id) {
+    if(!capture_skill)return 0;
+    last_bound_skill=(int)id;
+    return 1;
+}
 void dm_ui_pc_toggle_panel(unsigned id) {
     assert(id<57);
     panel_events[id]++;

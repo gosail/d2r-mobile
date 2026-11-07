@@ -14,7 +14,7 @@ final class MouseHoverOverlay extends View {
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint outline = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final float[] h = new float[9];
+    private final float[] h = new float[10];
     private final int[] rect = new int[4];
 
     MouseHoverOverlay(DmActivity activity) {
@@ -37,7 +37,10 @@ final class MouseHoverOverlay extends View {
         DmActivity.nativeMouseWorldRect(getWidth(), getHeight(), rect);
         float ox = rect[0], oy = rect[1], w = rect[2], ht = rect[3];
         if (w > 0 && ht > 0) {
-            if ((int)h[0]==1 || (int)h[0]==3) {
+            // Prefer the game's real MonsterHealth/SetInfo when available;
+            // draw the Android fallback only when the native target UI has
+            // not presented this enemy. The selection outline stays passive.
+            if ((int)h[0]==1 || ((int)h[0]==3 && h[9]==0)) {
                 boolean monster=(int)h[0]==3;
                 String[] parts=name.split("\\n",2);
                 String title=parts[0],detail=parts.length>1?parts[1]:"";

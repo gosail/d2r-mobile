@@ -2128,8 +2128,36 @@ static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
         LOG("PC 功能页：通过原版 UISwitcher 从第 %d 页切到第 %d 页",cur,to);
     }
 }
+// Read-only verification of the game's own six-slot binding table. No
+// .ctl parsing, guessed skill ID, persistence or guest mutation is involved.
+static int pc_native_bound_skill(uint64_t buttons) {
+    module_t *m=main_module();if(!m)return -1;
+    static const struct { uint64_t button;uint32_t logical; } face[]={
+        {DM_BTN_A,0x2000},{DM_BTN_B,0x1000},{DM_BTN_Y,0x4000},
+        {DM_BTN_X,0x8000},{DM_BTN_R,0x200},{DM_BTN_ZR,0x800}
+    };
+    uint64_t face_key=buttons&~DM_BTN_ZL;
+    uint32_t logical=0;
+    for(unsigned i=0;i<sizeof face/sizeof face[0];i++)
+        if(face_key==face[i].button){logical=face[i].logical;break;}
+    if(!logical)return -1;
+    uint8_t *b=(uint8_t *)m->base;
+    int bank=0;int dm_swapskill_wset(void);
+    if(dm_swapskill_wset()==1)bank=16;
+    for(unsigned i=0;i<6;i++) {
+        const uint8_t *r=b+0x2d13cbc+12*i;
+        if(*(const uint32_t *)r!=logical)continue;
+        unsigned index=(buttons&DM_BTN_ZL)?1:0;
+        uint32_t slot;memcpy(&slot,r+4+4*index,4);
+        if(slot>=12)return -1;
+        int32_t skill;memcpy(&skill,b+0x2d5f0c0+(uint64_t)(bank+slot)*28,4);
+        if(skill==-1 && bank)memcpy(&skill,b+0x2d5f0c0+(uint64_t)slot*28,4);
+        return skill;
+    }
+    return -1;
+}
 static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
-    static int phase; // 0 idle, 1 wait native popup, 2 ZL lead, 3 wait close
+    static int phase,tries,before; // 0 idle, 1 popup, 2 ZL lead, 3 await close
     static uint64_t begun,at,buttons,modal_opened;
     static uint64_t original_hover;
     uint64_t tree=root?ui_find(root,"SkillsTreePanel",0):0;
@@ -2163,6 +2191,8 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         // thread; the keyboard thread must never dereference guest pointers.
         if(!pc_skill_hit_walk(tree,xy,0) || dm_hud_held() ||
            !dm_ui_hover_now(x,y))return;
+        before=pc_native_bound_skill(buttons);
+        tries=0;
         dm_ui_key_pulse(DM_BTN_Y,5); // native "bind selected skill"
         begun=at=fr;modal_opened=0;phase=1;
         atomic_store(&g_pc_skill_binding_busy,1);
@@ -2187,7 +2217,7 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
             at=fr+10;phase=2;
         } else {
             dm_ui_key_pulse(buttons,6);
-            at=fr;phase=3;
+            at=fr;phase=3;tries++;
         }
         return;
     }
@@ -2196,16 +2226,31 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         if(fr>=at) {
             // The native UI requires ZL to be sampled before the face key.
             dm_ui_key_pulse(buttons,6);
-            at=fr;phase=3;
+            at=fr;phase=3;tries++;
         }
         return;
     }
     if(phase==3) {
-        if(!modal){phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;}
-        if(fr-at>60) {
-            LOG("【红】PC 技能绑定：原版模态框未确认快捷键，按原生取消键");
-            dm_ui_key_pulse(DM_BTN_MINUS,4);
-            phase=0;atomic_store(&g_pc_skill_binding_busy,0);
+        if(!modal) {
+            int after=pc_native_bound_skill(buttons);
+            if(after>=0 && after!=before)
+                LOG("PC 技能绑定：原版槽技能号 %d → %d，确认发生更改",before,after);
+            else
+                LOG("PC 技能绑定：弹窗关闭，槽技能号 %d → %d（同技能或取消，需实机确认）",before,after);
+            phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;
+        }
+        if(fr-at>35) {
+            if(tries<3) {
+                LOG("PC 技能绑定：模态框尚未接受目标键，重试第 %d 次",tries+1);
+                if(buttons&DM_BTN_ZL) {
+                    dm_ui_key_pulse(DM_BTN_ZL,30);
+                    at=fr+10;phase=2;
+                } else {dm_ui_key_pulse(buttons,6);at=fr;tries++;}
+            } else {
+                LOG("【红】PC 技能绑定：原版模态框未确认快捷键，按原生取消键");
+                dm_ui_key_pulse(DM_BTN_MINUS,4);
+                phase=0;atomic_store(&g_pc_skill_binding_busy,0);
+            }
         }
     }
 }

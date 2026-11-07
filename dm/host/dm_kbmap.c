@@ -106,6 +106,13 @@ void dm_kbmap_reset(void) {
 void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;
     if(pressed)dm_kbmap_external_owner(1);
+    // Physical left/right Command is exclusively a transient PC second-bank
+    // modifier. It must not also activate an unrelated native .key command.
+    // Shift remains the original command-36 stand-still key.
+    if(usage==0xe3 || usage==0xe7) {
+        dm_pc_input_cmd_event(usage,pressed);
+        return;
+    }
     pthread_mutex_lock(&km_mu);
     load_locked();
     int was_native=native_held[usage],was_legacy=down[usage];

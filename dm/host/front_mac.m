@@ -473,7 +473,7 @@ static NSString *mac_pc_vk_label(int vk) {
     entry.alignment=NSTextAlignmentLeft;
     [rows addSubview:entry];
     NSTextField *info=[NSTextField labelWithString:
-        @"键盘通过原生 .key 命令模拟游戏操作；手柄沿用 .ctl。"];
+        @"方向键=Switch 左摇杆（面板中为十字键）；Skill 5=Switch R，可用 .key 改绑。手柄沿用 .ctl。"];
     info.frame=NSMakeRect(10,49,w-20,28);
     [rows addSubview:info];
     NSTextField *mouse=[NSTextField labelWithString:
@@ -487,12 +487,12 @@ static NSString *mac_pc_vk_label(int vk) {
     static const char *const commands[57]={
         "Character","Inventory","Party","Message Log","Quests","Chat","Help","Automap",
         "Center Map","Fade Map","Map Party","Map Party Names","Skill Tree","Skill Bar",
-        "Skill 1","Skill 2","Skill 3","Skill 4","Skill 5","Skill 6","Skill 7","Skill 8",
+        "Skill 1 (Switch A)","Skill 2 (Switch B)","Skill 3 (Switch Y)","Skill 4 (Switch X)","Skill 5 (Switch R)","Skill 6 (Switch ZR)","Skill 7 (ZL+A)","Skill 8 (ZL+B)",
         "Show Belt","Potion 1","Potion 2","Potion 3","Potion 4",
         "Say 1","Say 2","Say 3","Say 4","Say 5","Say 6","Say 7",
         "Run Hold","Toggle Run","Stand Still","Show Items","Close Panels",
         "Previous Skill","Next Skill","Clear Messages","Screenshot","Portraits",
-        "Weapon Swap","Toggle Minimap","Skill 9","Skill 10","Skill 11","Skill 12",
+        "Weapon Swap","Toggle Minimap","Skill 9 (ZL+Y)","Skill 10 (ZL+X)","Skill 11 (ZL+R)","Skill 12 (ZL+ZR)",
         "Skill 13","Skill 14","Skill 15","Skill 16","Hireling","Say 8","Escape"
     };
     // A valid game profile may contain fewer (or additional) action pairs.

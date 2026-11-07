@@ -23,16 +23,20 @@ static const int native_pc_mode=1;
 static char hero[64];
 static void defaults(unsigned char *m) {
     memset(m,DM_KB_UNBOUND,256);
-    // Same physical keys as front_mac.m: WASD, J/K/U/I, F/G, Q/E/Z/C.
-    m[0x1a]=DM_KB_MOVE_UP; m[0x04]=DM_KB_MOVE_LEFT;
-    m[0x16]=DM_KB_MOVE_DOWN; m[0x07]=DM_KB_MOVE_RIGHT;
+    // The arrow cluster owns character movement. In particular A must
+    // NEVER be treated as legacy "move left": native .key often binds A
+    // to Character, producing the reported run + open-panel collision.
+    m[0x52]=DM_KB_MOVE_UP;    m[0x50]=DM_KB_MOVE_LEFT;
+    m[0x51]=DM_KB_MOVE_DOWN;  m[0x4f]=DM_KB_MOVE_RIGHT;
     m[0x0d]=0; m[0x0e]=1; m[0x18]=2; m[0x0c]=3;
     m[0x09]=4; m[0x0a]=5; m[0x14]=6; m[0x08]=7;
     m[0x1d]=8; m[0x06]=9;
     m[0x28]=DM_KB_ENTER; m[0x29]=DM_KB_ESCAPE;
     m[0x2b]=11; m[0x2e]=10; m[0x57]=10; m[0x2c]=0;
-    m[0x50]=12; m[0x52]=13; m[0x4f]=14; m[0x51]=15;
-    // Mobile extras: F1–F8 native skill slots; 1–4 potion D-pad; M map.
+    // Menu and modal arrow navigation is selected at key-down below,
+    // rather than treating the arrows as potion buttons during gameplay.
+    // Temporary fallback skills mimic verified Switch HUD slots; the
+    // character's actual .key replaces these when available.
     for (int k=0;k<8;k++) m[0x3a+k]=(unsigned char)(DM_KB_SKILL1+k);
     m[0x1e]=12; m[0x1f]=13; m[0x20]=14; m[0x21]=15;
     m[0x10]=DM_KB_MAP;
@@ -144,6 +148,14 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(pressed) {
         unsigned a=map[usage];
         if(a==DM_KB_MAP) { dm_world_mouse_map_toggle(); a=DM_KB_UNBOUND; }
+        if(!dm_uiscreen_ingame() || dm_uiscreen_panel()) {
+            // In controller menus, arrows are the Switch D-pad so the
+            // original focus/highlight navigation still works.
+            if(usage==0x50)a=12; // Left
+            if(usage==0x52)a=13; // Up
+            if(usage==0x4f)a=14; // Right
+            if(usage==0x51)a=15; // Down
+        }
         // Choose Enter/Esc meaning when pressed; hold it until key release.
         if(a==DM_KB_ENTER)a=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0; // same page semantics as Mac
         if(a==DM_KB_ESCAPE)a=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:1;
@@ -159,9 +171,11 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
         else if(a==DM_KB_MOVE_RIGHT)right=1;
         else if(a>=DM_KB_SKILL1 && a<=DM_KB_SKILL8) {
             unsigned idx=a-DM_KB_SKILL1;
-            static const int btn[4]={1,2,3,7}; // B, X, Y, R native skill slots
-            if(idx>=4)bits|=DM_BTN_ZL;
-            bits|=1ull<<btn[idx%4];
+            static const uint64_t btn[6]={
+                DM_BTN_A,DM_BTN_B,DM_BTN_Y,DM_BTN_X,DM_BTN_R,DM_BTN_ZR
+            };
+            if(idx>=6)bits|=DM_BTN_ZL;
+            bits|=btn[idx%6];
         }
     }
     dm_kb_set(bits,(right-left)*32767,(up-dn)*32767,0,0);

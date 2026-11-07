@@ -3,6 +3,7 @@
 #include "dm_input.h"
 #include "dm_kbmap.h"
 #include "dm_pc_input.h"
+#include "dm_pc_profile.h"
 #include "dm_keyfile.h"
 #include <assert.h>
 #include <stdio.h>
@@ -56,27 +57,49 @@ int main(void) {
     dm_kbmap_select_character("Alice");
     assert(dm_kbmap_pc_mode()==1 && dm_kbmap_set_pc_mode(1));
     assert(!dm_kbmap_set_pc_mode(0));
-    assert(dm_kbmap_action(0x1a)==DM_KB_MOVE_UP);
+    assert(dm_kbmap_action(0x52)==DM_KB_MOVE_UP);
+    assert(dm_kbmap_action(0x04)==DM_KB_UNBOUND); // A never walks
+    assert(dm_kbmap_action(0x1a)==DM_KB_UNBOUND); // W is native .key only
     assert(dm_kbmap_mouse_action(0)==0 && dm_kbmap_mouse_action(1)==1);
     assert(dm_kbmap_mouse_action(2)==2);
     assert(!dm_kbmap_bind(0x1b,0));
     assert(!dm_kbmap_bind_mouse(0,1));
     assert(!dm_kbmap_restore_defaults_checked());
     // Before the guest creates .key, keyboard still navigates as a pad.
-    dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
-    dm_kbmap_key_event(0x1a,0);assert(left_y==0);
+    dm_kbmap_key_event(0x52,1);assert(left_y==32767);
+    dm_kbmap_key_event(0x4f,1);assert(left_x==32767 && left_y==32767);
+    dm_kbmap_key_event(0x4f,0);
+    dm_kbmap_key_event(0x52,0);assert(left_y==0);
+    dm_kbmap_key_event(0x04,1);assert(left_x==0 && left_y==0);
+    dm_kbmap_key_event(0x04,0);
     // After guest .key exists, keyboard X resolves native Skill 1, then
     // uses the original SkillButton1 A binding (including its assigned skill).
     // A is the original Character action, not the legacy WASD left
     // movement. Even a previously held compatibility movement key must
     // stop before dispatching the native action.
-    dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
+    dm_kbmap_key_event(0x52,1);assert(left_y==32767);
     game_seed("Alice");
     dm_kbmap_key_event(0x04,1);
     assert(left_x==0 && left_y==0);
     dm_pc_input_guest_step();assert(pc_native_panels==1);
     dm_kbmap_key_event(0x04,0);
-    dm_kbmap_key_event(0x1a,0);
+    dm_kbmap_key_event(0x52,0);
+    // Native .key still keeps arrows reserved for walking. Pressing a
+    // skill at the same time must not cancel the left-stick axis.
+    dm_kbmap_key_event(0x52,1);assert(left_x==0 && left_y==32767);
+    dm_kbmap_key_event(0x4f,1);assert(left_x==23170 && left_y==23170);
+    dm_kbmap_key_event(0x1b,1);
+    assert((buttons&DM_BTN_A) && left_x==23170 && left_y==23170);
+    dm_kbmap_key_event(0x1b,0);assert(!buttons && left_x==23170);
+    dm_kbmap_key_event(0x52,0);assert(left_x==32767 && left_y==0);
+    dm_kbmap_key_event(0x4f,0);assert(left_x==0 && left_y==0);
+    // Skill 5 is Switch R, and can be reassigned to a new physical key
+    // by updating just the original character's Skill 5 .key command.
+    assert(dm_pc_profile_bind(18,0,'K',NULL,NULL)==DM_KEYFILE_OK);
+    dm_kbmap_key_event(0x3e,1);assert(buttons==0);
+    dm_kbmap_key_event(0x3e,0);
+    dm_kbmap_key_event(0x0e,1);assert(buttons==DM_BTN_R);
+    dm_kbmap_key_event(0x0e,0);assert(buttons==0);
     dm_kbmap_key_event(0x1b,1);assert(buttons & DM_BTN_A);
     dm_kbmap_key_event(0x1b,0);assert(buttons==0);
     char worksidecar[1200],savedsidecar[1200];

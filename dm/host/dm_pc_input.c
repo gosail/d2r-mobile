@@ -16,8 +16,19 @@ static unsigned queue_head,queue_tail;
 static uint64_t held_mask[256]; // latched at key-down (no re-interpretation of held keys)
 enum { UNMAPPED=255 };
 enum { PH_IDLE, PH_ZL_LEAD, PH_HELD, PH_ZL_TAP, PH_TAP_PULSE };
-static unsigned char skill_phase[256];
+static unsigned char skill_phase[256],arrow_walk[256];
 static uint64_t skill_sample[256];
+// USB HID keyboard arrow cluster, reserved for the guest's Switch stick
+// when playing and D-pad navigation when a menu or panel is open.
+static uint64_t arrow_dpad(unsigned hid) {
+    switch(hid) {
+    case 0x50:return DM_BTN_LEFT;
+    case 0x52:return DM_BTN_UP;
+    case 0x4f:return DM_BTN_RIGHT;
+    case 0x51:return DM_BTN_DOWN;
+    default:return 0;
+    }
+}
 
 // Guest HUD buttons, not positions guessed from a conventional PC key layout.
 // See dm_padmode_hud_click: SkillButton1..6 = A, B, Y, X, R, ZR.
@@ -54,7 +65,14 @@ static uint64_t command_bits(unsigned id) {
 }
 static void publish_locked(void) {
     uint64_t bits=0;int32_t right_y=0;
+    int left=0,right=0,up=0,downward=0;
     for(unsigned i=0;i<256;i++) {
+        if(down[i] && arrow_walk[i]) {
+            if(i==0x50)left=1;
+            if(i==0x4f)right=1;
+            if(i==0x52)up=1;
+            if(i==0x51)downward=1;
+        }
         if(skill_phase[i]==PH_ZL_LEAD || skill_phase[i]==PH_ZL_TAP) {
             // Second-set modifier must reach GetNpadState BEFORE the face edge.
             bits|=DM_BTN_ZL;
@@ -65,7 +83,12 @@ static void publish_locked(void) {
         if(command[i]==39)right_y=32767;
         if(command[i]==40)right_y=-32767;
     }
-    dm_kb_set(bits,0,0,0,right_y);
+    // A real stick cannot extend beyond its circular gate diagonally.
+    // Keep opposite directions cancelling and preserve full cardinal speed.
+    int dx=right-left,dy=up-downward;
+    int32_t lx=dx*(dy?23170:DM_STICK_MAX);
+    int32_t ly=dy*(dx?23170:DM_STICK_MAX);
+    dm_kb_set(bits,lx,ly,0,right_y);
 }
 void dm_pc_input_reset(void) {
     pthread_mutex_lock(&input_mu);
@@ -73,6 +96,7 @@ void dm_pc_input_reset(void) {
     memset(command,UNMAPPED,sizeof command);
     memset(held_mask,0,sizeof held_mask);
     memset(skill_phase,PH_IDLE,sizeof skill_phase);
+    memset(arrow_walk,0,sizeof arrow_walk);
     memset(skill_sample,0,sizeof skill_sample);
     queue_head=queue_tail=0;
     dm_kb_set(0,0,0,0,0);
@@ -161,6 +185,21 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         pthread_mutex_unlock(&input_mu);return;
     }
     if(pressed) {
+        uint64_t dpad=arrow_dpad(hid);
+        if(dpad) {
+            // Arrow keys are intentionally NOT looked up as character
+            // shortcuts in .key. Their fixed meaning avoids accidental
+            // potions/panels while walking with the controller layout.
+            int walk=dm_uiscreen_ingame() && !dm_uiscreen_panel();
+            down[hid]=1;
+            command[hid]=UNMAPPED;
+            skill_phase[hid]=PH_IDLE;
+            arrow_walk[hid]=(unsigned char)walk;
+            held_mask[hid]=walk?0:dpad;
+            publish_locked();
+            pthread_mutex_unlock(&input_mu);
+            return;
+        }
         uint32_t id=0;unsigned slot=0;
         int rc=dm_pc_profile_action_for_hid(hid,&id,&slot);
         down[hid]=1;
@@ -179,6 +218,7 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         }
     } else {
         down[hid]=0;
+        arrow_walk[hid]=0;
         if(skill_phase[hid]==PH_ZL_LEAD) {
             // Keep ZL and schedule an actual short press, even if key-up
             // arrived before the game sampled the first-set modifier.

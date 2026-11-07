@@ -14,7 +14,7 @@
 static char root[1024], save_dir[1100],work_dir[1100];
 static uint64_t game_buttons,guest_samples;
 uint64_t dm_input_samples(void) {return guest_samples;}
-static int32_t game_right_y;
+static int32_t game_right_y,game_left_x,game_left_y;
 static int map_toggles,panel_open,poisoned;static unsigned native_writers;
 static unsigned panel_events[57];
 void dm_ui_pc_toggle_panel(unsigned id) {
@@ -22,7 +22,8 @@ void dm_ui_pc_toggle_panel(unsigned id) {
     panel_events[id]++;
 }
 void dm_kb_set(uint64_t b,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
-    (void)lx;(void)ly;(void)rx;game_buttons=b;game_right_y=ry;
+    (void)rx;game_buttons=b;game_right_y=ry;
+    game_left_x=lx;game_left_y=ly;
 }
 void dm_world_mouse_map_toggle(void) {map_toggles++;}
 int dm_uiscreen_ingame(void) {return 1;}
@@ -195,6 +196,20 @@ int main(void) {
     assert(dm_pc_profile_get(23,0,&vk)==DM_KEYFILE_OK && vk=='1');
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
     dm_pc_input_reset();
+    // Arrow inputs are the Switch left stick in a run, without depending
+    // on (or accidentally firing) an action bound in the guest .key.
+    dm_pc_input_event(0x52,1);assert(game_buttons==0 && game_left_y==32767);
+    dm_pc_input_event(0x4f,1);
+    assert(game_left_x==23170 && game_left_y==23170 && game_buttons==0);
+    dm_pc_input_event(0x50,1);assert(game_left_x==0 && game_left_y==32767);
+    dm_pc_input_event(0x50,0);
+    dm_pc_input_event(0x52,0);assert(game_left_y==0 && game_left_x==32767);
+    dm_pc_input_event(0x4f,0);assert(game_left_x==0 && game_left_y==0);
+    panel_open=1;
+    dm_pc_input_event(0x52,1);assert(game_buttons==DM_BTN_UP && game_left_y==0);
+    dm_pc_input_event(0x52,0);assert(game_buttons==0);
+    panel_open=0;
+    assert(dm_pc_profile_bind(18,0,0x26,NULL,NULL)==DM_KEYFILE_UNSUPPORTED);
     assert(dm_pc_input_wheel(1)==1 && dm_pc_input_wheel(-1)==-1);
     assert(dm_pc_input_wheel(0)==0);
     assert(dm_pc_profile_bind(40,0,0xffff,NULL,NULL)==DM_KEYFILE_OK);

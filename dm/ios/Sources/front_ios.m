@@ -254,13 +254,13 @@ static NSString *pcKeyName(int vk) {
     static const char *const names[57]={
         "Character","Inventory","Party","Message Log","Quests","Chat","Help","Automap",
         "Center Automap","Fade Automap","Party Automap","Party Names","Skill Tree","Skill Bar",
-        "Skill 1","Skill 2","Skill 3","Skill 4","Skill 5","Skill 6","Skill 7","Skill 8",
+        "Skill 1 (Switch A)","Skill 2 (Switch B)","Skill 3 (Switch Y)","Skill 4 (Switch X)","Skill 5 (Switch R)","Skill 6 (Switch ZR)","Skill 7 (ZL+A)","Skill 8 (ZL+B)",
         "Show Belt","Potion 1","Potion 2","Potion 3","Potion 4",
         "Say 1","Say 2","Say 3","Say 4","Say 5","Say 6","Say 7",
         "Run Hold","Toggle Run","Stand Still","Show Items","Close Panels",
         "Previous Skill","Next Skill","Clear Messages","Screenshot","Portraits",
         "Weapon Swap","Minimap Toggle",
-        "Skill 9","Skill 10","Skill 11","Skill 12","Skill 13","Skill 14","Skill 15","Skill 16",
+        "Skill 9 (ZL+Y)","Skill 10 (ZL+X)","Skill 11 (ZL+R)","Skill 12 (ZL+ZR)","Skill 13","Skill 14","Skill 15","Skill 16",
         "Hireling","Say 8","Escape"
     };
     if(dm_pc_profile_file_status()!=1) {
@@ -336,8 +336,8 @@ static NSString *kbActionLabel(int action) {
     hint.textColor=UIColor.whiteColor;
     hint.font=[UIFont systemFontOfSize:14];
     hint.text=dm_lang_zh()?
-        @"键盘从角色原生 .key 读取动作并模拟游戏输入；手柄继续使用 .ctl。\n左键交互、右键使用；中键和滚轮可在 .key 中绑定。":
-        @"Keyboard commands use the original .key and input bridge; controller uses .ctl.\nLeft clicks, right uses; middle/wheel use .key bindings.";
+        @"方向键=Switch 左摇杆，面板中为十字键；Skill 5=Switch R，可在原生 .key 中改绑。\n手柄使用 .ctl；鼠标左键交互、右键使用。":
+        @"Arrows = Switch left stick (D-pad in menus); Skill 5 = Switch R, rebindable via .key.\nController uses .ctl; left mouse interacts, right mouse uses.";
     [_kbBindingScroll addSubview:hint];
     _kbBindingScroll.contentSize=CGSizeMake(w,190);
 }

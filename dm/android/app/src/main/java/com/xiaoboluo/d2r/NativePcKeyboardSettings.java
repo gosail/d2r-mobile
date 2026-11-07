@@ -10,20 +10,20 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Toast;
 
-/** Original Diablo II native .key controls, independent from Switch .kbm and .ctl. */
+/** Original Diablo II native .key keyboard shortcuts, independent from the controller's .ctl. */
 final class NativePcKeyboardSettings {
     private NativePcKeyboardSettings() {}
     private static final String[] COMMANDS={
         "Character", "Inventory", "Party", "Message log", "Quests",
         "Chat", "Help", "Automap", "Center map", "Fade map",
         "Party on map", "Names on map", "Skill tree", "Skill bar",
-        "Skill 1","Skill 2","Skill 3","Skill 4","Skill 5","Skill 6","Skill 7","Skill 8",
+        "Skill 1 (Switch A)","Skill 2 (Switch B)","Skill 3 (Switch Y)","Skill 4 (Switch X)","Skill 5 (Switch R)","Skill 6 (Switch ZR)","Skill 7 (ZL+A)","Skill 8 (ZL+B)",
         "Show belt","Potion 1","Potion 2","Potion 3","Potion 4",
         "Voice 1","Voice 2","Voice 3","Voice 4","Voice 5","Voice 6","Voice 7",
         "Hold run","Toggle run","Stand still","Show ground items","Close panels",
         "Previous skill","Next skill","Clear messages","Screenshot","Portraits",
         "Weapon swap","Toggle minimap",
-        "Skill 9","Skill 10","Skill 11","Skill 12","Skill 13","Skill 14","Skill 15","Skill 16",
+        "Skill 9 (ZL+Y)","Skill 10 (ZL+X)","Skill 11 (ZL+R)","Skill 12 (ZL+ZR)","Skill 13","Skill 14","Skill 15","Skill 16",
         "Hireling","Voice 8","Menu"
     };
     private static String keyName(int code) {
@@ -86,7 +86,7 @@ final class NativePcKeyboardSettings {
             }
             rows.addView(line);
         }
-        parent[0]=new AlertDialog.Builder(activity).setTitle("Native PC .key · primary / secondary")
+        parent[0]=new AlertDialog.Builder(activity).setTitle("Switch buttons via native .key · arrows walk")
             .setView(sc).setPositiveButton("Done",null).create();
         parent[0].show();
     }
@@ -105,7 +105,7 @@ final class NativePcKeyboardSettings {
     private static void capture(Activity activity,AlertDialog parent,int action,int slot) {
         AlertDialog dialog=new AlertDialog.Builder(activity)
             .setTitle(COMMANDS[action]+" · "+(slot==0?"Primary":"Secondary"))
-            .setMessage("Press a physical keyboard key, or choose a mouse/wheel input")
+            .setMessage("Arrows are reserved for Switch left-stick walking (D-pad in menus). Assign another key to this Switch action, or choose mouse/wheel.")
             .setNegativeButton("Cancel",null)
             .setPositiveButton("Mouse / Wheel",(d,w)->mouseChoice(activity,parent,action,slot))
             .setNeutralButton("Clear",(d,w)->{

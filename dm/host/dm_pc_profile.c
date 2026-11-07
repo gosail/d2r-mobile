@@ -88,6 +88,10 @@ int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk) {
 }
 int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
                        uint32_t *conflict,unsigned *conflict_slot) {
+    // Physical arrow keys are reserved for the Switch left stick / menu
+    // D-pad. Reject editing them as another command: otherwise the editor
+    // could report a successful binding the runtime intentionally ignores.
+    if(vk>=0x25 && vk<=0x28)return DM_KEYFILE_UNSUPPORTED;
     dm_fs_profile_lock();
     // Never change the committed save snapshot. While the game's .key is
     // open for writing, the host must not race its multi-write serialization.

@@ -349,6 +349,9 @@ static NSString *kbActionLabel(int action) {
     if(keyboard)[self kbSettingsRefresh];
 }
 - (void)kbSettingsSync {
+    // All bindings now live inside the game's own KeyBindingMenuHD
+    // list rows. No UIKit device tabs, sheet or panel is mounted here.
+    return;
     BOOL visible=dm_kbmap_controls_visible()!=0;
     if(!visible && !_kbDeviceTabs)return;
     if(!_kbDeviceTabs) {

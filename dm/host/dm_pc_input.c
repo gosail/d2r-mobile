@@ -10,6 +10,7 @@
 #include <string.h>
 // Implemented by the original guest PanelManager adapter in dm_cursor.c.
 int dm_ui_pc_skill_bind_request(uint32_t command_id);
+int dm_ui_pc_skill_tree_active(void);
 void dm_ui_pc_toggle_panel(unsigned command_id);
 
 static pthread_mutex_t input_mu=PTHREAD_MUTEX_INITIALIZER;
@@ -271,7 +272,12 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         // Cmd+Skill1..6 uses the native second bank, while dedicated
         // Skill7..12 shortcuts retain their original .key behavior.
         // A bound skill under the mouse enters the guest binding dialog.
-        if(skill_slot(action)>=0 && dm_ui_pc_skill_bind_request(action)) {
+        if(skill_slot(action)>=0 &&
+           (dm_ui_pc_skill_bind_request(action) ||
+            dm_ui_pc_skill_tree_active())) {
+            // In the skill tree the same native A/B/Y/X/R/ZR buttons also
+            // mean Select/Allocate/Cancel. Never send a cast/confirm merely
+            // because pointer hover was unavailable for one UI frame.
             command[hid]=UNMAPPED;
             held_mask[hid]=0;
         }

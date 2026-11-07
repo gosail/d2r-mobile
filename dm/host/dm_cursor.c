@@ -185,10 +185,13 @@ int dm_mouse_pointer_hint(void) {
 }
 // Physical mouse skill hover is captured only on the guest game thread.
 static _Atomic uint64_t g_pc_skill_hover, g_pc_skill_bind_req;
+static _Atomic int g_pc_skill_binding_busy;
 static void pc_skill_hover_note(module_t *m,int x,int y);
 void dm_ui_pc_skill_hover_end(void) { atomic_store(&g_pc_skill_hover,0); }
 int dm_ui_pc_skill_bind_request(uint32_t id) {
     if (!dm_pc_input_skill_buttons(id)) return 0;
+    // Repeated shortcuts during one binding must not cast the old skill.
+    if(atomic_load(&g_pc_skill_binding_busy) || atomic_load(&g_pc_skill_bind_req))return 1;
     uint64_t xy=atomic_load(&g_pc_skill_hover);
     if (!(xy >> 63)) return 0;
     uint64_t want=((uint64_t)id << 32) | (xy & 0xffffffffu), empty=0;
@@ -2100,7 +2103,7 @@ static void ui_bind_pump(uint64_t root, uint64_t fr) {
 // actions remain unsupported until native slots are actually verified.
 static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
     static int phase; // 0 idle, 1 wait native popup, 2 ZL lead, 3 wait close
-    static uint64_t begun,at,buttons;
+    static uint64_t begun,at,buttons,modal_opened;
     static uint64_t original_hover;
     uint64_t tree=root?ui_find(root,"SkillsTreePanel",0):0;
     int visible=tree && *(uint8_t *)(tree+0x50);
@@ -2113,6 +2116,7 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         atomic_store(&g_pc_skill_bind_req,0);
         if(phase && modal)dm_ui_key_pulse(DM_BTN_MINUS,4);
         phase=0;
+        atomic_store(&g_pc_skill_binding_busy,0);
         return;
     }
     if(!phase) {
@@ -2129,17 +2133,26 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         if(!pc_skill_hit_walk(tree,xy,0) || dm_hud_held() ||
            !dm_ui_hover_now(x,y))return;
         dm_ui_key_pulse(DM_BTN_Y,5); // native "bind selected skill"
-        begun=at=fr; phase=1;
+        begun=at=fr;modal_opened=0;phase=1;
+        atomic_store(&g_pc_skill_binding_busy,1);
         return;
     }
     if(phase==1) {
         // If the target pointer changed before the popup opened, cancel the
         // transaction; never bind the newly hovered skill by accident.
         if(!modal) {
-            if(atomic_load(&g_pc_skill_hover)!=original_hover || fr-begun>60)
-                phase=0;
+            if(atomic_load(&g_pc_skill_hover)!=original_hover || fr-begun>60) {
+                phase=0;atomic_store(&g_pc_skill_binding_busy,0);
+            }
             return;
         }
+        // Allow original binding dialog a full 12 guest frames to settle.
+        if(atomic_load(&g_pc_skill_hover)!=original_hover) {
+            dm_ui_key_pulse(DM_BTN_MINUS,4);
+            phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;
+        }
+        if(!modal_opened)modal_opened=fr;
+        if(fr-modal_opened<12)return;
         if(buttons&DM_BTN_ZL) {
             dm_ui_key_pulse(DM_BTN_ZL,30);
             at=fr+10;phase=2;
@@ -2150,7 +2163,7 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         return;
     }
     if(phase==2) {
-        if(!modal){phase=0;return;}
+        if(!modal){phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;}
         if(fr>=at) {
             // The native UI requires ZL to be sampled before the face key.
             dm_ui_key_pulse(buttons,6);
@@ -2159,10 +2172,10 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         return;
     }
     if(phase==3) {
-        if(!modal){phase=0;return;}
+        if(!modal){phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;}
         if(fr-at>60) {
             dm_ui_key_pulse(DM_BTN_MINUS,4); // native cancellation, never guess
-            phase=0;
+            phase=0;atomic_store(&g_pc_skill_binding_busy,0);
         }
     }
 }

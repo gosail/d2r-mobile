@@ -7,7 +7,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from touch_layout import _settings_tabs, pad_settings, _settings_no_legend
+from touch_layout import _settings_tabs, pad_settings, _settings_no_legend, PAD_PC_CLOSE, PAD_PC_CLOSE_PAGES
 from controls_layout import integrate as integrate_native_controls
 
 class ControlsTabs(unittest.TestCase):
@@ -43,6 +43,46 @@ class ControlsTabs(unittest.TestCase):
         self.assertIn('"@dmTabCustom"',plain)
         self.assertNotIn('"@OptionsMenuVideo"',plain)
 
+
+    def test_pc_mouse_native_close_is_added_to_controller_pages(self):
+        # The mouse selects the original Switch layout on iPad; do not
+        # assume the touch-only version of each page supplies its X.
+        expected = {
+            "controller/vendorpanellayouthd.json",
+            "controller/bankexpansionlayouthd.json",
+            "controller/characterstatspanelhd.json",
+            "controller/advancedstatspanelhd.json",
+            "controller/console/switch/playerinventoryexpansionlayouthd.json",
+            "controller/skillstreepanelhd.json",
+            "controller/questlogpanelexpansionhd.json",
+            "controller/hiremenupanelhd.json",
+            "controller/imbueitemspanelhd.json",
+            "controller/hirelinginventorypanelhd.json",
+            "controller/waypointspanelexpansionhd.json",
+            "controller/console/settingspanelhd.json",
+        }
+        self.assertEqual(set(PAD_PC_CLOSE_PAGES), expected)
+        self.assertEqual(set(PAD_PC_CLOSE), expected)
+        for rel, (source, buttons) in PAD_PC_CLOSE.items():
+            self.assertTrue(source.endswith(".json"), rel)
+            self.assertEqual(len(buttons), 1, rel)
+            name, alias, overrides, *extra = buttons[0]
+            self.assertIn(alias or name, ("TouchClose", "CloseButton", "close"))
+            self.assertIn('"rect"', overrides)
+            if rel == "controller/console/settingspanelhd.json":
+                self.assertIn("TouchNoop", overrides)
+            elif rel in (
+                "controller/console/switch/playerinventoryexpansionlayouthd.json",
+                "controller/skillstreepanelhd.json",
+                "controller/characterstatspanelhd.json",
+                "controller/questlogpanelexpansionhd.json",
+                "controller/hirelinginventorypanelhd.json",
+            ):
+                self.assertIn("ClosePanel:UISwitcher", overrides)
+        # The two pause page variants already get the same X through
+        # pad_pause; adding it again would create duplicate widget names.
+        self.assertNotIn("controller/pauselayouthd.json", PAD_PC_CLOSE)
+        self.assertNotIn("controller/pauselayoutgardenhd.json", PAD_PC_CLOSE)
 
     def test_keyboard_and_gamepad_share_one_guest_binding_row(self):
         text = lambda name: {"type":"TextBoxWidget","name":name,

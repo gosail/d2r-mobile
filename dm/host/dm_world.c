@@ -1231,7 +1231,7 @@ void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at th
     w_tap_step(b);
     // Middle click acts on the game thread only. Ignore in modal panels.
     if (atomic_exchange(&g_mouse_map_toggle,0)&1u) {
-        int dm_ui_map_is_full(void), dm_ui_map_full(int), dm_game_paused(void);
+        int dm_ui_map_is_full(void), dm_game_paused(void); // dm_ui_map_full is void in dm_cursor.h
         if (dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused())
             dm_ui_map_full(!dm_ui_map_is_full());
     }

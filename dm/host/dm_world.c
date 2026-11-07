@@ -642,6 +642,9 @@ static void w_hover_step(uint8_t *b) {
                             // health, affixes and resistances. Only publish the
                             // hovered unit ID for the native target selector.
                             native_mon_id=*(uint32_t *)(unit+8);
+#if defined(__ANDROID__)
+                            // Android still requires the controller-agnostic
+                            // fallback until its native target selector is wired.
                             // Read combat stats only on the guest game thread.
                             // Stat indices follow the game's itemstatcost table.
                             // HP values are stored as fixed-point 8-bit fractions.
@@ -684,6 +687,7 @@ static void w_hover_step(uint8_t *b) {
                             // was observed, rather than checking details[0].
                             if (view.immune_mask)
                                 strlcat(view.details,dm_lang_zh()?"免疫":" immune",sizeof view.details);
+#endif
                             // The native target selector still applies the game's
                             // eligibility/range/LOS rules; this is display only.
                         }

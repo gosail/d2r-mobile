@@ -6,6 +6,7 @@
 #include "dm_uiscreen.h"
 #include "dm_input.h"
 #include "dm_pc_input.h"
+#include "dm_pc_profile.h"
 #include "dm_kbmap.h"
 #include "dm_hud.h"
 #include "dm_actions.h"

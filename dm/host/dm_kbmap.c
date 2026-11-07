@@ -3,6 +3,7 @@
 // No private per-character file and no second persisted input mode.
 #include "dm_kbmap.h"
 #include "dm_pc_profile.h"
+#include "dm_keyfile.h"
 #include "dm_pc_input.h"
 #include "dm_input.h"
 #include "dm_world.h"

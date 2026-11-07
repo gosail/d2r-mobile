@@ -92,6 +92,9 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn('dm_ui_key_pulse(DM_BTN_Y,5)',ui)
         self.assertIn('dm_ui_key_pulse(DM_BTN_MINUS,4)',ui)
         self.assertIn('dm_ui_key_pulse(DM_BTN_ZL,30)',ui)
+        self.assertIn('if(fr-modal_opened<12)return;',ui)
+        self.assertIn('atomic_load(&g_pc_skill_binding_busy)',ui)
+        self.assertIn('atomic_store(&g_pc_skill_binding_busy,0)',ui)
         self.assertIn('dm_ui_pc_skill_hover_end();',mouse)
         # Skill 13..16 have no validated original controller slots.
         self.assertIn('if(id>=46 && id<=49)',pc)

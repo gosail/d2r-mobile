@@ -49,9 +49,14 @@ SRC=\
 	dm_dropfilter.c \
 	dm_drophaptic.c \
 	dm_elysium.c \
+	dm_external_mouse.c \
 	dm_freetp.c \
 	dm_hud.c \
 	dm_i18n.c \
+	dm_kbmap.c \
+	dm_keyfile.c \
+	dm_pc_profile.c \
+	dm_pc_input.c \
 	dm_kills.c \
 	dm_lootfilter.c \
 	dm_movie_decode.c \
@@ -106,8 +111,11 @@ print-macos-min-m3:
 # 由原版表生成的头文件：不进仓库，构建时从玩家自己的游戏文件（Switch 版 3.3.94012 的 Update/RomFS）生成；路径用环境变量 DM_ROMFS_SRC 指定
 # Headers generated from the original game's tables: not checked into the repository, generated at build time from the player's own game files (Update/RomFS of Switch version 3.3.94012); the path is given by the environment variable DM_ROMFS_SRC
 ROMFS?=$(or $(DM_ROMFS_SRC),$(DM_ROOT)/data/switch/3.3.94012/Update/RomFS)
-GENH=dm_vault_tab.h dm_hud_exp.h dm_bright_levels.inc
+GENH=dm_vault_tab.h dm_hud_exp.h dm_bright_levels.inc dm_hover_names.h
 NEED_ROMFS=@test -f "$(ROMFS)/data/build_manifest.psv" || { echo "🔴 没找到游戏文件：$(ROMFS)/data/build_manifest.psv。把 Switch 版 3.3.94012 的 Update/RomFS 放到这里，或用环境变量 DM_ROMFS_SRC 指过去（见 dm/README.md「从你的游戏文件生成资源」）"; exit 1; }
+dm_hover_names.h: ../ios/tools/gen_hover_names.py ../ios/tools/annot_strings.py
+	$(NEED_ROMFS)
+	python3 ../ios/tools/gen_hover_names.py "$(ROMFS)" > $@.tmp && mv $@.tmp $@
 dm_vault_tab.h: ../ios/tools/gen_vault_table.py
 	$(NEED_ROMFS)
 	python3 ../ios/tools/gen_vault_table.py "$(ROMFS)" > $@.tmp && mv $@.tmp $@

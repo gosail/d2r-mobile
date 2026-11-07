@@ -14,6 +14,10 @@
 //   <internal dir>/save, temp        saves and temporary files
 #include "../host/dm.h"
 #include "../host/dm_input.h"
+#include "../host/dm_kbmap.h"
+#include "../host/dm_pc_profile.h"
+#include "../host/dm_pc_input.h"
+#include "../host/dm_keyfile.h"
 #include "../host/front.h"
 #include "../host/hle.h"
 #include <android/log.h>
@@ -23,6 +27,10 @@
 #include <jni.h>
 #include "vulkan_present.h"
 #include "touch_android.h"
+#include "front_android.h"
+#include "../host/dm_world.h"
+#include "../host/dm_cursor.h"
+#include "../host/dm_uiscreen.h"
 #include "lifecycle_dispatch.h"
 #include "overlay_validate.h"
 #include "dm_overlay_contract.h"
@@ -323,6 +331,9 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeStart(JNIEnv *env
     // times a frame, briefly, on locks its job workers hold.
     setenv("DM_HLE_SPIN_US", "30", 0);
     if (!getenv("DM_LANG") && *lg) setenv("DM_LANG", lg, 0);   // 首次安装的语言按系统首选（同 iOS CFLocaleCopyPreferredLanguages，见 dm_i18n.c） | first-install language follows the system preference (as iOS CFLocaleCopyPreferredLanguages, see dm_i18n.c)
+    // The user-generated NPC string-key table stays in the imported game bundle, not in the APK.
+    { char hover_path[1300]; snprintf(hover_path,sizeof hover_path,"%s/out/hover_names.tsv",g_runtime);
+      setenv("DM_HOVER_NAMES",hover_path,1); }
     if (chdir(g_files)) LOG("【红】chdir %s 失败 errno %d", g_files, errno);
     (*env)->ReleaseStringUTFChars(env, files, f); (*env)->ReleaseStringUTFChars(env, ext, x); (*env)->ReleaseStringUTFChars(env, src, s); (*env)->ReleaseStringUTFChars(env, lang, lg);
     if (n <= 0) return -2;
@@ -421,6 +432,106 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeTouch(JNIEnv *env
     if (n) { (*env)->GetIntArrayRegion(env, ids, 0, n, id); (*env)->GetFloatArrayRegion(env, xs, 0, n, x); (*env)->GetFloatArrayRegion(env, ys, 0, n, y); }
     for (int i = 0; i < n; i++) t[i] = (dm_touch){(uint32_t)id[i], x[i], y[i]};
     dm_touch_set(t, n);
+}
+
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMousePointerHint(JNIEnv *env,jclass cls) {
+    (void)env; (void)cls; return dm_mouse_pointer_hint();
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv *env,jclass cls,jint op,jfloat x,jfloat y,jint arg) {
+    (void)env; (void)cls; dm_android_mouse_event(op,x,y,arg);
+}
+JNIEXPORT jstring JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseHover(JNIEnv *env,jclass cls,jfloatArray out) {
+    (void)cls; dm_world_hover_view h={0}; dm_world_hover_read(&h);
+    if (out && (*env)->GetArrayLength(env,out)>=9) {
+        // The 10th float is an optional native-HUD-present bit. Preserve
+        // the previous nine-field JNI contract for an older caller.
+        float v[10]={(float)h.kind,h.x,h.y,h.w,h.h,(float)h.hp,(float)h.hp_max,
+                    (float)h.tier,(float)h.immune_mask,
+                    (float)dm_world_hover_native_visible()};
+        (*env)->SetFloatArrayRegion(env,out,0,(*env)->GetArrayLength(env,out)>=10?10:9,v);
+    }
+    char label[sizeof(h.title)+sizeof(h.details)+4];
+    if(h.kind==3 && h.details[0]) snprintf(label,sizeof label,"%s\n%s",h.title,h.details);
+    else snprintf(label,sizeof label,"%s",h.title);
+    return (*env)->NewStringUTF(env,label);
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JNIEnv *env,jclass cls,jint w,jint h,jintArray out) {
+    (void)cls;
+    if (!out || (*env)->GetArrayLength(env,out)<4) return;
+    int rect[4]={0,0,w,h};
+    front_android_view_rect(w,h,rect);
+    if (front_android_full() && dm_uiscreen_ingame()) { rect[0]=0; rect[1]=0; rect[2]=w; rect[3]=h; }
+    (*env)->SetIntArrayRegion(env,out,0,4,rect);
+}
+
+// Pointer roles share the local sw_keyboard.txt serializer.
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseBinding(JNIEnv *e,jclass c,jint physical) {
+    (void)e;(void)c;return physical<0?-1:dm_kbmap_mouse_action((unsigned)physical);
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseBind(JNIEnv *e,jclass c,jint physical,jint logical) {
+    (void)e;(void)c;return physical>=0 && logical>=0 &&
+        dm_kbmap_bind_mouse((unsigned)physical,(unsigned)logical);
+}
+
+// Local keyboard controls; used by the button on the native Controls tab.
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbControlsVisible(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_kbmap_controls_visible();
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcMode(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_kbmap_pc_mode()!=0;
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcSetMode(JNIEnv *e,jclass c,jboolean nativePc) {
+    (void)e;(void)c;return dm_kbmap_set_pc_mode(nativePc!=0)!=0;
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcStatus(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_pc_profile_file_status();
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcGet(JNIEnv *e,jclass c,jint action,jint slot) {
+    (void)e;(void)c;uint16_t vk=0xffff;
+    if(action<0 || slot<0 || dm_pc_profile_get((uint32_t)action,(unsigned)slot,&vk))
+        return -1;
+    return (jint)vk;
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcBind(JNIEnv *e,jclass c,jint action,jint slot,jint vk) {
+    (void)e;(void)c;
+    if(action<0 || slot<0 || vk<0 || vk>65535)return DM_KEYFILE_INVALID;
+    int rc=dm_pc_profile_bind((uint32_t)action,(unsigned)slot,(uint16_t)vk,NULL,NULL);
+    // Editing a native PC action must also switch the actual input dispatcher.
+    // Failure is reported to the UI; never show success while legacy actions fire.
+    if(rc==DM_KEYFILE_OK && !dm_kbmap_set_pc_mode(1))return DM_KEYFILE_IO;
+    return rc;
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcActionSupported(JNIEnv *e,jclass c,jint action) {
+    (void)e;(void)c;
+    return action>=0 && dm_pc_input_supported_action((uint32_t)action);
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePcVkFromHid(JNIEnv *e,jclass c,jint usage) {
+    (void)e;(void)c;return usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);
+}
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbAction(JNIEnv *e,jclass c,jint usage) {
+    (void)e;(void)c;return usage<0 ? DM_KB_UNBOUND : dm_kbmap_action((unsigned)usage);
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbBind(JNIEnv *e,jclass c,jint usage,jint action) {
+    (void)e;(void)c;return usage>=0 && action>=0 && dm_kbmap_bind((unsigned)usage,(unsigned)action);
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbDefaults(JNIEnv *e,jclass c) {
+    (void)e;(void)c;dm_kbmap_restore_defaults();
+}
+JNIEXPORT jboolean JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKbResetChecked(JNIEnv *e,jclass c) {
+    (void)e;(void)c;return dm_kbmap_restore_defaults_checked()!=0;
+}
+
+// Physical keyboard is separate from the touch and gamepad input channels.
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardEvent(JNIEnv *env,jclass cls,jint usage,jboolean down) {
+    (void)env;(void)cls;
+    if(usage>=0 && usage<256) {
+        dm_kbmap_key_event((unsigned)usage,down!=0);
+        if(down && dm_kbmap_action((unsigned)usage)!=DM_KB_UNBOUND)
+            dm_padmode_request_glyph(DM_GLYPH_KBD);
+    }
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardReset(JNIEnv *env,jclass cls) {
+    (void)env;(void)cls;dm_kbmap_reset();
 }
 
 // 实体手柄（Java PadInput.java）→ 宿主手柄状态。与触屏的虚拟手柄分开存，游戏取手柄时按键取或、摇杆触屏优先（hle_hid.c 的 fill）。

@@ -1,0 +1,29 @@
+// Character-scoped native Diablo II keyboard profile, independent of .kbm
+// (legacy keyboard-to-controller emulation) and original gamepad .ctl.
+#pragma once
+#include <stdint.h>
+
+// 0..56 action IDs belong to the native 0x25 .key format.
+// Returns DM_KEYFILE_* codes (see dm_keyfile.h).
+int dm_pc_profile_select(const char *name);
+int dm_pc_profile_get(uint32_t id,unsigned slot,uint16_t *vk);
+int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
+                       uint32_t *conflict,unsigned *conflict_slot);
+int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot);
+int dm_pc_profile_action_for_hid(unsigned usage,uint32_t *id,unsigned *slot);
+void dm_pc_profile_clear(void);
+// Called with the filesystem transaction path lock held (never lock it again).
+void dm_pc_profile_pre_commit_locked(const char *workdir);
+// 1: supported game-created .key; 0: not created/mounted; -1: invalid or
+// unsupported format. Used only for fallback before the guest creates it.
+int dm_pc_profile_file_status(void);
+// One serialized native-file read for all visible Switch HUD keycap labels.
+// primary[0..5] = A,B,Y,X,R,ZR; primary[6..9] = potion 1..4;
+// second[0..5] = the same six skill buttons with ZL held.
+// 1=valid file, 0=missing file (temporary fallbacks), -1=invalid.
+int dm_pc_profile_hud_snapshot(uint16_t primary[10],uint16_t second[6]);
+
+// Portable, layout-independent HID usage -> Win32 VK for this .key variant.
+// Does not convert to ASCII (e.g. top-row '1' is VK_1 regardless of Shift).
+// -1 means not representable in this legacy native-key format.
+int dm_pc_vk_from_hid(unsigned usage);

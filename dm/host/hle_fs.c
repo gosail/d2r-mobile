@@ -45,8 +45,23 @@ static mount_t g_mnt[MAX_MOUNT];   // commit 非空 = 事务式存档挂载 | co
 static int g_nmnt;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_path_lock = PTHREAD_MUTEX_INITIALIZER;
-static void path_unlock(pthread_mutex_t **m) { pthread_mutex_unlock(*m); }
+// Public sidecar writer lock. Taking this before the keyboard map's own
+// mutex preserves the same order as the Commit path (path -> map).
+void dm_fs_profile_lock(void) { pthread_mutex_lock(&g_path_lock); }
+void dm_fs_profile_unlock(void) { pthread_mutex_unlock(&g_path_lock); }
+static void path_unlock(pthread_mutex_t **m) { if(*m) pthread_mutex_unlock(*m); }
 #define PATH_LOCK() pthread_mutex_t *path_guard __attribute__((cleanup(path_unlock))) = &g_path_lock; pthread_mutex_lock(path_guard)
+// Original guest .key writers and host binding edits share g_path_lock.
+// Track handles across OpenFile/WriteFile/SetFileSize/CloseFile so the host
+// refuses to patch a profile while the game is serializing it.
+static uint8_t g_fkey[65536]; // 0 = other, 1 = native .key read, 2 = writable
+static _Atomic unsigned g_key_writers;
+unsigned dm_fs_native_key_writers(void) { return atomic_load(&g_key_writers); }
+// Does not lock on non-key file traffic. Caller cannot hold g_path_lock.
+#define KEY_FD_LOCK(h) pthread_mutex_t *key_fd_guard __attribute__((cleanup(path_unlock)))=NULL; \
+    if((h)<65536 && g_fkey[(unsigned)(h)]) { \
+        pthread_mutex_lock(&g_path_lock); key_fd_guard=&g_path_lock; \
+    }
 static uint8_t g_fmode[65536];              // fd → 打开方式 | fd → open mode
 // 角色档写完的先后（个人仓库翻页 / iCloud 并回判「这份角色档是不是某一刻之后序列化的」用）：写方式打开的 *.d2s 关闭、或改名成 *.d2s 时取一个全局单调序号。
 // 只当「写完」的先后用，不当「序列化」的先后用——角色档由另一条线程写，序列化在前、写盘在后中间可以夹着服务端拍上的动作（dm_vault.c 文件头）
@@ -56,6 +71,9 @@ static uint8_t g_fd2s[65536]; static _Atomic uint64_t g_seq, g_d2s_wseq;
 uint64_t dm_seq_next(void) { return atomic_fetch_add(&g_seq, 1) + 1; }
 uint64_t dm_fs_d2s_wseq(void) { return atomic_load(&g_d2s_wseq); }
 static int is_d2s(const char *p) { size_t n = strlen(p); return n > 4 && !strcmp(p + n - 4, ".d2s"); }
+static int is_native_key(const char *p) {
+    size_t n=strlen(p); return n>4 && !strcmp(p+n-4,".key");
+}
 static uint8_t g_fsave[65536];              // fd → 是否在事务式存档挂载上（存档写注入点只数这些） | fd → whether it is on a transactional save mount (the save write injection point only counts these)
 static _Atomic int g_save_writes;           // 存档挂载上的写次数（注入点与提交日志共用） | number of writes on the save mount (shared by the injection point and the commit log)
 static _Atomic uint64_t g_txn_first_ns;     // 本事务第一次存档写的时刻（提交日志报耗时用；提交时清 0） | time of this transaction's first save write (used by the commit log to report timing; cleared to 0 at commit)
@@ -456,6 +474,8 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
     if (i == g_nmnt || !g_mnt[i].commit[0]) { pthread_mutex_unlock(&g_lock); return RES_OK; }   // 非事务挂载：无可提交 | non-transactional mount: nothing to commit
     uint64_t tc0 = clock_gettime_nsec_np(CLOCK_MONOTONIC), tw0 = atomic_exchange(&g_txn_first_ns, 0);
     for (int k = 0; k < 5; k++) if (g_dm_pre_commit_hook[k]) g_dm_pre_commit_hook[k](g_mnt[i].dir);
+    { void dm_kbmap_pre_commit(const char *) __attribute__((weak));
+      if(dm_kbmap_pre_commit) dm_kbmap_pre_commit(g_mnt[i].dir); }
     uint64_t tc1 = clock_gettime_nsec_np(CLOCK_MONOTONIC);   // 写进工作目录的旁路文件随这次提交一起原子换入 | side files written into the working directory are swapped in atomically together with this commit
     int perr = atomic_exchange(&g_save_poison, 0);
     if (perr) {                                                         // 本事务有写失败：拒绝提交、丢弃工作目录 | a write failed in this transaction: refuse the commit, discard the working directory
@@ -581,6 +601,9 @@ HLE_FORCE("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci", "fsp-srv → open(2)", Re
     if (S_ISDIR(st.st_mode)) { close(fd); return RES_PATH_NOT_FOUND; }
     if (fd >= (int)sizeof g_fmode) die("fd 超出表");
     g_fmode[fd] = (uint8_t)mode; *out = (uint64_t)fd; g_fd2s[fd] = (mode & (MODE_WRITE | MODE_APPEND)) && is_d2s(path);
+    g_fkey[fd]=is_native_key(path)?
+        ((mode & (MODE_WRITE|MODE_APPEND))?2:1):0;
+    if(g_fkey[fd]==2) atomic_fetch_add(&g_key_writers,1);
     g_hm[fd] = NULL; if (!(mode & (MODE_WRITE | MODE_APPEND))) dm_data_note_fd(fd, hp);
     { const char *c = strchr(path, ':'); size_t ln = c ? (size_t)(c - path) : 0; g_fsave[fd] = 0;
       for (int i = 0; c && i < g_nmnt; i++) if (strlen(g_mnt[i].name) == ln && !strncmp(g_mnt[i].name, path, ln)) g_fsave[fd] = g_mnt[i].commit[0] != 0; }
@@ -590,6 +613,7 @@ HLE_FORCE("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci", "fsp-srv → open(2)", Re
     return RES_OK;
 }
 HLE_FORCE("_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm", "fsp-srv → pread(2)", Result, h_fs_ReadFile, size_t *out, uint64_t h, int64_t off, void *buf, size_t sz) {
+    KEY_FD_LOCK(h);
     if (!h) { *out = 0; return RES_FAIL; }   // 文件句柄就是 fd，0 是标准输入、不会是游戏打开的文件：打开失败后照用的空句柄 | A file handle is an fd; 0 is standard input and never a file the game opened: it is the null handle the game keeps using after a failed open
     size_t got = 0; uint64_t t0 = g_flag.bootprof ? now_ns() : 0;
     dm_guest_write_prepare(buf, sz);   // 目标可能是图形层写保护的贴图池页：内核写只读页返回 EFAULT 而不缺页，先解保护并标脏 | The destination may be a texture pool page write-protected by the graphics layer: a kernel write to a read-only page returns EFAULT instead of page-faulting, so unprotect and mark dirty first
@@ -616,6 +640,7 @@ HLE_FORCE("_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm", "fsp-srv → pread(2)", 
     return RES_OK;
 }
 HLE_FORCE("_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE", "fsp-srv → pwrite(2)", Result, h_fs_WriteFile, uint64_t h, int64_t off, const void *buf, size_t sz, const void *opt) {
+    KEY_FD_LOCK(h);
     if (!h) return RES_FAIL;
     (void)opt; size_t put = 0;
     if (g_fsave[(int)h & 0xffff]) {                                     // 存档写注入点（确定性回归用；只数存档挂载上的写） | Save write injection point (for deterministic regression; only writes on the save mount are counted)
@@ -643,6 +668,7 @@ HLE_FORCE("_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE", "fsp-srv → fstat(2)", 
     *out = (int)h < 4096 && g_hm[(int)h] ? g_hm[(int)h]->size : st.st_size; return RES_OK;
 }
 HLE_FORCE("_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl", "fsp-srv → ftruncate(2)", Result, h_fs_SetFileSize, uint64_t h, int64_t sz) {
+    KEY_FD_LOCK(h);
     if (!h) return RES_FAIL;
     if (!ftruncate((int)h, sz)) return RES_OK;
     if (g_fsave[(int)h & 0xffff]) save_poison(errno);
@@ -650,7 +676,11 @@ HLE_FORCE("_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl", "fsp-srv → ftruncate(2)
 }
 HLE_FORCE("_ZN2nn2fs9FlushFileENS0_10FileHandleE", "fsp-srv；宿主 write 已进页缓存，刷新为空操作", Result, h_fs_FlushFile, uint64_t h) { (void)h; return RES_OK; }
 HLE_FORCE("_ZN2nn2fs9CloseFileENS0_10FileHandleE", "fsp-srv → close(2)", void, h_fs_CloseFile, uint64_t h) {
-    if (!h) return;  g_fmode[(int)h & 0xffff] = 0; g_fsave[(int)h & 0xffff] = 0;
+    KEY_FD_LOCK(h);
+    if (!h) return;
+    if(g_fkey[(int)h & 0xffff]==2) atomic_fetch_sub(&g_key_writers,1);
+    g_fkey[(int)h & 0xffff]=0;
+    g_fmode[(int)h & 0xffff] = 0; g_fsave[(int)h & 0xffff] = 0;
     int d2s = g_fd2s[(int)h & 0xffff]; g_fd2s[(int)h & 0xffff] = 0;
     if ((int)h >= 0 && (int)h < 4096 && g_hm[(int)h]) { holemap *m = g_hm[(int)h]; g_hm[(int)h] = NULL; free(m->log); free(m->len); free(m->phys); free(m); }
     close((int)h); if (d2s) atomic_store(&g_d2s_wseq, dm_seq_next()); }   // 先关再取号：取号时内容已落到文件 | Close first, then take the number: by then the content is in the file

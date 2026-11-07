@@ -316,6 +316,44 @@ static void pointer_item_tap(void) {
     dm_tc_begin_at(&s,0,120,90,14.5); dm_tc_end_at(&s,0,14.6); CHECK(s.pulse_button==0); CHECK(s.mouse_click_seq==1); NEAR(s.mouse_click_x,120,0.001); NEAR(s.mouse_click_y,90,0.001);
     dm_tc_begin_at(&s,0,300,180,15.5); dm_tc_pointer_item(&s,1); dm_tc_end_at(&s,0,15.6); CHECK(s.mouse_click_seq==1); CHECK(s.pulse_button==0);   /* 物品区单击不算鼠标点击 | A single tap in the item area does not count as a mouse click */
 }
+/* Physical mouse: click to pick up, release without auto-drop, move freely,
+   then click a different cell to put down. Finger taps remain unchanged. */
+static void mouse_item_pickup_placement(void) {
+    dm_tc_state s;dm_tc_init(&s,667,375);
+    dm_tc_set_navigation_mode(&s,1);
+    s.mouse_click_mode=1;s.mouse_item_mode=1;
+    dm_tc_begin_at(&s,0,300,180,1.0);
+    dm_tc_pointer_item(&s,1);
+    dm_tc_end_at(&s,0,1.08);
+    CHECK(s.mouse_pick_pending && s.pulse_button==0);
+    dm_tc_tick(&s,1.50); // strictly after 0.4s double-click window
+    CHECK(!s.mouse_pick_pending && s.pulse_button==DM_BTN_A && s.pulse_epoch!=0);
+    NEAR(s.pointer_x,300,0.001);
+    CHECK(dm_tc_pulse_end(&s,s.pulse_epoch));
+    dm_tc_tick(&s,1.6);
+    CHECK(s.pulse_button==0 && s.buttons==0); // mouse-up never drops
+    dm_tc_set_holding(&s,1); // game confirms item now follows native cursor
+    dm_tc_begin_at(&s,0,390,195,2.0);
+    dm_tc_pointer_item(&s,1);
+    dm_tc_end_at(&s,0,2.08);
+    CHECK(s.pulse_button==DM_BTN_A);
+    NEAR(s.pointer_x,390,0.001);
+    CHECK(dm_tc_pulse_end(&s,s.pulse_epoch));
+    dm_tc_tick(&s,3.0);
+    CHECK(s.pulse_button==0 && s.buttons==0); // no repeated place/pickup
+    // Two rapid clicks on an empty hand use/equip an item.
+    dm_tc_set_holding(&s,0);
+    dm_tc_begin_at(&s,0,300,180,4.0);
+    dm_tc_pointer_item(&s,1);
+    dm_tc_end_at(&s,0,4.05);
+    CHECK(s.mouse_pick_pending && s.pulse_button==0);
+    dm_tc_begin_at(&s,0,300,180,4.15);
+    dm_tc_pointer_item(&s,1);
+    dm_tc_end_at(&s,0,4.21);
+    CHECK(!s.mouse_pick_pending && s.use_seq==1 && s.pulse_button==0);
+    dm_tc_tick(&s,4.9);
+    CHECK(s.pulse_button==0 && s.use_seq==1);
+}
 /* 界面连续手势：鼠标点击模式下起手不在物品区 / 面板外、位移过 10 点阈值 → 按那一刻的方向定型（纵 1 = 滚动，横 2 = 滑块），定型后不变；
    不发任何键、不记鼠标点击（拖出去又拖回原处也不算点按）；物品区起手照旧是拖放；面板外起手不定型；没开鼠标点击模式不定型
    UI continuous gesture: in mouse click mode, when the touch does not start in the item area / outside the panel and the displacement passes the 10-point threshold → the type is fixed by the direction at that moment (vertical 1 = scroll, horizontal 2 = slider), and does not change once fixed;
@@ -642,7 +680,7 @@ int main(void) {
     RUN(hit_edges); RUN(key_hold_and_ownership); RUN(two_fingers_same_key); RUN(joystick_deadzone); RUN(joystick_clamp_956);
     RUN(joystick_axes); RUN(joystick_plus_skills); RUN(no_auto_handoff); RUN(background_no_key);
     RUN(circles_before_joystick); RUN(cancel_and_resize); RUN(deferred_skill_vs_belt); RUN(held_skill2_vs_belt); RUN(belt_single_double); RUN(no_ui_drag_outside_modal); RUN(invalid_slots_and_repeated_begin); RUN(all_slots_hold); RUN(enabled_targets); RUN(ui_scene_messages);
-    RUN(pointer_tap); RUN(world_tap); RUN(pointer_outside_close); RUN(scene_dialog_only); RUN(pointer_item_tap); RUN(pointer_stack_tap); RUN(pointer_over_disabled_target); RUN(ui_drag_typing); RUN(pointer_drag_out); RUN(pointer_drag); RUN(pointer_long); RUN(pointer_long_then_drag); RUN(pointer_long_seq); RUN(pointer_shop_drag); RUN(pointer_control_hit); RUN(pointer_game_mode); RUN(pointer_pulse_queue); RUN(safe_insets); RUN(swap_key); RUN(skill_cluster_clearance);
+    RUN(pointer_tap); RUN(world_tap); RUN(pointer_outside_close); RUN(scene_dialog_only); RUN(pointer_item_tap); RUN(mouse_item_pickup_placement); RUN(pointer_stack_tap); RUN(pointer_over_disabled_target); RUN(ui_drag_typing); RUN(pointer_drag_out); RUN(pointer_drag); RUN(pointer_long); RUN(pointer_long_then_drag); RUN(pointer_long_seq); RUN(pointer_shop_drag); RUN(pointer_control_hit); RUN(pointer_game_mode); RUN(pointer_pulse_queue); RUN(safe_insets); RUN(swap_key); RUN(skill_cluster_clearance);
     RUN(belt_expand);
     printf("PASS %d/%d cases; %d/%d checks\n",cases,cases,checks,checks); return 0;
 }

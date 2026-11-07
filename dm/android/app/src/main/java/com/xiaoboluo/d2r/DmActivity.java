@@ -6,10 +6,18 @@ package com.xiaoboluo.d2r;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.graphics.Rect;
 import android.content.Intent;
 import android.net.Uri;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.view.View;
 import android.os.Environment;
 import android.provider.Settings;
 import android.system.ErrnoException;
@@ -22,6 +30,8 @@ import android.text.Spanned;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
+import android.view.InputDevice;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -56,6 +66,10 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native void nativeSurface(Object surface, int w, int h);
     static native void nativeRefresh(float hz);
     static native void nativeTouch(int n, int[] ids, float[] xs, float[] ys);
+    static native void nativeMouseEvent(int op, float xDp, float yDp, int arg);
+    static native int nativeMousePointerHint();
+    static native String nativeMouseHover(float[] out);
+    static native void nativeMouseWorldRect(int widthPx, int heightPx, int[] out);
     static native void nativeFocus(int ev);
     static native void nativeTextResult(long id, boolean accepted, String text);
     // 越肩镜头的体感转向（CamSensor）：开哪种传感器（0 = 不开），每次转动的弧度
@@ -79,6 +93,23 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     // Heading arrow on the minimap (CamThreats): 4 numbers, returns 1 = draw it
     static native int nativeCamHeading(float[] out);
     static native void nativePad(long buttons, int lx, int ly, int rx, int ry);
+    static native void nativeKeyboardEvent(int hidUsage, boolean down);
+    static native void nativeKeyboardReset();
+    static native int nativeKbControlsVisible();
+    // Native Diablo II .key command bindings are distinct from .kbm controller emulation.
+    static native boolean nativePcMode();
+    static native boolean nativePcSetMode(boolean nativePc);
+    static native int nativePcStatus();
+    static native int nativePcGet(int action, int slot);
+    static native int nativePcBind(int action, int slot, int vk);
+    static native boolean nativePcActionSupported(int action);
+    static native int nativePcVkFromHid(int usage);
+    static native int nativeKbAction(int hidUsage);
+    static native boolean nativeKbBind(int hidUsage, int action);
+    static native void nativeKbDefaults();
+    static native boolean nativeKbResetChecked();
+    static native int nativeMouseBinding(int physical);
+    static native boolean nativeMouseBind(int physical,int logical);
     static native void nativePadMode(int pad);
     static native void nativePadGlyph(int glyph);
 
@@ -89,7 +120,44 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private SurfaceView view;
     private FrameLayout gameFrame;
     private TouchOverlay touchOverlay;
+    private MouseHoverOverlay mouseHoverOverlay;
+    private Button kbSettingsButton,controllerSettingsButton;
+    private LinearLayout kbDeviceTabs;
+    private ScrollView kbInlinePanel;
+    private boolean kbKeyboardMode;
+    private final Handler kbUiHandler=new Handler(Looper.getMainLooper());
+    private final Runnable kbUiPoll=new Runnable() {
+        @Override public void run() {
+            if(kbDeviceTabs!=null) {
+                boolean visible=libraryLoaded && started && resumed && nativeKbControlsVisible()!=0;
+                kbDeviceTabs.setVisibility(visible?View.VISIBLE:View.GONE);
+                if(kbInlinePanel!=null) {
+                    kbInlinePanel.setVisibility(visible && kbKeyboardMode?View.VISIBLE:View.GONE);
+                    if(visible && kbKeyboardMode)kbInlinePanel.bringToFront();
+                }
+                if(visible) kbDeviceTabs.bringToFront();
+            }
+            kbUiHandler.postDelayed(this,250);
+        }
+    };
     private boolean started;
+    private boolean secondaryMouseDown;
+    // Game mouse routing must not consume events belonging to the Java
+    // Controls editor. Capture the entire down/up sequence once it begins
+    // on the editor, even when the cursor is dragged outside it.
+    private boolean controlsMouseCaptured,gameMouseCaptured,controlsTouchCaptured;
+    private boolean mouseHitsControls(MotionEvent e) {
+        if (kbDeviceTabs == null || kbDeviceTabs.getVisibility()!=View.VISIBLE)
+            return false;
+        Rect bounds=new Rect();
+        if (kbDeviceTabs.getGlobalVisibleRect(bounds) &&
+            bounds.contains((int)e.getRawX(),(int)e.getRawY())) return true;
+        return kbInlinePanel!=null &&
+            kbInlinePanel.getVisibility()==View.VISIBLE &&
+            kbInlinePanel.getGlobalVisibleRect(bounds) &&
+            bounds.contains((int)e.getRawX(),(int)e.getRawY());
+    }
+    boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
     private boolean importing, savesTransferred;
     private boolean libraryLoaded;
     private boolean resumed;
@@ -117,6 +185,58 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         gameFrame = new FrameLayout(this);
         gameFrame.addView(view, new FrameLayout.LayoutParams(-1, -1));
         setContentView(gameFrame);
+        // The original guest KeyBindingMenuHD is now the sole controls
+        // interface. Keyboard and controller columns share its native row
+        // layout and edit .key / .ctl independently. Never mount a separate
+        // Android keyboard/controller page over the game.
+        /*
+        // Legacy Android controls overlay is intentionally retired.
+        // The two device categories are real controls, not aliases for
+        // the native controller Key1/Key2 alternate-binding slots.
+        float density=getResources().getDisplayMetrics().density;
+        kbDeviceTabs=new LinearLayout(this);
+        kbDeviceTabs.setOrientation(LinearLayout.HORIZONTAL);
+        kbSettingsButton=new Button(this);
+        kbSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"控制 · 键鼠":"Controls · Keyboard & Mouse");
+        controllerSettingsButton=new Button(this);
+        controllerSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"手柄":"Controller");
+        int tabW=(int)(142*density),tabH=(int)(44*density);
+        kbDeviceTabs.addView(kbSettingsButton,new LinearLayout.LayoutParams(tabW,tabH));
+        kbDeviceTabs.addView(controllerSettingsButton,new LinearLayout.LayoutParams(tabW,tabH));
+        FrameLayout.LayoutParams tp=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.CENTER_HORIZONTAL);
+        tp.topMargin=(int)(46*density);
+        gameFrame.addView(kbDeviceTabs,tp);
+        kbDeviceTabs.setVisibility(View.GONE);
+        kbInlinePanel=KeyboardSettings.createInline(this);
+        FrameLayout.LayoutParams pp=new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER);
+        gameFrame.addView(kbInlinePanel,pp);
+        kbInlinePanel.setVisibility(View.GONE);
+        // Keep the original KeyBindingMenu and its .ctl visible by default.
+        kbKeyboardMode=false;
+        kbSettingsButton.setOnClickListener(view->{
+            if(libraryLoaded && started)nativeKeyboardReset();
+            kbKeyboardMode=true;
+            KeyboardSettings.refreshInline(this,kbInlinePanel);
+            kbInlinePanel.setVisibility(View.VISIBLE);
+            kbInlinePanel.bringToFront();
+            kbDeviceTabs.bringToFront();
+        });
+        controllerSettingsButton.setOnClickListener(view->{
+            if(libraryLoaded && started)nativeKeyboardReset();
+            kbKeyboardMode=false;kbInlinePanel.setVisibility(View.GONE);
+            kbDeviceTabs.bringToFront();
+        });
+        gameFrame.addOnLayoutChangeListener((view,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom)->{
+            if(kbInlinePanel==null)return;
+            int w=right-left,h=bottom-top;
+            if(w<=0||h<=0)return;
+            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(
+                Math.max(200,(int)(w*.72)),Math.max(180,(int)(h*.70)),Gravity.CENTER);
+            p.topMargin=(int)(h*.10);
+            kbInlinePanel.setLayoutParams(p);
+        });
+        kbUiHandler.post(kbUiPoll);
+        */
         immersive();
     }
 
@@ -136,9 +256,85 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     // (#178: connecting a controller after installing a new version, before the import, crashed it). The system handles them as on any other screen
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
         if (libraryLoaded && PadInput.onKey(e)) return true;
+        // The keyboard editor and its choice dialogs own keyboard navigation.
+        // Never cast a spell because the user pressed Enter/arrow in the UI.
+        if(kbKeyboardMode && kbDeviceTabs!=null &&
+           kbDeviceTabs.getVisibility()==View.VISIBLE)return super.dispatchKeyEvent(e);
+        if (libraryLoaded && started && (inputDialog == null || !inputDialog.isShowing()) && KeyboardInput.onKey(e)) return true;
         return super.dispatchKeyEvent(e);
     }
 
+    private boolean handleExternalMouse(MotionEvent e) {
+        if (!libraryLoaded || !started || (e.getSource() & InputDevice.SOURCE_MOUSE) != InputDevice.SOURCE_MOUSE) return false;
+        final int a = e.getActionMasked();
+        int op;
+        switch (a) {
+            case MotionEvent.ACTION_HOVER_ENTER:
+            case MotionEvent.ACTION_HOVER_MOVE: op=3; break;
+            case MotionEvent.ACTION_HOVER_EXIT: op=8; break;
+            case MotionEvent.ACTION_CANCEL: op=4; break;
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_BUTTON_PRESS:
+                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0 ||
+                    (a==MotionEvent.ACTION_DOWN && (e.getButtonState() & MotionEvent.BUTTON_TERTIARY)!=0)) {
+                    op=9;
+                } else if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
+                    (a == MotionEvent.ACTION_DOWN && (e.getButtonState() & MotionEvent.BUTTON_SECONDARY) != 0)) {
+                    op=5; secondaryMouseDown=true;
+                } else if (a == MotionEvent.ACTION_DOWN) op=0;
+                else return true;
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_BUTTON_RELEASE:
+                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0) { op=10; break; }
+                if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
+                    (a == MotionEvent.ACTION_UP && secondaryMouseDown)) {
+                    op=6; secondaryMouseDown=false;
+                } else if (a == MotionEvent.ACTION_UP) op=2;
+                else return true;
+                break;
+            case MotionEvent.ACTION_MOVE: op=1; break;
+            case MotionEvent.ACTION_SCROLL: op=7; break;
+            default: return false;
+        }
+        int[] location = new int[2]; gameFrame.getLocationOnScreen(location);
+        float d=getResources().getDisplayMetrics().density;
+        float x=(e.getRawX()-location[0])/d, y=(e.getRawY()-location[1])/d;
+        int wheel=op==7 ? Float.compare(e.getAxisValue(MotionEvent.AXIS_VSCROLL),0) : 0;
+        if(op!=4 && op!=8)PadInput.externalInput();
+        nativeMouseEvent(op,x,y,wheel);
+        // Use Android system cursor icons, never an extra host-drawn tooltip
+        // or fake item sprite. The guest renders the held item itself.
+        int hint=nativeMousePointerHint();
+        int kind=hint==2?PointerIcon.TYPE_GRABBING:
+                 hint==1?PointerIcon.TYPE_GRAB:PointerIcon.TYPE_ARROW;
+        PointerIcon pointer=PointerIcon.getSystemIcon(this,kind);
+        if (view!=null) view.setPointerIcon(pointer);
+        if (touchOverlay!=null) touchOverlay.setPointerIcon(pointer);
+        gameFrame.setPointerIcon(pointer);
+        return true;
+    }
+    @Override public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        if((e.getSource() & InputDevice.SOURCE_MOUSE)==InputDevice.SOURCE_MOUSE) {
+            int action=e.getActionMasked();
+            if(action==MotionEvent.ACTION_BUTTON_PRESS && !controlsMouseCaptured &&
+               !gameMouseCaptured) {
+                if(mouseHitsControls(e))controlsMouseCaptured=true;
+                else gameMouseCaptured=true;
+            }
+            if(controlsMouseCaptured || (!gameMouseCaptured && mouseHitsControls(e))) {
+                boolean handled=super.dispatchGenericMotionEvent(e);
+                if(action==MotionEvent.ACTION_BUTTON_RELEASE)controlsMouseCaptured=false;
+                return handled;
+            }
+            if(handleExternalMouse(e)) {
+                if(action==MotionEvent.ACTION_BUTTON_RELEASE && e.getButtonState()==0)
+                    gameMouseCaptured=false;
+                return true;
+            }
+        }
+        return super.dispatchGenericMotionEvent(e);
+    }
     @Override public boolean onGenericMotionEvent(MotionEvent e) {
         if (libraryLoaded && PadInput.onMotion(e)) return true;
         return super.onGenericMotionEvent(e);
@@ -151,7 +347,38 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private final Set<Integer> swallowed = new HashSet<>();
 
     @Override public boolean dispatchTouchEvent(MotionEvent e) {
+        if ((e.getSource() & InputDevice.SOURCE_MOUSE)==InputDevice.SOURCE_MOUSE) {
+            int action=e.getActionMasked();
+            if((action==MotionEvent.ACTION_DOWN || action==MotionEvent.ACTION_BUTTON_PRESS)
+               && !gameMouseCaptured && !controlsMouseCaptured) {
+                if(mouseHitsControls(e))controlsMouseCaptured=true;
+                else gameMouseCaptured=true;
+            }
+            // The press origin owns the entire drag/release. Crossing the
+            // editor boundary must never steal a world attack's mouse-up.
+            if(controlsMouseCaptured || (!gameMouseCaptured && mouseHitsControls(e))) {
+                super.dispatchTouchEvent(e);
+                if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ||
+                   action==MotionEvent.ACTION_BUTTON_RELEASE)controlsMouseCaptured=false;
+                return true;
+            }
+            if(handleExternalMouse(e)) {
+                if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL)
+                    gameMouseCaptured=false;
+                return true;
+            }
+        }
         int action = e.getActionMasked();
+        // Native settings widgets must also receive the FIRST finger tap.
+        // Otherwise PadInput.onTouch() consumes it as a controller->touch
+        // mode switch, making every editor button appear to need two taps.
+        if(controlsTouchCaptured || mouseHitsControls(e)) {
+            if(action==MotionEvent.ACTION_DOWN)controlsTouchCaptured=true;
+            super.dispatchTouchEvent(e);
+            if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL)
+                controlsTouchCaptured=false;
+            return true;
+        }
         if (action == MotionEvent.ACTION_DOWN) {
             boolean wasPad = PadInput.isPadMode();
             PadInput.onTouch();
@@ -360,6 +587,9 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
             });
             if (BuildConfig.DEBUG && getIntent().getBooleanExtra("dmNoHud", false)) touchOverlay.setDebugNoHud(true);   // 调试包：量游戏自己的 HUD 时不画自绘层 | debug builds: no overlay drawing while measuring the game's own HUD
             gameFrame.addView(touchOverlay, new FrameLayout.LayoutParams(-1, -1));
+            // Non-interactive world pointer feedback stays above the touch HUD.
+            mouseHoverOverlay = new MouseHoverOverlay(this);
+            gameFrame.addView(mouseHoverOverlay, new FrameLayout.LayoutParams(-1, -1));
             touchOverlay.requestApplyInsets();
         }
         if (!view.getHolder().getSurface().isValid() || view.getWidth() <= 0 || view.getHeight() <= 0) return;
@@ -525,11 +755,11 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     @Override public void onDisplayRemoved(int id) { updateRefresh(); }
     @Override public void onDisplayChanged(int id) { updateRefresh(); }
     @Override protected void onResume() { super.onResume(); resumed = true; immersive(); startHost(); updateRefresh(); if (started) { nativeFocus(3); if (touchOverlay != null && bootFailure == 0) applyPadMode(PadInput.isPadMode()); if (camSensor != null) camSensor.start(nativeCamSensor()); if (camButtons != null) camButtons.start(); if (camThreats != null) camThreats.start(); } }
-    @Override protected void onPause() { resumed = false; if (camSensor != null) camSensor.stop(); if (camButtons != null) camButtons.stop(); if (camThreats != null) camThreats.stop(); if (inputDialog != null) inputDialog.dismiss(); releaseTouches(); PadInput.reset(); if (touchOverlay != null) touchOverlay.setInputEnabled(false); if (started) nativeFocus(0); super.onPause(); }
+    @Override protected void onPause() { controlsMouseCaptured=gameMouseCaptured=controlsTouchCaptured=false; if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } resumed = false; if (camSensor != null) camSensor.stop(); if (camButtons != null) camButtons.stop(); if (camThreats != null) camThreats.stop(); if (inputDialog != null) inputDialog.dismiss(); releaseTouches(); PadInput.reset(); if (touchOverlay != null) touchOverlay.setInputEnabled(false); if (started) nativeFocus(0); super.onPause(); }
     @Override protected void onStart() { super.onStart(); if (started) nativeFocus(2); }
     @Override protected void onStop() { if (started) nativeFocus(1); com.xiaoboluo.d2r.widget.HeroWidgetProvider.requestUpdate(this); super.onStop(); }
-    @Override protected void onDestroy() { if (displays != null) displays.unregisterDisplayListener(this); if (inputDialog != null) inputDialog.dismiss(); if (current.get() == this) current.clear(); super.onDestroy(); }
-    @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); else releaseTouches(); }
+    @Override protected void onDestroy() { kbUiHandler.removeCallbacks(kbUiPoll); if (displays != null) displays.unregisterDisplayListener(this); if (inputDialog != null) inputDialog.dismiss(); if (current.get() == this) current.clear(); super.onDestroy(); }
+    @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); else { controlsMouseCaptured=gameMouseCaptured=controlsTouchCaptured=false; releaseTouches(); if (libraryLoaded && started) { nativeKeyboardReset(); nativeMouseEvent(4,0,0,0); } } }
 
     @Override public void surfaceCreated(SurfaceHolder h) {}
     @Override public void surfaceChanged(SurfaceHolder h, int format, int w, int ht) {
@@ -537,6 +767,6 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         updateRefresh();
         startHost();
     }
-    @Override public void surfaceDestroyed(SurfaceHolder h) { releaseTouches(); if (libraryLoaded) nativeSurface(null, 0, 0); }
+    @Override public void surfaceDestroyed(SurfaceHolder h) { releaseTouches(); if (libraryLoaded && started) nativeMouseEvent(4,0,0,0); if (libraryLoaded) nativeSurface(null, 0, 0); }
 
 }

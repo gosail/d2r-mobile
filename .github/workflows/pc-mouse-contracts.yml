@@ -1,0 +1,112 @@
+name: PC mouse/controls static contracts
+
+on:
+  pull_request:
+    paths:
+      - "dm/host/**"
+      - "dm/ios/**"
+      - "dm/android/**"
+      - ".github/workflows/pc-mouse-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Keyboard/controller options and runtime mouse contracts
+        run: |
+          python -m unittest discover -v -s dm/ios/tests -p test_controls_tab.py
+          python -m unittest discover -v -s dm/ios/tests -p test_mouse_pc_parity.py
+          python -m unittest discover -v -s dm/ios/tests -p test_mouse_world_render.py
+          python -m unittest discover -v -s dm/ios/tests -p test_keyboard_bindings.py
+          python -m unittest discover -v -s dm/ios/tests -p test_native_pc_keys.py
+      - name: Compile and run portable keyboard mapping unit test
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_keyfile.c dm/host/tests/t_kbmap.c -o /tmp/dm_test_keyboard
+          /tmp/dm_test_keyboard
+      - name: Exercise physical mouse pick-up and explicit placement through touch state machine
+        run: |
+          # This pre-existing broad gesture harness contains legacy one-line
+          # constructs; retain error checks except the known indentation warning.
+          cc -std=gnu11 -Wall -Wextra -Werror -Wno-error=misleading-indentation -I dm/host -I dm/ios/Sources \
+            dm/ios/tests/t_touch_controls.c dm/ios/Sources/dm_touch_controls.c \
+            -lm -o /tmp/dm_test_touch_controls
+          /tmp/dm_test_touch_controls
+      - name: Real iPadOS/Android mouse panel drag and cancel lifecycle
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host \
+            dm/host/tests/t_external_mouse.c -lm -o /tmp/dm_test_external_mouse
+          /tmp/dm_test_external_mouse
+      - name: Parse, edit and atomically round-trip native .key records (synthetic fixtures)
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -I dm/host dm/host/dm_keyfile.c dm/host/tests/t_keyfile.c -o /tmp/dm_test_keyfile
+          /tmp/dm_test_keyfile
+      - name: Native character key profile and HID/VK tests
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host \
+            dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/tests/t_pc_profile.c \
+            -o /tmp/dm_test_pc_profile
+          /tmp/dm_test_pc_profile
+      - name: Compile Android keyboard UI adapters against Android SDK
+        run: |
+          jar=$(find "${ANDROID_HOME}/platforms" -name android.jar | sort -V | tail -1)
+          test -n "$jar"
+          mkdir -p /tmp/dmkb/com/xiaoboluo/d2r /tmp/dmkb-classes
+          cat > /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java <<'STUB'
+          package com.xiaoboluo.d2r;
+          class DmActivity {
+              static native boolean nativePcMode();
+              static native boolean nativePcSetMode(boolean nativePc);
+              static native int nativePcStatus();
+              static native int nativePcGet(int action,int slot);
+              static native int nativePcBind(int action,int slot,int vk);
+              static native boolean nativePcActionSupported(int action);
+              static native int nativePcVkFromHid(int usage);
+              static native void nativeKeyboardEvent(int hid, boolean down);
+              static native int nativeKbAction(int hid);
+              static native boolean nativeKbBind(int hid, int action);
+              static native void nativeKbDefaults();
+              static native boolean nativeKbResetChecked();
+              static native int nativeMouseBinding(int physical);
+              static native boolean nativeMouseBind(int physical,int logical);
+          }
+          STUB
+          cat > /tmp/dmkb/com/xiaoboluo/d2r/PadInput.java <<'STUB'
+          package com.xiaoboluo.d2r;
+          class PadInput { static void externalInput() {} }
+          STUB
+          javac -cp "$jar" -d /tmp/dmkb-classes \
+            /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java \
+            /tmp/dmkb/com/xiaoboluo/d2r/PadInput.java \
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardInput.java \
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardSettings.java \
+            dm/android/app/src/main/java/com/xiaoboluo/d2r/NativePcKeyboardSettings.java
+
+  apple-syntax:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: macOS AppKit mouse overlay syntax
+        run: |
+          xcrun clang -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -mmacosx-version-min=15.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/host/front_mac.m
+      - name: Per-character binding host C syntax
+        run: |
+          xcrun clang -std=gnu11 -fsyntax-only -Werror=implicit-function-declaration \
+            -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include \
+            dm/host/dm_kbmap.c dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_pages.c dm/host/dm_cursor.c dm/host/hle_fs.c
+      - name: Compile and exercise native save-file writer leases and rollback
+        run: |
+          xcrun clang -std=gnu11 -pthread -I dm/host -I dm/gfx/nvn/include \
+            dm/host/tests/t_fs.c dm/host/tests/t_fs_stub.c \
+            dm/host/dm_pc_profile.c dm/host/dm_keyfile.c -o /tmp/dm_test_fs
+          /tmp/dm_test_fs
+      - name: iPadOS UIKit mouse overlay syntax
+        run: |
+          xcrun --sdk iphoneos clang -arch arm64 -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -miphoneos-version-min=16.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/ios/Sources/front_ios.m

@@ -2110,7 +2110,9 @@ static uint64_t g_pc_full_page_started;
 static int pc_native_merc_tab_visible(uint64_t root) {
     uint64_t tabs=root?ui_find(root,"UISwitcherTabs",0):0;
     uint64_t item=tabs?ui_find(tabs,"Image4",0):0;
-    return item && *(uint8_t *)(item+0x50) && *(uint8_t *)(item+0x51);
+    // Original tab_walk treats tab ImageK visibility as the availability
+    // signal; +0x51 is a generic widget flag and not a verified tab gate.
+    return item && *(uint8_t *)(item+0x50);
 }
 static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
     if(!g_pc_full_page_pending)return;

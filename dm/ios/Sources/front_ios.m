@@ -16,7 +16,8 @@ int dm_thermal_now(void) { return g_dm_thermal; }   // 最近的温控档位（0
 #include <signal.h>
 #include "front.h"
 #include "dm_input.h"
-void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void);   // dm_gamepad.m
+void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void);
+void dm_gamepad_external_input(void); // physical keyboard/mouse selects native Switch layout
 #include "hle.h"
 #import "DmTouchOverlay.h"
 #include "dm_touch_native_art.h"

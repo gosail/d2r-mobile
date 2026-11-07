@@ -73,6 +73,9 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn('dm_pc_input_guest_step',c)
         self.assertIn('dm_kb_set(bits,lx,ly,0,right_y)',c)
         self.assertIn('dm_pc_input_wheel(int delta)',c)
+        self.assertIn('int dm_pc_input_middle_or_default(void)',c)
+        self.assertIn('int dm_pc_input_wheel_or_default(int delta)',c)
+        self.assertIn('rc==DM_KEYFILE_NOT_FOUND',c)
         self.assertIn('dm_ui_pc_toggle_panel(batch[i])',c)
     def test_game_thread_panel_and_original_weapon_swap(self):
         world=src("host/dm_world.c")

@@ -12,6 +12,10 @@ int dm_pc_input_wheel(int delta);
 // Native mouse pseudo-VK 0x100 (middle) and optional extra buttons 0x101/2.
 // Only well-understood one-shot commands are forwarded, no fake left click.
 int dm_pc_input_mouse_special(unsigned pseudo_vk);
+// Keep the established PC middle-map and wheel skill-selection defaults if
+// the selected native .key genuinely has no corresponding pseudo-VK record.
+int dm_pc_input_middle_or_default(void);
+int dm_pc_input_wheel_or_default(int delta);
 int dm_pc_input_supported_action(uint32_t id);
 // Test/diagnostic: most recently resolved native command for this physical key.
 int dm_pc_input_latched_command(unsigned hid);

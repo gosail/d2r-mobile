@@ -144,7 +144,7 @@ void dm_external_mouse_step(void) {
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
             int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
-            if(source==1)(void)dm_pc_input_mouse_special(0x100);
+            if(source==1)(void)dm_pc_input_middle_or_default();
             else if(source==0)dm_world_mouse_map_toggle();
             continue;
         }
@@ -163,7 +163,7 @@ void dm_external_mouse_step(void) {
         if (e->op == DM_MOUSE_WHEEL) {
             if (e->arg) {
                 int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
-                int direction=source==1?dm_pc_input_wheel(e->arg):
+                int direction=source==1?dm_pc_input_wheel_or_default(e->arg):
                     source==0?(e->arg>0?1:-1):0;
                 atomic_store(&mouse_scroll,direction);
                 atomic_store(&mouse_scroll_until, direction?

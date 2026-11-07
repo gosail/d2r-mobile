@@ -1,5 +1,6 @@
 #include "dm_pc_input.h"
 #include "dm_pc_profile.h"
+#include "dm_keyfile.h"
 #include "dm_input.h"
 #include "dm_world.h"
 #include "dm_uiscreen.h"
@@ -151,6 +152,22 @@ int dm_pc_input_mouse_special(unsigned pseudo_vk) {
         return ok;
     }
     return 0;
+}
+int dm_pc_input_middle_or_default(void) {
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    int rc=dm_pc_profile_action_for_vk(0x100,&id,&slot);
+    if(rc==DM_KEYFILE_NOT_FOUND) {
+        dm_world_mouse_map_toggle();
+        return 1;
+    }
+    return rc==DM_KEYFILE_OK?dm_pc_input_mouse_special(0x100):0;
+}
+int dm_pc_input_wheel_or_default(int delta) {
+    if(!delta)return 0;
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    int rc=dm_pc_profile_action_for_vk(delta>0?0x103:0x104,&id,&slot);
+    if(rc==DM_KEYFILE_NOT_FOUND)return delta>0?1:-1;
+    return rc==DM_KEYFILE_OK?dm_pc_input_wheel(delta):0;
 }
 int dm_pc_input_wheel(int delta) {
     if(!delta)return 0;

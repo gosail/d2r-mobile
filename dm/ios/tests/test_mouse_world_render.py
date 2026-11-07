@@ -55,12 +55,14 @@ class PointerWorldRender(unittest.TestCase):
         self.assertIn("dm_world_hover_read(&h)", mac)
         self.assertIn('h.kind>=1 && h.kind<=4',ios)
         self.assertIn('h.kind>=1 && h.kind<=4',mac)
-        # Monster name/details/HP are painted independently from the outline.
-        # Both can coexist on every normal mouse-hover hit.
+        # The native MonsterHealth panel must be the *only* Apple monster
+        # health/nameplate presenter. A passive selection outline is allowed.
         for code in (ios, mac):
-            self.assertNotIn('} else if ((h.kind==1 || h.kind==3) && h.title[0])',code)
-            self.assertIn('h.title[0] || h.details[0] || h.hp_max>0',code)
-            self.assertIn('if (health)',code)
+            self.assertIn('if (h.kind==1 && h.title[0])',code)
+            self.assertNotIn('h.title[0] || h.details[0] || h.hp_max>0',code)
+            self.assertNotIn('if (health)',code)
+            self.assertNotIn('g_mouse_hp_bg',code)
+            self.assertNotIn('_mouseHoverHpBg',code)
         android=source("android/app/src/main/java/com/xiaoboluo/d2r/MouseHoverOverlay.java")
         self.assertIn('if(!title.isEmpty() || !detail.isEmpty() || health)',android)
         self.assertIn('boolean health=monster && h[6]>0',android)

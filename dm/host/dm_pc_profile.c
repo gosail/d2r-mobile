@@ -154,16 +154,22 @@ void dm_pc_profile_pre_commit_locked(const char *workdir) {
     dm_keyfile latest={0};
     int rc=dm_keyfile_read(&latest,fn);
     if(rc==DM_KEYFILE_OK) {
+        int need_write=0;
         for(unsigned id=0;id<PROFILE_COMMANDS && rc==DM_KEYFILE_OK;id++)
             for(unsigned slot=0;slot<2 && rc==DM_KEYFILE_OK;slot++)
                 if(edited[id][slot]) {
                     uint16_t was=0xffff;
                     rc=dm_keyfile_get(&latest,id,slot,&was);
-                    if(rc==DM_KEYFILE_OK && was!=edited_vk[id][slot])
+                    if(rc==DM_KEYFILE_OK && was!=edited_vk[id][slot]) {
                         rc=dm_keyfile_bind_checked(&latest,id,slot,
                             edited_vk[id][slot],NULL,NULL);
+                        if(rc==DM_KEYFILE_OK)need_write=1;
+                    }
                 }
-        if(rc==DM_KEYFILE_OK)rc=dm_keyfile_write_atomic(&latest,fn);
+        // Avoid rewriting, fsyncing and backing up a native .key on every
+        // unrelated item/gold save once the host settings are already present.
+        if(rc==DM_KEYFILE_OK && need_write)
+            rc=dm_keyfile_write_atomic(&latest,fn);
         if(rc==DM_KEYFILE_OK) {
             dm_keyfile_free(&profile);
             profile=latest;

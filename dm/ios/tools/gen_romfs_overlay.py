@@ -51,16 +51,16 @@ with tempfile.TemporaryDirectory() as t:
     # Temporary, metadata-only diagnostic for the integrated native Controls
     # tab. Do not dump proprietary layout JSON or game data.
     for line in open(os.path.join(romfs,'data','build_manifest.psv'),encoding='utf-8'):
-        f=line.rstrip('\\n').split('|')
+        f=line.rstrip('\n').split('|')
         if len(f)<11 or '/ui/layouts/' not in f[9].lower() or 'keybind' not in f[9].lower(): continue
         path=f[9].split(':',1)[-1]
         print('NATIVE_CONTROLS_LAYOUT',path,flush=True)
         rel=path.lower().split('/ui/layouts/',1)[1]
         _,raw=touch_layout.read_layout(romfs,rel)
         import re
-        for j,m in enumerate(re.finditer(r'"type"\\s*:\\s*"([^"]+)"\\s*,\\s*"name"\\s*:\\s*"([^"]+)"',raw)):
+        for j,m in enumerate(re.finditer(r'"type"\s*:\s*"([^"]+)"\s*,\s*"name"\s*:\s*"([^"]+)"',raw)):
             if j>=100:break
-            print('NATIVE_CONTROLS_WIDGET',j,m.group(1),m.group(2),raw[m.start():m.start()+250].replace('\\n',' ')[:210],flush=True)
+            print('NATIVE_CONTROLS_WIDGET',j,m.group(1),m.group(2),raw[m.start():m.start()+250].replace('\n',' ')[:210],flush=True)
         print('NATIVE_CONTROLS_LAYOUT_END',rel,'bytes',len(raw),flush=True)
     tl,ntl=touch_layout.build(romfs,t); REPL.update(tl)
     REPL.update(touch_layout.build_pcfront(romfs,t))   # 选角页改用键鼠版界面（盖掉上面 build 对这几份的改动） | Character select page switched to the keyboard-and-mouse UI (overrides the changes the build above made to these files)

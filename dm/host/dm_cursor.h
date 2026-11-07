@@ -29,7 +29,16 @@ void dm_cursor_set(int x, int y);
 // it reaches the game in the same sample as the keys. If the front-end main thread writes the cursor global directly at an arbitrary time, the game writes it back from its own controller cursor state before processing A, and A lands at the old cursor
 void dm_cursor_set_screen(float x, float y, float screen_w, float screen_h);
 void dm_cursor_clear(void);
-int dm_ui_mouse_hover_now(float nx, float ny);   // 游戏线程：Mac 无按键悬停，只更新自由光标；不点击、不吸附邻格 | Game thread: Mac button-free hover, updates the free cursor without clicking or snapping to nearby cells
+// Host-published state for native OS pointer icons; safe on UI threads.
+int dm_mouse_pointer_hint(void); // 0 arrow, 1 grab, 2 grabbing
+// Game-thread-safe queued right-click item use, coordinates in UI space.
+void dm_ui_mouse_right_use(float nx, float ny);
+int dm_ui_mouse_hover_now(float nx, float ny);
+// Clear native PC skill hover on pointer exit or world transition.
+void dm_ui_pc_skill_hover_end(void);
+// Queue guest-owned skill binding for a verified hovered skill icon.
+int dm_ui_pc_skill_bind_request(uint32_t command_id);
+int dm_ui_pc_skill_tree_active(void);   // 游戏线程：Mac 无按键悬停，只更新自由光标；不点击、不吸附邻格 | Game thread: Mac button-free hover, updates the free cursor without clicking or snapping to nearby cells
 // 摇杆闭环（过渡做法，原版鼠标模式开关找到前用）：真机上原版逐帧鼠标移动那条路不跑，直写的光标会被手柄光标逻辑盖回。
 // 改为：每次读手柄时读原版光标 (main+0x2d128f8/fc)，离目标 > DM_CURSOR_NEAR（9）像素就推左摇杆朝目标走（60 像素内按距离减力）；
 // 没到位时按下的 A 连同当时的目标位置排队扣住，光标走到该位置才放出（拖放的起点 / 终点各一下）；排队 1.5 秒没到位报红并丢掉。
@@ -126,3 +135,7 @@ void dm_ui_hand_idle(int idle);                  // 触摸前端每拍报：没�
 uint32_t dm_ui_hover_unid(void);               // 光标此刻指着的我方未鉴定物品 id（背包 / 箱子 / 方块 / 身上；没有 = 0）。宿主每帧发布，任意线程读 | id of our own unidentified item the cursor is pointing at right now (inventory / stash / cube / equipped; none = 0). Published by the host every frame, read from any thread
 void dm_ui_identify_hovered(void);              // 触摸层双击未鉴定物品：宿主下一帧对它调免费鉴定（dm_item_identify_free） | Touch layer double-tap on an unidentified item: on the next frame the host calls free identify on it (dm_item_identify_free)
 int dm_ui_map_geom(float *cell);   // 地图几何：返回 0 没开 / 1 微缩 / 2 全屏，*cell = 每格像素（真实画面像素，任意线程） | Map geometry: returns 0 not open / 1 minimap / 2 full screen, *cell = pixels per cell (real picture pixels, any thread)
+
+// Explicit finger-control switch; mouse-held item ownership is otherwise
+// retained across mouse leave/focus transitions.
+void dm_ui_mouse_ownership_release(void);

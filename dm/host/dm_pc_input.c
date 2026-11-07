@@ -1,0 +1,308 @@
+#include "dm_pc_input.h"
+#include "dm_pc_profile.h"
+#include "dm_keyfile.h"
+#include "dm_input.h"
+#include "dm_world.h"
+#include "dm_uiscreen.h"
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <string.h>
+// Implemented by the original guest PanelManager adapter in dm_cursor.c.
+int dm_ui_pc_skill_bind_request(uint32_t command_id);
+int dm_ui_pc_skill_tree_active(void);
+void dm_ui_pc_toggle_panel(unsigned command_id);
+
+static pthread_mutex_t input_mu=PTHREAD_MUTEX_INITIALIZER;
+static unsigned char down[256],command[256];
+static unsigned char panel_queue[32];
+static unsigned queue_head,queue_tail;
+static uint64_t held_mask[256]; // latched at key-down (no re-interpretation of held keys)
+enum { UNMAPPED=255 };
+enum { PH_IDLE, PH_ZL_LEAD, PH_HELD, PH_ZL_TAP, PH_TAP_PULSE };
+static unsigned char skill_phase[256],arrow_walk[256];
+static uint64_t skill_sample[256];
+// Native PC "stand still" (command 36, typically Shift) is a held
+// movement modifier, not a toggle for the controller's second skill set.
+static _Atomic int stand_still;
+static _Atomic unsigned cmd_down;
+static void publish_locked(void);
+int dm_pc_input_stand_still(void) { return atomic_load(&stand_still); }
+int dm_pc_input_second_group(void) { return atomic_load(&cmd_down)!=0; }
+// Reserve both physical Command keys for the PC skill-bank preview.
+// This is transient input state, not a guessed edit to the character .key.
+void dm_pc_input_cmd_event(unsigned hid,int pressed) {
+    unsigned bit=hid==0xe3?1u:hid==0xe7?2u:0;
+    if(!bit)return;
+    pthread_mutex_lock(&input_mu);
+    unsigned cur=atomic_load(&cmd_down);
+    unsigned next=pressed?(cur|bit):(cur&~bit);
+    if(next!=cur){atomic_store(&cmd_down,next);publish_locked();}
+    pthread_mutex_unlock(&input_mu);
+}
+// USB HID keyboard arrow cluster, reserved for the guest's Switch stick
+// when playing and D-pad navigation when a menu or panel is open.
+static uint64_t arrow_dpad(unsigned hid) {
+    switch(hid) {
+    case 0x50:return DM_BTN_LEFT;
+    case 0x52:return DM_BTN_UP;
+    case 0x4f:return DM_BTN_RIGHT;
+    case 0x51:return DM_BTN_DOWN;
+    default:return 0;
+    }
+}
+
+// Guest HUD buttons, not positions guessed from a conventional PC key layout.
+// See dm_padmode_hud_click: SkillButton1..6 = A, B, Y, X, R, ZR.
+// ZL selects the original game's second set of the SAME six skill buttons.
+// Skill 13..16 have no verified Switch controller slots and remain unsupported.
+static const uint64_t slot_buttons[6]={
+    DM_BTN_A,DM_BTN_B,DM_BTN_Y,DM_BTN_X,DM_BTN_R,DM_BTN_ZR
+};
+static int skill_slot(unsigned id) {
+    if(id>=14 && id<=21)return (int)(id-14);
+    if(id>=46 && id<=49)return (int)(id-46+8);
+    return -1;
+}
+int dm_pc_input_supported_action(uint32_t id) {
+    return id==0 || id==1 || id==4 || id==12 || id==44 || id==54 ||
+           id==38 || id==39 || id==40 || id==45 ||
+           id==7 || id==23 || id==24 || id==25 || id==26 ||
+           id==35 || id==36 || id==37 || id==56 || skill_slot(id)>=0;
+}
+// Only 12 native controller slots are verified. Expose the actual button
+// masks for the guest skill-binding modal instead of duplicating their order.
+uint64_t dm_pc_input_skill_buttons(uint32_t id) {
+    int slot=skill_slot(id);
+    return slot>=0?slot_buttons[slot%6] | (slot>=6?DM_BTN_ZL:0):0;
+}
+static unsigned second_action(unsigned id) {
+    int slot=skill_slot(id);
+    if(slot<0 || slot>=6)return id;
+    return slot<2 ? (unsigned)(20+slot) : (unsigned)(46+slot-2);
+}
+static uint64_t command_bits(unsigned id) {
+    int slot=skill_slot(id);
+    if(slot>=0)return dm_pc_input_skill_buttons(id);
+    switch(id) {
+    case 23:return DM_BTN_LEFT;
+    case 24:return DM_BTN_UP;
+    case 25:return DM_BTN_DOWN;
+    case 26:return DM_BTN_RIGHT;
+    case 35:return DM_BTN_LS;
+    case 38:return dm_uiscreen_panel()?DM_BTN_B:0; // close an existing panel
+    case 37:return DM_BTN_L; // show items
+    case 56:return dm_uiscreen_ingame()&&!dm_uiscreen_panel()?DM_BTN_PLUS:DM_BTN_B;
+    default:return 0;
+    }
+}
+static void publish_locked(void) {
+    uint64_t bits=0;int32_t right_y=0;
+    int left=0,right=0,up=0,downward=0;
+    for(unsigned i=0;i<256;i++) {
+        if(down[i] && arrow_walk[i]) {
+            if(i==0x50)left=1;
+            if(i==0x4f)right=1;
+            if(i==0x52)up=1;
+            if(i==0x51)downward=1;
+        }
+        if(skill_phase[i]==PH_ZL_LEAD || skill_phase[i]==PH_ZL_TAP) {
+            // Second-set modifier must reach GetNpadState BEFORE the face edge.
+            bits|=DM_BTN_ZL;
+            continue;
+        }
+        if(!down[i] && skill_phase[i]!=PH_TAP_PULSE)continue;
+        bits|=held_mask[i];
+        if(command[i]==39)right_y=32767;
+        if(command[i]==40)right_y=-32767;
+    }
+    // A real stick cannot extend beyond its circular gate diagonally.
+    // Keep opposite directions cancelling and preserve full cardinal speed.
+    int dx=right-left,dy=up-downward;
+    int32_t lx=dx*(dy?23170:DM_STICK_MAX);
+    int32_t ly=dy*(dx?23170:DM_STICK_MAX);
+    int still=0;
+    for(unsigned i=0;i<256;i++)
+        if(down[i] && command[i]==36) { still=1;break; }
+    atomic_store(&stand_still,still);
+    // Only the gameplay HUD receives ZL from Command. Controller-style
+    // menus must never interpret Command as a tab-switch or a binding key.
+    if(atomic_load(&cmd_down) && dm_uiscreen_ingame() &&
+       !dm_uiscreen_panel())bits|=DM_BTN_ZL;
+    dm_kb_set(bits,lx,ly,0,right_y);
+}
+void dm_pc_input_reset(void) {
+    pthread_mutex_lock(&input_mu);
+    memset(down,0,sizeof down);
+    memset(command,UNMAPPED,sizeof command);
+    memset(held_mask,0,sizeof held_mask);
+    memset(skill_phase,PH_IDLE,sizeof skill_phase);
+    memset(arrow_walk,0,sizeof arrow_walk);
+    memset(skill_sample,0,sizeof skill_sample);
+    queue_head=queue_tail=0;
+    atomic_store(&stand_still,0);
+    atomic_store(&cmd_down,0);
+    dm_kb_set(0,0,0,0,0);
+    pthread_mutex_unlock(&input_mu);
+}
+int dm_pc_input_latched_command(unsigned hid) {
+    if(hid>=256)return -1;
+    pthread_mutex_lock(&input_mu);
+    int cmd=down[hid] && command[hid]!=UNMAPPED ? (int)command[hid]:-1;
+    pthread_mutex_unlock(&input_mu);return cmd;
+}
+void dm_pc_input_guest_step(void) {
+    unsigned char batch[32];unsigned n=0;
+    // Count ACTUAL guest GetNpadState reads, not host wall-clock frames:
+    // ZL and its face button in one sample are treated as set I by D2R.
+    uint64_t sampled=dm_input_samples();
+    pthread_mutex_lock(&input_mu);
+    int changed=0;
+    for(unsigned i=0;i<256;i++) {
+        if((skill_phase[i]==PH_ZL_LEAD || skill_phase[i]==PH_ZL_TAP) &&
+           sampled-skill_sample[i]>=2) {
+            skill_phase[i]=down[i]?PH_HELD:PH_TAP_PULSE;
+            skill_sample[i]=sampled;
+            changed=1;
+        } else if(skill_phase[i]==PH_TAP_PULSE &&
+                  sampled-skill_sample[i]>=2) {
+            // Even an extremely short physical key press yields a complete
+            // face-button pulse AFTER the modifier has been sampled.
+            skill_phase[i]=PH_IDLE;
+            command[i]=UNMAPPED;
+            held_mask[i]=0;
+            changed=1;
+        }
+    }
+    if(changed)publish_locked();
+    while(queue_head!=queue_tail && n<sizeof batch)
+        batch[n++]=panel_queue[queue_head++%32];
+    pthread_mutex_unlock(&input_mu);
+    for(unsigned i=0;i<n;i++)
+        dm_ui_pc_toggle_panel(batch[i]);
+}
+int dm_pc_input_mouse_special(unsigned pseudo_vk) {
+    if(pseudo_vk<0x100 || pseudo_vk>0x102)return 0;
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    if(dm_pc_profile_action_for_vk((uint16_t)pseudo_vk,&id,&slot))return 0;
+    if(id==7 || id==45){dm_world_mouse_map_toggle();return 1;}
+    if(id==0 || id==1 || id==4 || id==12 || id==44 || id==54) {
+        pthread_mutex_lock(&input_mu);
+        int ok=queue_tail-queue_head<32;
+        if(ok)panel_queue[queue_tail++%32]=(unsigned char)id;
+        pthread_mutex_unlock(&input_mu);
+        return ok;
+    }
+    return 0;
+}
+int dm_pc_input_middle_or_default(void) {
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    int rc=dm_pc_profile_action_for_vk(0x100,&id,&slot);
+    if(rc==DM_KEYFILE_NOT_FOUND) {
+        dm_world_mouse_map_toggle();
+        return 1;
+    }
+    return rc==DM_KEYFILE_OK?dm_pc_input_mouse_special(0x100):0;
+}
+int dm_pc_input_wheel_or_default(int delta) {
+    if(!delta)return 0;
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    int rc=dm_pc_profile_action_for_vk(delta>0?0x103:0x104,&id,&slot);
+    if(rc==DM_KEYFILE_NOT_FOUND)return delta>0?1:-1;
+    return rc==DM_KEYFILE_OK?dm_pc_input_wheel(delta):0;
+}
+int dm_pc_input_wheel(int delta) {
+    if(!delta)return 0;
+    uint32_t id=UINT32_MAX;unsigned slot=0;
+    uint16_t pseudo=delta>0?0x103:0x104;
+    if(dm_pc_profile_action_for_vk(pseudo,&id,&slot))return 0;
+    if(id==39)return 1;
+    if(id==40)return -1;
+    // The map toggle and panel shortcuts can be emitted as one-shot events.
+    if(id==7 || id==45){dm_world_mouse_map_toggle();return 0;}
+    if(id==0 || id==1 || id==4 || id==12 || id==44 || id==54) {
+        pthread_mutex_lock(&input_mu);
+        if(queue_tail-queue_head<32)panel_queue[queue_tail++%32]=(unsigned char)id;
+        pthread_mutex_unlock(&input_mu);
+    }
+    return 0; // refuse to trigger unverified commands on a scroll event
+}
+void dm_pc_input_event(unsigned hid,int pressed) {
+    if(hid>=256)return;
+    pthread_mutex_lock(&input_mu);
+    if(pressed && !down[hid] &&
+       (skill_phase[hid]==PH_ZL_TAP || skill_phase[hid]==PH_TAP_PULSE)) {
+        // A second physical press while a short-tap is pending resumes the
+        // same latched native command without losing a release edge.
+        down[hid]=1;
+        skill_phase[hid]=skill_phase[hid]==PH_ZL_TAP?PH_ZL_LEAD:PH_HELD;
+        publish_locked();
+        pthread_mutex_unlock(&input_mu);
+        return;
+    }
+    if(down[hid]==(unsigned char)!!pressed) {
+        pthread_mutex_unlock(&input_mu);return;
+    }
+    if(pressed) {
+        uint64_t dpad=arrow_dpad(hid);
+        if(dpad) {
+            // Arrow keys are intentionally NOT looked up as character
+            // shortcuts in .key. Their fixed meaning avoids accidental
+            // potions/panels while walking with the controller layout.
+            int walk=dm_uiscreen_ingame() && !dm_uiscreen_panel();
+            down[hid]=1;
+            command[hid]=UNMAPPED;
+            skill_phase[hid]=PH_IDLE;
+            arrow_walk[hid]=(unsigned char)walk;
+            held_mask[hid]=walk?0:dpad;
+            publish_locked();
+            pthread_mutex_unlock(&input_mu);
+            return;
+        }
+        uint32_t id=0;unsigned slot=0;
+        int rc=dm_pc_profile_action_for_hid(hid,&id,&slot);
+        down[hid]=1;
+        command[hid]=rc==0 && id<=56 && dm_pc_input_supported_action(id)?
+            (unsigned char)id:UNMAPPED;
+        int slot_index=skill_slot(command[hid]);
+        unsigned action=slot_index>=0 && slot_index<6 &&
+            atomic_load(&cmd_down)?second_action(command[hid]):command[hid];
+        held_mask[hid]=command[hid]==UNMAPPED?0:command_bits(action);
+        skill_phase[hid]=PH_IDLE;
+        // Cmd+Skill1..6 uses the native second bank, while dedicated
+        // Skill7..12 shortcuts retain their original .key behavior.
+        // A bound skill under the mouse enters the guest binding dialog.
+        if(skill_slot(action)>=0 &&
+           (dm_ui_pc_skill_bind_request(action) ||
+            dm_ui_pc_skill_tree_active() || dm_uiscreen_panel())) {
+            // In the skill tree the same native A/B/Y/X/R/ZR buttons also
+            // mean Select/Allocate/Cancel. Never send a cast/confirm merely
+            // because pointer hover was unavailable for one UI frame.
+            command[hid]=UNMAPPED;
+            held_mask[hid]=0;
+        }
+        if(skill_slot(command[hid])>=0 && (held_mask[hid]&DM_BTN_ZL)) {
+            skill_phase[hid]=PH_ZL_LEAD;
+            skill_sample[hid]=dm_input_samples();
+        }
+        if(command[hid]==7 || command[hid]==45)dm_world_mouse_map_toggle();
+        if(command[hid]==0 || command[hid]==1 || command[hid]==4 ||
+           command[hid]==12 || command[hid]==44 || command[hid]==54) {
+            if(queue_tail-queue_head<32)panel_queue[queue_tail++%32]=command[hid];
+        }
+    } else {
+        down[hid]=0;
+        arrow_walk[hid]=0;
+        if(skill_phase[hid]==PH_ZL_LEAD) {
+            // Keep ZL and schedule an actual short press, even if key-up
+            // arrived before the game sampled the first-set modifier.
+            skill_phase[hid]=PH_ZL_TAP;
+        } else {
+            skill_phase[hid]=PH_IDLE;
+            command[hid]=UNMAPPED;
+            held_mask[hid]=0;
+        }
+    }
+    publish_locked();
+    pthread_mutex_unlock(&input_mu);
+}

@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../dm_keyfile.h"
+#include "../dm_pc_profile.h"
 #include <sys/types.h>
 static ssize_t fake_pwrite(int fd, const void *buf, size_t n, off_t off);
 #define pwrite fake_pwrite
@@ -24,6 +26,9 @@ static ssize_t fake_pwrite(int fd, const void *buf, size_t n, off_t off);
 #undef pwrite
 ssize_t pwrite(int, const void *, size_t, off_t);
 
+// HLE save transaction integration test has no full game frontend.
+void dm_kbmap_pre_commit(const char *workdir) {(void)workdir;}
+int dm_sys_lang(void) {return 0;}
 struct dm_flags g_flag; uint64_t g_t0_ns; uint64_t now_ns(void) { return 0; }   // 日志时间戳与读路径的桩（写路径不用） | stubs for log timestamps and the read path (not used by the write path)
 void dm_prof_add(int id, uint64_t ns, uint64_t b) { (void)id; (void)ns; (void)b; } void dm_guest_write_prepare(void *a, size_t n) { (void)a; (void)n; }
 void dm_fs_save_poison(int e);
@@ -98,6 +103,47 @@ int main(void) {
     mkdir(save, 0755); snprintf(p, sizeof p, "%s/a", save); put(p, "old");
     setenv("DM_SAVE", save, 1); setenv("DM_TEST_FS_FAIL", "write:5:28", 1);   // 存档第 5 次写失败，errno 28 = ENOSPC | the 5th save write fails, errno 28 = ENOSPC
     CHECK(h_fs_MountSave("save", NULL) == RES_OK, "挂载存档");
+
+    // Guest-native .key writer leases protect the host keyfile editor. An
+    // open READ handle is harmless; an open WRITE handle forbids host edits.
+    CHECK(h_fs_CreateDirectory("save:/Alice") == RES_OK, "guest native key: create character directory");
+    CHECK(h_fs_CreateFile("save:/Alice/Alice.key", 2) == RES_OK, "guest native key: create original file");
+    uint64_t keyfd=0;
+    CHECK(h_fs_OpenFile(&keyfd,"save:/Alice/Alice.key",MODE_READ)==RES_OK,
+          "guest native key: read handle opens");
+    CHECK(dm_fs_native_key_writers()==0,"guest native key: readers do not block editing");
+    h_fs_CloseFile(keyfd);
+    // Write a synthetic, structurally native .key as if the guest had
+    // finished creating its own profile. Test data never comes from a user.
+    dm_keyfile guestkey={0};
+    CHECK(dm_keyfile_new_legacy(&guestkey)==DM_KEYFILE_OK,
+          "guest key: fixture has the original 0x25 records");
+    char guest_path[1300];snprintf(guest_path,sizeof guest_path,
+        "%s/Alice/Alice.key",work);
+    size_t guest_len=0;const uint8_t *guest_raw=dm_keyfile_data(&guestkey,&guest_len);
+    FILE *guest_out=fopen(guest_path,"wb");
+    CHECK(guest_out && fwrite(guest_raw,1,guest_len,guest_out)==guest_len &&
+          fclose(guest_out)==0,"guest key: seeded the active transaction inode");
+    dm_keyfile_free(&guestkey);
+    CHECK(dm_pc_profile_select("Alice")==DM_KEYFILE_OK,"host sees guest character");
+    uint16_t pc_vk=0;
+    CHECK(dm_pc_profile_get(0,0,&pc_vk)==DM_KEYFILE_OK && pc_vk=='A',
+          "host reads guest-owned native code");
+    CHECK(h_fs_OpenFile(&keyfd,"save:/Alice/Alice.key",MODE_WRITE)==RES_OK,
+          "guest native key: write handle opens");
+    CHECK(dm_fs_native_key_writers()==1,"guest native key: writable handle blocks host editing");
+    CHECK(dm_pc_profile_bind(0,0,0xf5,NULL,NULL)==DM_KEYFILE_CONFLICT,
+          "host refuses concurrent edit while guest has writable file open");
+    CHECK(dm_pc_profile_get(0,0,&pc_vk)==DM_KEYFILE_OK && pc_vk=='A',
+          "busy edit leaves original profile unchanged");
+    h_fs_CloseFile(keyfd);
+    CHECK(dm_fs_native_key_writers()==0,"guest native key: close releases edit guard");
+    CHECK(dm_pc_profile_bind(0,0,0xf5,NULL,NULL)==DM_KEYFILE_OK,
+          "host edits game-owned .key only after guest closes its writer");
+    CHECK(dm_pc_profile_get(0,0,&pc_vk)==DM_KEYFILE_OK && pc_vk==0xf5,
+          "guest worktree now contains native edited VK");
+    // Only the file open/close lifecycle is exercised here: no extra
+    // WriteFile injection count is consumed by this test.
 
     // 存档写计数：①=第 1 次 ②=第 2 次 ③=第 3 次 ④=第 4/5/6/7 次 ⑤=第 8 次
     // Save write count: (1)=1st (2)=2nd (3)=3rd (4)=4th/5th/6th/7th (5)=8th

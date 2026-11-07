@@ -49,6 +49,14 @@ with tempfile.TemporaryDirectory() as t:
     # Full-touch scheme: controller button hints on the front end and generic popups are moved off screen (once the buttons themselves are tappable, the glyphs are misinformation); list and method in touch_layout.py
     sys.path.insert(0,HERE); import touch_layout
     tl,ntl=touch_layout.build(romfs,t); REPL.update(tl)
+    # Both input devices share the original KeyBindingMenuHD scroll list.
+    # The guest keeps the .ctl buttons; PC key buttons are sibling widgets
+    # inside each cloned native list row. This is not an OS-side settings UI.
+    import controls_layout
+    cp, original_controls = touch_layout.read_layout(romfs,controls_layout.LAYOUT)
+    pc_controls_file=os.path.join(t,'native_controls.json')
+    open(pc_controls_file,'w',encoding='utf-8').write(controls_layout.integrate(original_controls))
+    REPL[cp.lower()]=pc_controls_file
     REPL.update(touch_layout.build_pcfront(romfs,t))   # 选角页改用键鼠版界面（盖掉上面 build 对这几份的改动） | Character select page switched to the keyboard-and-mouse UI (overrides the changes the build above made to these files)
     tp,ntp=touch_layout.build_present(romfs,t); REPL.update(tp)   # 局内：页签条两端 L / R、人物页耐力行 | In-game: L / R at the two ends of the tab strip, stamina row on the character page
     ti,nti=touch_layout.build_ingame(romfs,t); REPL.update(ti)   # 局内：各面板右上角的关闭按钮（同一落点、各发各的消息）与手柄版删掉的功能按钮（修理 / 翻页 / 高级属性 / 选项页应用·默认·放弃）；要在 build_present 之后（同一文件以这份为准） | In-game: the close button at each panel's top-right corner (same position, each sending its own message) and the function buttons removed in the controller version (repair / page turn / advanced stats / options page apply·default·discard); must come after build_present (for the same file this copy wins)
@@ -184,7 +192,7 @@ with tempfile.TemporaryDirectory() as t:
     # 还没分开的存量：两份字号档（开机只读一次）
     # Meant to be shared by both modes all along (our own pages, one layout for controller / touch, placed by the host according to mode): the three Chronicle ones
     # Existing stock not yet split: the two font size profiles (read only once at boot)
-    SHARED_TODO=('chroniclebaselistpanelhd.json','chroniclepanelhd.json','controller/_profileconsolehd.json','controller/_profilehandheldhd.json','dropdownlistcontentshd.json')
+    SHARED_TODO=('keybindingmenuhd.json','chroniclebaselistpanelhd.json','chroniclepanelhd.json','controller/_profileconsolehd.json','controller/_profilehandheldhd.json','dropdownlistcontentshd.json')
     PADROOT=touch_layout.build_pad_root(romfs,tpad); PADROOT_KEYS={k[len(LAY):] for k in PADROOT}   # 三份选项页：原路径放手柄那份，触屏那份挪到触屏这边 | The three options pages: the controller copy goes at the original path, the touch copy moves to the touch side
     UNSHARE=('confirmationmodalhd.json','dismissablemodalhd.json','helpbuttonpanelhd.json','npcdialogpanelhd.json','youdiedmodalhd.json')   # 只该给触屏的：挪到触屏这边（见 emit） | Touch-only ones: moved to the touch side (see emit)
     PADLAY={k:v for k,v in PR.items() if touch_path(k)}   # 手柄版只取布局（数据表、图与触屏版同一份） | The controller version takes only layouts (data tables and images are the same copy as the touch version)

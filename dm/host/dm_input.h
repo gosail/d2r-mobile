@@ -42,3 +42,9 @@ void dm_input_sampled_right(int32_t *rx,int32_t *ry);
 // 手柄状态注入点：GetNpadState 填完原状态后、伪键覆盖前调用。Mac 宿主触点脚本（touch_mac.c，Mac 专用、按 _mac 约定不进 iOS 包）启动时注册；iOS 不带该文件，保持空
 // Controller state injection point: called after GetNpadState has filled in the original state and before the pseudo-key override. The Mac host touch point script (touch_mac.c, Mac only, kept out of the iOS app by the _mac convention) registers at startup; iOS does not carry that file and it stays empty
 extern void (*dm_pad_hook)(uint64_t now, uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry);
+
+// Real keyboard has its own channel, merged with touch and physical pad.
+void dm_kb_set(uint64_t buttons,int32_t lx,int32_t ly,int32_t rx,int32_t ry);
+
+// Focus-loss reset also flushes pending keyboard press edges.
+void dm_kb_clear(void);

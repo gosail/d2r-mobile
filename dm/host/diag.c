@@ -5,6 +5,7 @@
 #include "dm_uctx.h"
 #include "dm_hud.h"
 #include "dm_cursor.h"
+#include "dm_world.h"
 #include "dm_hud_exp.h"
 #include "dm_elysium.h"
 #include "dm_bossrush.h"
@@ -376,6 +377,23 @@ static void monres_on_setinfo(const uint64_t *regs, uint64_t payload) {
     memcpy(buf + keep, add, n); memcpy(buf + keep + n, "\xee\x81\xbe" "0", 4); memset(buf + keep + n + 4, ' ', len - keep); buf[keep + n + 4 + (len - keep)] = 0;
 }
 
+// Copy the native game's already-rendered monster title when its selection
+// matches our physical pointer. This is the real game title/affix string,
+// rather than a guessed "Monster #class" based on incomplete name tables.
+static void hover_native_monster_title(const uint64_t *regs,uint64_t payload) {
+    if(!regs[19] || !payload)return;
+    uint32_t id=0;vm_size_t got=0;uint64_t name=0;
+    if(vm_read_overwrite(mach_task_self(),regs[19]+8,4,(vm_address_t)&id,&got) || got!=4 ||
+       id!=dm_world_hover_monster_id())return;
+    if(vm_read_overwrite(mach_task_self(),payload,8,(vm_address_t)&name,&got) || got!=8 ||
+       name<0x1000)return;
+    char buf[160]={0};
+    if(vm_read_overwrite(mach_task_self(),name,sizeof buf-1,(vm_address_t)buf,&got) ||
+       got!=sizeof buf-1)return;
+    buf[sizeof buf-1]=0;
+    if(!memchr(buf,0,sizeof buf))return;
+    dm_world_hover_native_name(id,buf);
+}
 static void uimsg_print(const uint64_t *regs) {   // 观测门回调：只读寄存器 | Observation gate callback: registers are read-only
     if ((g_ui_print || atomic_load(&g_nui_sub)) && !g_uih) uih_build();
     uint64_t msg = regs[1], f[3] = {0}; vm_size_t got = 0;
@@ -388,7 +406,10 @@ static void uimsg_print(const uint64_t *regs) {   // 观测门回调：只读寄
                                                                                                          // The pointed-to bytes happened to look like characters (happened once: arg was written as "\xf0\xbc\xb8", the assertion script reading uimsg.jsonl as UTF-8 errored out, and inv_tap failed spuriously twice)
         if (k == got) have_arg = 0;                                         // 64 字节内没有终止 0 | No terminating 0 within 64 bytes
     }
-    if (f[0] == UIH_MONSTERHEALTH && f[1] == UIH_SETINFO && f[2]) monres_on_setinfo(regs, f[2]);
+    if (f[0] == UIH_MONSTERHEALTH && f[1] == UIH_SETINFO && f[2]) {
+        monres_on_setinfo(regs, f[2]);
+        hover_native_monster_title(regs, f[2]);
+    }
     prof_on_uimsg(f[1], have_arg ? nm : "");
     char c0[24], c1[24], stage[256];
     const char *n0 = uih_name(f[0], c0), *n1 = uih_name(f[1], c1);   // 名字表里有就返回表里的串、不写进 c0 / c1（原先拿 c0 / c1 比「ToGame」永远比不上） | If the name table has it, return the table's string without writing into c0 / c1 (it used to compare c0 / c1 against "ToGame", which could never match)
@@ -1902,7 +1923,8 @@ static void loadscreen_on_uimsg(const char *cat, const char *act, const char *ar
     { void dm_update_on_uimsg(const char *, const char *, const char *); dm_update_on_uimsg(cat, act, arg); }
     { void dm_kills_on_uimsg(const char *, const char *, const char *); dm_kills_on_uimsg(cat, act, arg); } { void dm_rift_ui_on_uimsg(const char *, const char *, const char *); dm_rift_ui_on_uimsg(cat, act, arg); }   // 编年史「首领」页签（dm_kills.c） | The chronicle's 「首领」(Bosses) tab (dm_kills.c)
     { void dm_vault_on_uimsg(const char *, const char *, const char *); dm_vault_on_uimsg(cat, act, arg); }
-    { void dm_padmode_on_uimsg(const char *, const char *, const char *); dm_padmode_on_uimsg(cat, act, arg); }   // 手柄版暂停菜单「游戏难度」行（dm_padmode.c） | "Game Difficulty" row of the controller pause menu (dm_padmode.c)
+    { void dm_padmode_on_uimsg(const char *, const char *, const char *); dm_padmode_on_uimsg(cat, act, arg); }
+    { void dm_kbmap_controls_event(const char *, const char *, const char *); dm_kbmap_controls_event(cat, act, arg); }   // 手柄版暂停菜单「游戏难度」行（dm_padmode.c） | "Game Difficulty" row of the controller pause menu (dm_padmode.c)
     { void dm_pouch_on_uimsg(const char *, const char *, const char *); dm_pouch_on_uimsg(cat, act, arg); }   // 百宝囊框 / 存放按钮（dm_pouch.c）   // 储藏箱第六页「编年史」（dm_vault_ui.c） | Pouch frame / deposit button (dm_pouch.c)   // stash page six 「编年史」(Chronicle) (dm_vault_ui.c)
     { void dm_shoprefresh_on_uimsg(const char *, const char *, const char *, uint8_t *); module_t *sm = main_mod(); dm_shoprefresh_on_uimsg(cat, act, arg, sm ? (uint8_t *)sm->base : NULL); }   // 商人交易页「刷新货架」按钮（dm_shoprefresh.c） | The 「刷新货架」(Refresh Stock) button on the vendor trade page (dm_shoprefresh.c)
     { void dm_runeword_on_uimsg(const char *, const char *, const char *); dm_runeword_on_uimsg(cat, act, arg); }   // 符文之语助手（dm_runeword.c） | Runeword helper (dm_runeword.c)

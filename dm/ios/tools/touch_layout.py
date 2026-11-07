@@ -1139,25 +1139,43 @@ def build_present(romfs, outdir):
 # ---------- 选项页：视频页签整页去掉（iPhone 自己能调亮度），其余页签里与触摸产品无关的项藏掉 ----------
 # ---------- Options pages: the whole video tab page is removed (the iPhone can adjust brightness itself), and items in the other tabs unrelated to the touch product are hidden ----------
 def _settings_tabs(text):
-    """页签条去掉第一个（视频）：个数与四个并列数组各去首项；第四项「控制」换成「自定义」。 | Remove the first item (video) from the tab strip: drop the first entry from the count and from each of the four parallel arrays; the fourth item 「控制」(Controls) is replaced with 「自定义」(Custom)."""
+    """Keep Controls between Game Settings and Custom on the shared options bar.
+
+    The original console Controls action (KeyBindingMenu) is preserved so the
+    game's own controller binding data remains authoritative. Custom still
+    opens our borrowed VideoOptionsPanel; no PC .key/.ctl bytes are rewritten.
+    The original 5-tab width is reused: remove Video, append Custom.
+    """
     n = 0
-    def drop_first(m):
-        nonlocal n; items = [x for x in re.split(r',\s*', m.group(2).strip().rstrip(',')) if x.strip()]; n += 1
-        return m.group(1) + ' ' + ', '.join(items[1:]) + ' ' + m.group(3)
-    new = re.sub(r'("(?:inactiveFrames|activeFrames|textStrings)"\s*:\s*\[)([^\]]*)(\])', drop_first, text)
-    new = re.sub(r'("tabMessages"\s*:\s*\[)([^\]]*)(\])', lambda m: m.group(1) + '\n' + ',\n'.join(x for x in [y.strip() for y in m.group(2).split(',')] if x and 'VideoOptionsPanel' not in x) + ',\n' + m.group(3), new)
-    new, k = re.subn(r'"tabCount"\s*:\s*5', '"tabCount": 4', new)
-    # 第四项原是「控制」（KeyBindingMenu，本平台不出现）：改成「自定义」，打开借来的视频页（见 _custom_page）
-    # The fourth item was originally 「控制」(Controls) (KeyBindingMenu, which does not appear on this platform): changed to 「自定义」(Custom), opening the borrowed video page (see _custom_page)
-    if new.count('"@Controls"') != 1 or new.count('SettingsPanelMessage:CheckChanges:KeyBindingMenu') != 1: raise SystemExit('touch_layout：页签条第四项不是原样「控制」，自定义页签没换')
-    # 第三项「游戏设定」：原版英文串 Game Settings 在 266 宽的页签里折成两行、第二行被截成「Se…」（英文版审计）；触屏页签条换成我们表里的串（中文不变、英文 Settings）。手柄版页签条是原版，不动
-    # Third item 「游戏设定」(Settings): the original English string Game Settings wraps to two lines in the 266-wide tab and the second line is truncated to "Se..." (English version audit); the touch tab bar uses the string from our table instead (Chinese unchanged, English Settings). The controller layout tab bar is the original and is left alone
-    if new.count('"@GameSettingsTab"') != 1: raise SystemExit('touch_layout：页签条第三项不是原样「游戏设定」（原版布局变了？）')
+    def replace_list(m):
+        nonlocal n
+        name = re.search(r'"(inactiveFrames|activeFrames|textStrings)"', m.group(1)).group(1)
+        items = [item.strip() for item in m.group(2).strip().rstrip(',').split(',') if item.strip()]
+        if len(items) != 5:
+            raise SystemExit('touch_layout: options %s expected 5 tabs, got %d' % (name, len(items)))
+        extra = {'inactiveFrames':'0', 'activeFrames':'1', 'textStrings':'"@dmTabCustom"'}[name]
+        n += 1
+        return m.group(1) + ' ' + ', '.join(items[1:] + [extra]) + ' ' + m.group(3)
+    new = re.sub(r'("(?:inactiveFrames|activeFrames|textStrings)"\s*:\s*\[)([^\]]*)(\])', replace_list, text)
+    def replace_actions(m):
+        nonlocal n
+        items = [item.strip() for item in m.group(2).strip().rstrip(',').split(',') if item.strip()]
+        if len(items) != 5 or sum('VideoOptionsPanel' in item for item in items) != 1:
+            raise SystemExit('touch_layout: original controls actions not recognised')
+        items = [item for item in items if 'VideoOptionsPanel' not in item]
+        items.append('"SettingsPanelMessage:CheckChanges:VideoOptionsPanel"')
+        n += 1
+        return m.group(1) + '\n' + ',\n'.join(items) + '\n' + m.group(3)
+    new = re.sub(r'("tabMessages"\s*:\s*\[)([^\]]*)(\])', replace_actions, new)
+    if new.count('"tabCount": 5') + new.count('"tabCount":5') != 1:
+        raise SystemExit('touch_layout: expected original 5-tab settings panel')
+    if new.count('"@Controls"') != 1 or new.count('SettingsPanelMessage:CheckChanges:KeyBindingMenu') != 1:
+        raise SystemExit('touch_layout: original Controls tab lost')
+    if new.count('"@dmTabCustom"') != 1 or new.count('SettingsPanelMessage:CheckChanges:VideoOptionsPanel') != 1:
+        raise SystemExit('touch_layout: custom tab wiring wrong')
+    if new.count('"@GameSettingsTab"') != 1: raise SystemExit('touch_layout: Game Settings label changed')
     new = new.replace('"@GameSettingsTab"', '"@dmTabGameSettings"')
-    # 第四项「自定义」同理：原版串 KeyBindingTypeCustom 的西语「Personalizar」在页签里被截成「Persona…」（西语截图），页签用我们表里的短词（页面大标题仍用原版串）
-    # The fourth item "Custom" likewise: the original string KeyBindingTypeCustom in Spanish "Personalizar" is truncated to "Persona…" in the tab (Spanish screenshot), so the tab uses the short word from our table (the page heading still uses the original string)
-    new = new.replace('"@Controls"', '"@dmTabCustom"').replace('SettingsPanelMessage:CheckChanges:KeyBindingMenu', 'SettingsPanelMessage:CheckChanges:VideoOptionsPanel')
-    return new, n + k + 1
+    return new, n + 1
 def _drop_rows(*rows):
     """把选项表里的整行（TableRowWidget "Row <名>"）删掉：表格按剩下的行重排，不留空行。每个名字必须恰好删到一行。 | Delete whole rows (TableRowWidget "Row <name>") from the options table: the table re-lays out the remaining rows and leaves no empty row. Each name must delete exactly one row."""
     def fn(text):
@@ -1332,7 +1350,10 @@ PRESENT['controller/console/videooptionspanelhd.json'] = _custom_page
 # 手柄版选项页：原版页签条不动，只把第一项「视频」换成「自定义」——它打开的视频页就是上面那份自定义页（两种模式同一份内容）
 # Controller options page: the original tab bar is untouched, only the first item "Video" is replaced by "Custom"; the video page it opens is the Custom
 # page above (same content in both modes)
-def pad_settings(s): return _sub1(s, '"@OptionsMenuVideo"', '"@KeyBindingTypeCustom"')   # 原版串：自定义 / Custom（跟游戏语言走） | original string: "Custom" in Chinese / English (follows the game language)
+def pad_settings(s):
+    # Gamepad and touch use identical tab order: Settings -> Controls -> Custom.
+    # Preserve the actual KeyBindingMenu controller action in both layouts.
+    return _settings_tabs(s)[0]
 def pad_custom_page(s): return _custom_page(s)[0]
 # 挂进 PRESENT：build_ingame 对同一份文件（往选项页插「应用 / 默认 / 放弃」）会先套这里的变换再插按钮，不会出两份覆盖互相盖掉
 # Hooked into PRESENT: for the same file (inserting 「应用 / 默认 / 放弃」(Apply / Default / Discard) into the options page) build_ingame applies the transform here first and then inserts the buttons, so two overlays that overwrite each other are not produced
@@ -1340,9 +1361,21 @@ PRESENT['controller/console/settingspanelhd.json'] = _settings_tabs
 # 选项页底部的手柄提示条（「默认」「返回」两段说明字；键图标已透明）：局内被外框底带挡着看不出，前端选项页没有外框、字露在三个按钮下面——挪走
 # The controller button legend at the bottom of the options page (the two caption texts 「默认」(Default) and 「返回」(Back); the key icons are already transparent): in-game it is hidden by the bottom band of the outer frame, but the front-end options page has no outer frame and the text shows below the three buttons -- moved away
 def _settings_no_legend(s):
+    # Both console/ and plain controller/ layouts may be selected by the
+    # original Switch UI. The console page is handled by _settings_tabs;
+    # apply the identical Controls-before-Custom transformation here only
+    # when this resource itself owns the five-tab bar. Wrapper variants
+    # that contain only a ButtonLegendWidget must remain untouched.
+    changed=0
+    if ('"@Controls"' in s and
+        'SettingsPanelMessage:CheckChanges:KeyBindingMenu' in s and
+        '"tabMessages"' in s and
+        'SettingsPanelMessage:CheckChanges:VideoOptionsPanel' in s and
+        '"@dmTabCustom"' not in s):
+        s,changed=_settings_tabs(s)
     s, n = offscreen(s, types=('ButtonLegendWidget',))
     if n != 1: raise SystemExit('touch_layout：选项页提示条应为 1 个，找到 %d 个' % n)
-    return s, n
+    return s, n+changed
 # 确认框正文：统一大字号（40）后正文一行约 87 单位高，而确认框的底图是固定大小的，框顶内沿到按钮上沿只有约 265 单位 = 三行；
 # 专家模式警告是四行，最后一行被「好 / 取消」压住。只加高正文区不够（标题顶出框上沿、第四行仍被压）；原版更大的那张底图也只多 62 单位。
 # 定法（与「同页不要两种大小」的原则有出入，属例外）：这个框的正文字号 40 → 30（一行约 65 单位，四行 260），

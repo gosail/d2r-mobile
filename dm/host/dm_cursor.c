@@ -2138,19 +2138,16 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         return;
     }
     if(phase==1) {
-        // If the target pointer changed before the popup opened, cancel the
-        // transaction; never bind the newly hovered skill by accident.
+        // The original Y press has already selected the skill. Mouse hover
+        // may end when the modal takes focus; do not cancel a valid binding
+        // merely because UIKit/AppKit stopped delivering hover events.
         if(!modal) {
-            if(atomic_load(&g_pc_skill_hover)!=original_hover || fr-begun>60) {
+            if(fr-begun>60) {
                 phase=0;atomic_store(&g_pc_skill_binding_busy,0);
             }
             return;
         }
         // Allow original binding dialog a full 12 guest frames to settle.
-        if(atomic_load(&g_pc_skill_hover)!=original_hover) {
-            dm_ui_key_pulse(DM_BTN_MINUS,4);
-            phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;
-        }
         if(!modal_opened)modal_opened=fr;
         if(fr-modal_opened<12)return;
         if(buttons&DM_BTN_ZL) {

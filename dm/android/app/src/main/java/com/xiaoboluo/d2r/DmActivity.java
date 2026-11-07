@@ -185,6 +185,12 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         gameFrame = new FrameLayout(this);
         gameFrame.addView(view, new FrameLayout.LayoutParams(-1, -1));
         setContentView(gameFrame);
+        // The original guest KeyBindingMenuHD is now the sole controls
+        // interface. Keyboard and controller columns share its native row
+        // layout and edit .key / .ctl independently. Never mount a separate
+        // Android keyboard/controller page over the game.
+        /*
+        // Legacy Android controls overlay is intentionally retired.
         // The two device categories are real controls, not aliases for
         // the native controller Key1/Key2 alternate-binding slots.
         float density=getResources().getDisplayMetrics().density;
@@ -230,6 +236,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
             kbInlinePanel.setLayoutParams(p);
         });
         kbUiHandler.post(kbUiPoll);
+        */
         immersive();
     }
 

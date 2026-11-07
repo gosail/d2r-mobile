@@ -52,8 +52,10 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertNotIn("dm_keyfile_new_legacy(&temp)",profile)
         self.assertIn("int rc=dm_keyfile_read(&temp,fn);",profile)
         self.assertIn("dm_keyfile_free(&profile);",profile)
-        self.assertIn("void dm_kbmap_pre_commit(const char *workdir) { (void)workdir; }",
+        self.assertIn("dm_pc_profile_pre_commit_locked(workdir);",
                       src("host/dm_kbmap.c"))
+        self.assertIn("edited_vk[id][slot]=vk;",profile)
+        self.assertIn("dm_keyfile_write_atomic(&latest,fn);",profile)
         self.assertNotIn("SummonMancer",c)
     def test_native_input_mapping_is_latched_and_gamepad_separate(self):
         c=src("host/dm_pc_input.c")

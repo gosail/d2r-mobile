@@ -239,4 +239,6 @@ int dm_kbmap_bind_mouse(unsigned physical,unsigned action) {
     // Unverified left/right remapping is not exposed without a native slot.
     (void)physical;(void)action;return 0;
 }
-void dm_kbmap_pre_commit(const char *workdir) { (void)workdir; }
+void dm_kbmap_pre_commit(const char *workdir) {
+    dm_pc_profile_pre_commit_locked(workdir);
+}

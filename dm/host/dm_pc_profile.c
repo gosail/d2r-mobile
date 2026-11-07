@@ -18,6 +18,13 @@ void dm_fs_save_poison(int e);
 static pthread_mutex_t pc_mu=PTHREAD_MUTEX_INITIALIZER;
 static char selected[64];
 static dm_keyfile profile;
+// Last host-edited VK fields for the active character. The guest may later
+// serialize its stale in-memory key table over the worktree; re-assert only
+// these explicit host edits at the transactional Commit boundary. All other
+// native records and the original .ctl remain owned by the game.
+enum { PROFILE_COMMANDS=57 };
+static unsigned char edited[PROFILE_COMMANDS][2];
+static uint16_t edited_vk[PROFILE_COMMANDS][2];
 
 static int valid_name(const char *name) {
     if(!name || !name[0] || strlen(name)>48 ||
@@ -39,6 +46,7 @@ void dm_pc_profile_clear(void) {
     pthread_mutex_lock(&pc_mu);
     dm_keyfile_free(&profile);
     selected[0]=0;
+    memset(edited,0,sizeof edited);
     pthread_mutex_unlock(&pc_mu);
 }
 int dm_pc_profile_select(const char *name) {
@@ -46,6 +54,7 @@ int dm_pc_profile_select(const char *name) {
     pthread_mutex_lock(&pc_mu);
     if(strcmp(selected,name)) {
         dm_keyfile_free(&profile);
+        memset(edited,0,sizeof edited);
         snprintf(selected,sizeof selected,"%s",name);
     }
     pthread_mutex_unlock(&pc_mu);
@@ -115,6 +124,9 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
                     // transaction will roll back on its poisoned state.
                     if(rc==DM_KEYFILE_IO)dm_fs_save_poison(errno?errno:EIO);
                     (void)dm_keyfile_set(&profile,id,slot,old);
+                } else if(id<PROFILE_COMMANDS && slot<2) {
+                    edited[id][slot]=1;
+                    edited_vk[id][slot]=vk;
                 }
             }
         }
@@ -122,6 +134,47 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
     pthread_mutex_unlock(&pc_mu);
     dm_fs_profile_unlock();
     return rc;
+}
+// Caller holds hle_fs's g_path_lock during Commit. Never recurse into the
+// public dm_pc_profile_get/bind APIs (they would deadlock on that lock).
+void dm_pc_profile_pre_commit_locked(const char *workdir) {
+    if(!workdir || dm_fs_native_key_writers())return;
+    pthread_mutex_lock(&pc_mu);
+    int changed=0;
+    for(unsigned id=0;id<PROFILE_COMMANDS;id++)
+        for(unsigned slot=0;slot<2;slot++)changed|=edited[id][slot]!=0;
+    if(!changed || !valid_name(selected)) {
+        pthread_mutex_unlock(&pc_mu);return;
+    }
+    char fn[1200];
+    int len=snprintf(fn,sizeof fn,"%s/%s/%s.key",workdir,selected,selected);
+    if(len<=0 || len>=(int)sizeof fn) {
+        pthread_mutex_unlock(&pc_mu);return;
+    }
+    dm_keyfile latest={0};
+    int rc=dm_keyfile_read(&latest,fn);
+    if(rc==DM_KEYFILE_OK) {
+        for(unsigned id=0;id<PROFILE_COMMANDS && rc==DM_KEYFILE_OK;id++)
+            for(unsigned slot=0;slot<2 && rc==DM_KEYFILE_OK;slot++)
+                if(edited[id][slot]) {
+                    uint16_t was=0xffff;
+                    rc=dm_keyfile_get(&latest,id,slot,&was);
+                    if(rc==DM_KEYFILE_OK && was!=edited_vk[id][slot])
+                        rc=dm_keyfile_bind_checked(&latest,id,slot,
+                            edited_vk[id][slot],NULL,NULL);
+                }
+        if(rc==DM_KEYFILE_OK)rc=dm_keyfile_write_atomic(&latest,fn);
+        if(rc==DM_KEYFILE_OK) {
+            dm_keyfile_free(&profile);
+            profile=latest;
+            latest=(dm_keyfile){0};
+        }
+    }
+    // An unknown guest format is left untouched. An IO failure during an
+    // attempted rebase must not be promoted to a successful save.
+    if(rc==DM_KEYFILE_IO)dm_fs_save_poison(errno?errno:EIO);
+    dm_keyfile_free(&latest);
+    pthread_mutex_unlock(&pc_mu);
 }
 int dm_pc_profile_file_status(void) {
     // Do not infer validity from a particular command ID: other game-created

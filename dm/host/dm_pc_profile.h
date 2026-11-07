@@ -12,6 +12,8 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot);
 int dm_pc_profile_action_for_hid(unsigned usage,uint32_t *id,unsigned *slot);
 void dm_pc_profile_clear(void);
+// Called with the filesystem transaction path lock held (never lock it again).
+void dm_pc_profile_pre_commit_locked(const char *workdir);
 // 1: supported game-created .key; 0: not created/mounted; -1: invalid or
 // unsupported format. Used only for fallback before the guest creates it.
 int dm_pc_profile_file_status(void);

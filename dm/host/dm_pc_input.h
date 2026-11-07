@@ -19,5 +19,7 @@ int dm_pc_input_mouse_special(unsigned pseudo_vk);
 int dm_pc_input_middle_or_default(void);
 int dm_pc_input_wheel_or_default(int delta);
 int dm_pc_input_supported_action(uint32_t id);
+// Verified original controller buttons for PC skill actions 1..12; 0 otherwise.
+uint64_t dm_pc_input_skill_buttons(uint32_t id);
 // Test/diagnostic: most recently resolved native command for this physical key.
 int dm_pc_input_latched_command(unsigned hid);

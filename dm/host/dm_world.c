@@ -10,6 +10,8 @@
 #include "dm_uiscreen.h"
 #include "dm_world.h"
 #include "dm_pc_input.h"
+#include "dm_cursor.h"
+#include "dm_input.h"
 #include "dm_external_mouse.h"
 #include "hle.h"
 #include "dm.h"
@@ -777,7 +779,22 @@ int dm_world_has_target(void) { return atomic_load(&g_has_target); }   // 按主
 #if TARGET_OS_OSX || TARGET_OS_IOS || defined(__ANDROID__)
 static int w_hostile(uint8_t *b, uint64_t u) { if (*(uint32_t *)u != 1) return 0; uint64_t pl = w_player(); int c = pl ? ((int (*)(int, uint64_t, uint64_t))(b + 0x2f7b7c))(0x165, pl, u) : 0; return c == 1 || c == 0xa; }
 static uint64_t g_mouse_attack_at;
-static void w_attack(uint64_t u, const char *how) { g_mouse_attack_at = w_now_ns(); if (g_go.on) g_go.on = 0; int r = w_interact(u); static int lg; if (lg++ < 300) LOG("鼠标攻击：%s 类型 1 cls %u id %u → 点击入口 %d", how, *(uint32_t *)(u + 4), *(uint32_t *)(u + 8), r); }
+static void w_attack(uint64_t u, const char *how) {
+    g_mouse_attack_at=w_now_ns();
+    if(g_go.on)g_go.on=0;
+    if(dm_pc_input_stand_still()) {
+        // The original w_interact(unit) can enqueue an approach path even
+        // while Shift is held. Use the game's own current A-skill button for
+        // a stationary attack/cast and never queue that monster approach.
+        // The native targeting subsystem remains responsible for the skill.
+        dm_ui_key_pulse(DM_BTN_A,6);
+        return;
+    }
+    int r=w_interact(u);
+    static int lg;
+    if(lg++<300)LOG("鼠标攻击：%s 类型 1 cls %u id %u → 点击入口 %d",
+                   how,*(uint32_t *)(u+4),*(uint32_t *)(u+8),r);
+}
 static void w_walk_step(uint8_t *b) {
     // Shift / native stand-still cancels only a pending mouse ground route.
     // Keep the game's NPC approach and monster-ID lock behavior untouched.

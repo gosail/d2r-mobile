@@ -596,7 +596,7 @@ static int pc_prompt_is_pad_label(const char *nm) {
            !strcmp(nm,"LeftBumperPrompt") || !strcmp(nm,"RightBumperPrompt");
 }
 static void pc_prompt_walk(uint64_t w,int dep) {
-    if(!w || dep>12)return;
+    if(!w || dep>12 || !*(uint8_t *)(uintptr_t)(w+0x50))return;
     const char *nm=(const char *)(uintptr_t)rd8(w+8);
     // HUD button widgets are actionable: hiding RunButtonPrompt would also
     // make its existing mouse hit target unusable. Scope this to open panels.

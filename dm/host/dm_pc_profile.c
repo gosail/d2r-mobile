@@ -197,6 +197,38 @@ int dm_pc_profile_file_status(void) {
     if(rc==DM_KEYFILE_NOT_FOUND)return 0;
     return -1;
 }
+int dm_pc_profile_hud_snapshot(uint16_t primary[10],uint16_t second[6]) {
+    if(!primary || !second)return -1;
+    for(unsigned i=0;i<10;i++)primary[i]=0xffff;
+    for(unsigned i=0;i<6;i++)second[i]=0xffff;
+    dm_fs_profile_lock();
+    pthread_mutex_lock(&pc_mu);
+    int rc=read_locked();
+    if(rc==DM_KEYFILE_OK) {
+        // Native command IDs 14..21 and 46..49 are already ordered by
+        // original Switch skill slots A/B/Y/X/R/ZR (see dm_pc_input.c).
+        static const uint32_t base[6]={14,15,16,17,18,19};
+        static const uint32_t alt[6]={20,21,46,47,48,49};
+        for(unsigned i=0;i<10;i++) {
+            uint32_t id=i<6?base[i]:23+i-6;
+            uint16_t vk=0xffff;
+            if(dm_keyfile_get(&profile,id,0,&vk)!=DM_KEYFILE_OK ||
+               vk==0xffff)
+                (void)dm_keyfile_get(&profile,id,1,&vk);
+            primary[i]=vk;
+            if(i<6) {
+                vk=0xffff;
+                if(dm_keyfile_get(&profile,alt[i],0,&vk)!=DM_KEYFILE_OK ||
+                   vk==0xffff)
+                    (void)dm_keyfile_get(&profile,alt[i],1,&vk);
+                second[i]=vk;
+            }
+        }
+    }
+    pthread_mutex_unlock(&pc_mu);
+    dm_fs_profile_unlock();
+    return rc==DM_KEYFILE_OK?1:rc==DM_KEYFILE_NOT_FOUND?0:-1;
+}
 int dm_pc_profile_action_for_vk(uint16_t vk,uint32_t *id,unsigned *slot) {
     dm_fs_profile_lock();
     pthread_mutex_lock(&pc_mu);

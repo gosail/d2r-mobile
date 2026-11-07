@@ -17,6 +17,11 @@ void dm_pc_profile_pre_commit_locked(const char *workdir);
 // 1: supported game-created .key; 0: not created/mounted; -1: invalid or
 // unsupported format. Used only for fallback before the guest creates it.
 int dm_pc_profile_file_status(void);
+// One serialized native-file read for all visible Switch HUD keycap labels.
+// primary[0..5] = A,B,Y,X,R,ZR; primary[6..9] = potion 1..4;
+// second[0..5] = the same six skill buttons with ZL held.
+// 1=valid file, 0=missing file (temporary fallbacks), -1=invalid.
+int dm_pc_profile_hud_snapshot(uint16_t primary[10],uint16_t second[6]);
 
 // Portable, layout-independent HID usage -> Win32 VK for this .key variant.
 // Does not convert to ASCII (e.g. top-row '1' is VK_1 regardless of Shift).

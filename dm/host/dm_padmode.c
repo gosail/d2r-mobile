@@ -533,17 +533,13 @@ static void pc_key_name(char out[24],uint16_t vk) {
 static void pc_hud_keys(uint8_t *b,uint64_t frame) {
     if(!g_cur || frame%12)return;
     extern int dm_kbmap_is_external_owner(void);
-    extern int dm_pc_profile_file_status(void);
-    extern int dm_pc_profile_get(uint32_t,unsigned,uint16_t *);
+    extern int dm_pc_profile_hud_snapshot(uint16_t [10],uint16_t [6]);
     int owner=dm_kbmap_is_external_owner();
-    int status=owner?dm_pc_profile_file_status():0;
+    uint16_t main_vk[10],alt_vk[6];
+    int status=owner?dm_pc_profile_hud_snapshot(main_vk,alt_vk):0;
     int native=status==1;
     uint64_t root=rd8((uint64_t)(uintptr_t)(b+0x2f05458));
     if(!root)return;
-    // Guest native .key Skill 1..12 correspond to Switch A B Y X R ZR
-    // (and those same six buttons with ZL). No X/Y swap in the HUD label.
-    static const unsigned main_ids[6]={14,15,16,17,18,19};
-    static const unsigned alt_ids[6]={20,21,46,47,48,49};
     for(int i=0;i<10;i++) {
         char nm[36],label[60]={0};
         if(i<6)snprintf(nm,sizeof nm,"TouchPcKeySkill%d",i);
@@ -553,17 +549,8 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
         if(owner && status>=0) {
             char first[24]={0},second[24]={0};
             if(native) {
-                unsigned id=i<6?main_ids[i]:(unsigned)(23+i-6);
-                uint16_t vk=0xffff;
-                if(dm_pc_profile_get(id,0,&vk)!=0 || vk==0xffff)
-                    (void)dm_pc_profile_get(id,1,&vk);
-                pc_key_name(first,vk);
-                if(i<6) {
-                    vk=0xffff; unsigned alt=alt_ids[i];
-                    if(dm_pc_profile_get(alt,0,&vk)!=0 || vk==0xffff)
-                        (void)dm_pc_profile_get(alt,1,&vk);
-                    pc_key_name(second,vk);
-                }
+                pc_key_name(first,main_vk[i]);
+                if(i<6)pc_key_name(second,alt_vk[i]);
             } else {
                 // Temporary default before the guest writes its .key.
                 if(i<6)snprintf(first,sizeof first,"F%d",i+1);

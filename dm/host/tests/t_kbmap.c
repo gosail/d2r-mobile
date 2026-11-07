@@ -20,6 +20,7 @@ uint64_t dm_input_samples(void) { return guest_samples; }
 static int32_t left_x,left_y;
 static unsigned maps,pc_native_panels;
 int dm_ui_pc_skill_bind_request(uint32_t id) { (void)id;return 0; }
+int dm_ui_pc_skill_tree_active(void) { return 0; }
 static int game_ingame=1;
 void dm_fs_profile_lock(void) {}
 void dm_fs_profile_unlock(void) {}

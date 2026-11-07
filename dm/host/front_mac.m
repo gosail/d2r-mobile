@@ -581,6 +581,9 @@ static BOOL mac_controls_hit(NSView *view,NSEvent *event) {
 }
 static DmMacKeyboardEditor *g_mac_keyboard_editor;
 static void mac_controls_sync(void) {
+    // Native KeyBindingMenuHD is the one shared controls page; AppKit must
+    // not add a second Keyboard/Controller tab or a separate window.
+    return;
     if(!g_live || !g_view)return;
     BOOL visible=dm_kbmap_controls_visible()!=0;
     if(!visible && !g_mac_keyboard_tab)return;

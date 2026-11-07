@@ -20,6 +20,7 @@
 #include <stdatomic.h>
 #include <math.h>
 
+static void ui_pc_controls_message(int slot);
 static module_t *main_module(void) {
     for (int i = 0; i < g_nmod; ++i)
         if (!strcmp(g_mod[i].name, "main")) return &g_mod[i];
@@ -2168,6 +2169,159 @@ static int pc_native_bound_skill(uint64_t buttons) {
     }
     return -1;
 }
+// Inline native Controls column, added to the original KeyBindingMenuHD
+// cloned ListItem template by ios/tools/controls_layout.py. Gamepad
+// PrimaryKeyButton/SecondaryKeyButton remain owned by the guest (.ctl).
+// The two TouchPcKeyButton siblings write only this character's .key.
+static int pc_controls_command_for_name(const char *s) {
+    if(!s || !*s)return -1;
+    // Only unambiguous game UI action labels are assigned to .key IDs.
+    // Never assume the dynamic gamepad row ordinal is a PC command ID.
+    if(strstr(s,"Skill") || strstr(s,"skill") ||
+       strstr(s,"技能") || strstr(s,"スキル") ||
+       strstr(s,"기술") || strstr(s,"Habilidad") ||
+       strstr(s,"Habilidade") || strstr(s,"Навык")) {
+        for(const char *p=s;*p;p++)if(*p>='0' && *p<='9') {
+            int n=atoi(p);
+            if(n>=1 && n<=8)return 13+n;
+            if(n>=9 && n<=12)return 46+n-9;
+            return -1;
+        }
+    }
+    if(strstr(s,"Inventory") || strstr(s,"inventory") ||
+       strstr(s,"物品栏") || strstr(s,"背包"))return 1;
+    if(strstr(s,"Character") || strstr(s,"character") ||
+       strstr(s,"角色属性") || strstr(s,"人物属性"))return 0;
+    if(strstr(s,"Skill Tree") || strstr(s,"Skill tree") ||
+       strstr(s,"技能树"))return 12;
+    if(strstr(s,"Automap") || strstr(s,"Auto Map") ||
+       strstr(s,"自动地图"))return 7;
+    if(strstr(s,"Stand Still") || strstr(s,"Stand still") ||
+       strstr(s,"原地站立"))return 36;
+    return -1;
+}
+static void pc_controls_key_name(uint16_t vk,char out[24]) {
+    out[0]=0;
+    if(vk==0xffff){strlcpy(out,"—",24);return;}
+    if((vk>='A'&&vk<='Z')||(vk>='0'&&vk<='9')){
+        out[0]=(char)vk;out[1]=0;return;
+    }
+    if(vk>=0x70&&vk<=0x7b){snprintf(out,24,"F%u",(unsigned)(vk-0x70+1));return;}
+    if(vk>=0x60&&vk<=0x69){snprintf(out,24,"Num%u",(unsigned)(vk-0x60));return;}
+    switch(vk){
+    case 0x09:strlcpy(out,"Tab",24);break;
+    case 0x0d:strlcpy(out,"Enter",24);break;
+    case 0x1b:strlcpy(out,"Esc",24);break;
+    case 0x20:strlcpy(out,"Space",24);break;
+    case 0x10:strlcpy(out,"Shift",24);break;
+    case 0x11:strlcpy(out,"Ctrl",24);break;
+    case 0x12:strlcpy(out,"Alt",24);break;
+    case 0x100:strlcpy(out,"Mouse3",24);break;
+    case 0x103:strlcpy(out,"Wheel+",24);break;
+    case 0x104:strlcpy(out,"Wheel-",24);break;
+    default:snprintf(out,24,"VK%X",(unsigned)vk);
+    }
+}
+static void pc_controls_text(module_t *m,uint64_t w,const char *newtext) {
+    if(!w || !newtext ||
+       *(uint64_t *)(uintptr_t)w!=(uint64_t)m->base+0x20ba4c8)return;
+    size_t n=strlen(newtext);
+    const char *old=(const char *)(uintptr_t)*(uint64_t *)(uintptr_t)(w+0x88);
+    if(*(uint64_t *)(uintptr_t)(w+0x90)==n &&
+       (!n || (old && !memcmp(old,newtext,n))))return;
+    ((void (*)(uint64_t,const char *,uint64_t))(m->base+0x136e5c))
+        (w+0x88,newtext,(uint64_t)n);
+    ((void (*)(uint64_t))(m->base+0xadc434))(w);
+}
+static int pc_controls_row_action(uint64_t template) {
+    uint64_t binding=ui_find(template,"Binding",0);
+    uint64_t title=binding?ui_find(binding,"BindingName",0):0;
+    if(!title || !main_module() ||
+       *(uint64_t *)(uintptr_t)title!=(uint64_t)main_module()->base+0x20ba4c8)
+        return -1;
+    const char *s=(const char *)(uintptr_t)*(uint64_t *)(uintptr_t)(title+0x88);
+    return pc_controls_command_for_name(s);
+}
+static int pc_controls_row_button_hit(uint64_t template,int slot,uint64_t xy) {
+    uint64_t button=ui_find(template,
+        slot?"TouchPcKeyButton1":"TouchPcKeyButton0",0);
+    if(!button || !*(uint8_t *)(uintptr_t)(button+0x50))return 0;
+    uint64_t vt=*(uint64_t *)(uintptr_t)button;
+    uint64_t fn=*(uint64_t *)(uintptr_t)(vt+0x48);
+    return fn && (((int (*)(uint64_t,uint64_t))fn)(button,xy)&1)!=0;
+}
+static int pc_controls_template_visit(module_t *m,uint64_t w,int depth,
+                                      int clicked_slot,uint64_t xy,
+                                      int *selected) {
+    if(!w || depth>14 || !*(uint8_t *)(uintptr_t)(w+0x50))return 0;
+    const char *name=(const char *)(uintptr_t)*(uint64_t *)(uintptr_t)(w+8);
+    if(name && !strcmp(name,"Template") &&
+       ui_find(w,"TouchPcKeyButton0",0) &&
+       ui_find(w,"TouchPcKeyButton1",0)) {
+        int command=pc_controls_row_action(w);
+        if(command>=0) {
+            if(clicked_slot>=0 && pc_controls_row_button_hit(w,clicked_slot,xy)) {
+                if(dm_kbmap_native_pc_begin((unsigned)command,(unsigned)clicked_slot)) {
+                    *selected=1;
+                    LOG("原生控制页：%d 键鼠槽 %d 开始采集物理按键（.ctl 不变）",
+                        command,clicked_slot);
+                }
+                return 1;
+            }
+            if(clicked_slot<0) {
+                unsigned active_id=0,active_slot=0;
+                int capturing=dm_kbmap_native_pc_capture(&active_id,&active_slot);
+                for(int slot=0;slot<2;slot++) {
+                    char text[24]={0};
+                    uint16_t vk=0xffff;
+                    int rc=dm_pc_profile_get((unsigned)command,(unsigned)slot,&vk);
+                    if(capturing && active_id==(unsigned)command &&
+                       active_slot==(unsigned)slot) {
+                        strlcpy(text,dm_lang_zh()?"按键…":"Press key",sizeof text);
+                        if(dm_kbmap_native_pc_result()==-5)
+                            strlcpy(text,dm_lang_zh()?"键冲突":"Conflict",sizeof text);
+                    } else if(rc==0)pc_controls_key_name(vk,text);
+                    else strlcpy(text,"—",sizeof text);
+                    uint64_t label=ui_find(w,slot?"TouchPcKeyName1":"TouchPcKeyName0",0);
+                    pc_controls_text(m,label,text);
+                }
+            }
+        }
+        return 0;
+    }
+    uint64_t ch=*(uint64_t *)(uintptr_t)(w+0x58),
+             n=*(uint64_t *)(uintptr_t)(w+0x60);
+    if(!ch || n>512)return 0;
+    for(uint64_t i=0;i<n;i++)
+        if(pc_controls_template_visit(m,*(uint64_t *)(uintptr_t)(ch+8*i),
+                                       depth+1,clicked_slot,xy,selected))return 1;
+    return 0;
+}
+static void ui_pc_controls_pump(module_t *m,uint64_t root,uint64_t fr) {
+    if(fr%6)return;
+    uint64_t panel=root?ui_find(root,"KeyBindingMenu",0):0;
+    if(!panel || !*(uint8_t *)(uintptr_t)(panel+0x50)) {
+        dm_kbmap_native_pc_cancel();
+        return;
+    }
+    uint64_t list=ui_find(panel,"BindingsList",0);
+    int selected=0;
+    if(list)pc_controls_template_visit(m,list,0,-1,0,&selected);
+}
+static void ui_pc_controls_message(int slot) {
+    module_t *m=main_module();
+    if(!m || slot<0 || slot>1)return;
+    uint64_t root=*(uint64_t *)(uintptr_t)(m->base+0x2f05458);
+    uint64_t panel=root?ui_find(root,"KeyBindingMenu",0):0;
+    uint64_t list=panel?ui_find(panel,"BindingsList",0):0;
+    if(!list || !*(uint8_t *)(uintptr_t)(panel+0x50))return;
+    uint32_t x=*(uint32_t *)(uintptr_t)(m->base+0x2d128f8),
+             y=*(uint32_t *)(uintptr_t)(m->base+0x2d128fc);
+    uint64_t xy=(uint64_t)x|((uint64_t)y<<32);
+    int selected=0;
+    pc_controls_template_visit(m,list,0,slot,xy,&selected);
+    if(!selected)LOG("原生控制页：没有匹配的键鼠操作行，不猜测行号或覆盖 .key");
+}
 static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
     static int phase,tries,before; // 0 idle, 1 popup, 2 ZL lead, 3 await close
     static uint64_t begun,at,buttons,modal_opened;
@@ -3191,7 +3345,7 @@ void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线
                 else fix = 0; }
             if (th) { ui_auto_key(th); tnext = fr + 8; } } } }
     { module_t *pm = main_module(); uint64_t proot = 0; if (pm) { memcpy(&proot, pm->base + 0x2f05458, 8); int32_t pw = *(int32_t *)(pm->base + 0x211da38), phh = *(int32_t *)(pm->base + 0x211da3c);
-        static uint64_t pf = UINT64_MAX; if (proot && pw > 0 && phh > 0 && pf != fr) { pf = fr; { static int dd; const char *dn; if (!dd && (dn = getenv("DM_UI_DUMP")) && atomic_load(&g_taps_base) && fr >= atomic_load(&g_taps_base) + (getenv("DM_UI_DUMP_AT") ? atoi(getenv("DM_UI_DUMP_AT")) : 45)) { dd = 1; ui_dump(proot, 0, dn, 0, pm); } } int tm = ui_touch_mode(); if (tm) ui_wtap_pump(pm, proot, pw, phh); if (tm) ui_long_pump(); ui_target_pump(pm, fr); if (tm) ui_use_pump(); if (tm) ui_buy_pump(pw, phh); ui_item_pump(proot, pw, phh); ui_ptr_pump(pm, proot, pw, phh); if (tm) ui_drag_pump(pm, proot, pw, phh); UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh); { int lu = atomic_load(&g_load_up); dm_uiscreen_set_ingame(ui_panel(proot, "HUDPanel") && !(lu < 0 ? ui_find(proot, "LoadScreenPanel", 0) != 0 : lu)); } ui_safe_pump(pm, proot, fr); ui_lift_pump(proot, fr); ui_note_dock_pump(proot); ui_trove_tabs_pump(pm, proot, fr); ui_minimap_pump(pm, proot, pw, phh, fr); ui_map_pump(pm, proot); ui_map_geom_pump(pm, proot); ui_boss_pct_pump(pm, proot); ui_npcdlg_pump(proot); ui_map_center(pm, proot, *(volatile int32_t *)(pm->base + 0x2d5c748)); if (tm) ui_bind_pump(proot, fr); ui_pc_skill_bind_pump(proot, fr); ui_pc_full_page_pump(pm,proot,fr); if (tm) swaptab_pump(proot); if (tm) ui_mercpg_pump(pm, proot, fr); ui_widestash_pump(proot); mv_audit_pump(proot, fr); ui_pages_pump(pm, proot); } } }
+        static uint64_t pf = UINT64_MAX; if (proot && pw > 0 && phh > 0 && pf != fr) { pf = fr; { static int dd; const char *dn; if (!dd && (dn = getenv("DM_UI_DUMP")) && atomic_load(&g_taps_base) && fr >= atomic_load(&g_taps_base) + (getenv("DM_UI_DUMP_AT") ? atoi(getenv("DM_UI_DUMP_AT")) : 45)) { dd = 1; ui_dump(proot, 0, dn, 0, pm); } } int tm = ui_touch_mode(); if (tm) ui_wtap_pump(pm, proot, pw, phh); if (tm) ui_long_pump(); ui_target_pump(pm, fr); if (tm) ui_use_pump(); if (tm) ui_buy_pump(pw, phh); ui_item_pump(proot, pw, phh); ui_ptr_pump(pm, proot, pw, phh); if (tm) ui_drag_pump(pm, proot, pw, phh); UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh); { int lu = atomic_load(&g_load_up); dm_uiscreen_set_ingame(ui_panel(proot, "HUDPanel") && !(lu < 0 ? ui_find(proot, "LoadScreenPanel", 0) != 0 : lu)); } ui_safe_pump(pm, proot, fr); ui_lift_pump(proot, fr); ui_note_dock_pump(proot); ui_trove_tabs_pump(pm, proot, fr); ui_minimap_pump(pm, proot, pw, phh, fr); ui_map_pump(pm, proot); ui_map_geom_pump(pm, proot); ui_boss_pct_pump(pm, proot); ui_npcdlg_pump(proot); ui_map_center(pm, proot, *(volatile int32_t *)(pm->base + 0x2d5c748)); if (tm) ui_bind_pump(proot, fr); ui_pc_skill_bind_pump(proot, fr); ui_pc_controls_pump(pm,proot,fr); ui_pc_full_page_pump(pm,proot,fr); if (tm) swaptab_pump(proot); if (tm) ui_mercpg_pump(pm, proot, fr); ui_widestash_pump(proot); mv_audit_pump(proot, fr); ui_pages_pump(pm, proot); } } }
     if (atomic_load(&g_fe_name_open) && atomic_load(&g_ut_phase) == 2) {   // 起名页：点输入框（底板 / 文本框）= 重新弹系统键盘，不发鼠标点击 | naming page: tapping the input box (backplate / text box) = pop up the system keyboard again, no mouse click is sent
         module_t *nm = main_module(); uint64_t nroot = 0; if (nm) memcpy(&nroot, nm->base + 0x2f05458, 8); uint64_t pn = nroot ? ui_find(nroot, "CharacterCreateNamePanel", 0) : 0;
         if (pn && nm) { int32_t w = *(int32_t *)(nm->base + 0x211da38), h = *(int32_t *)(nm->base + 0x211da3c); uint64_t v = atomic_load(&g_ut_xy);
@@ -3424,6 +3578,9 @@ void dm_ui_on_uimsg(const char *cat, const char *act, const char *arg) {
     if (!strcmp(cat, "PanelManager") && arg && !strcmp(arg, "ChroniclePanel") && (!strcmp(act, "ClosePanel") || !strcmp(act, "UnloadPanel"))) atomic_store(&g_chr_closed, 1);
     { void dm_kbmap_controls_event(const char *,const char *,const char *);
       dm_kbmap_controls_event(cat,act,arg); }
+    if(!strcmp(cat,"PanelManager") && !strcmp(act,"ClosePanel") && arg &&
+       (!strcmp(arg,"TouchPcBind0") || !strcmp(arg,"TouchPcBind1")))
+        ui_pc_controls_message(arg[11]-'0');
     dm_custom_on_uimsg(cat, act, arg ? arg : "");
     if (act && !strcmp(act, "ControllerActionEnd")) atomic_store(&g_a_wait, 0);   // 等到「手柄动作结束」：拿起是在确认键松开被游戏处理时才发的（只等到「开始」就挪光标，背包 → 箱子的拿起包没发） | wait until "controller action end": the pick-up is only sent when the release of the confirm button is processed by the game (if the cursor is moved after waiting only for "start", the pick-up packet for inventory → stash is not sent)
     if (strcmp(cat, "InputMessage") && strcmp(cat, "MonsterHealth") && strcmp(cat, "PartyPanelMessage")) DM_LAT("ui %s %s %s", cat, act, arg ? arg : "");

@@ -16,6 +16,9 @@
 static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char map[256],def[256],down[256],active[256],native_held[256];
 static int inited;
+// Once this character has a valid guest .key, never fall back to WASD just
+// because the guest is temporarily rewriting or committing its profile.
+static int native_seen;
 static const int native_pc_mode=1;
 static char hero[64];
 static void defaults(unsigned char *m) {
@@ -57,6 +60,7 @@ void dm_kbmap_select_character(const char *name) {
         memcpy(map,def,sizeof map);
         memset(down,0,sizeof down);memset(active,0,sizeof active);
         memset(native_held,0,sizeof native_held);
+        native_seen=0;
         dm_kb_clear();
     }
     pthread_mutex_unlock(&km_mu);
@@ -95,35 +99,42 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;
     pthread_mutex_lock(&km_mu);
     load_locked();
-    int pc_mode=native_pc_mode;
     int was_native=native_held[usage],was_legacy=down[usage];
-    int any_native=0,any_legacy=0;
-    if(pc_mode)for(unsigned i=0;i<256;i++) {
-        any_native|=native_held[i];any_legacy|=down[i];
-    }
+    int seen_native=native_seen;
     pthread_mutex_unlock(&km_mu);
-    if(pc_mode) {
-        int use_native=was_native;
-        if(pressed && !was_native && !was_legacy) {
-            if(any_native)use_native=1;
-            else if(any_legacy)use_native=0;
-            else if(!dm_uiscreen_ingame())use_native=0; // main menu/character select
-            else {
-                // The guest creates the .key only for a real character. An
-                // unsupported file still permits safe controller-style
-                // navigation; the native .key editor stays read-only.
-                use_native=dm_pc_profile_file_status()==1;
-            }
-        }
-        if(use_native) {
+    // A release always goes to the dispatcher that owned its key-down.
+    // Never reinterpret a held key as the active save file changes.
+    if(was_native) {
+        if(!pressed) {
             pthread_mutex_lock(&km_mu);
-            native_held[usage]=(unsigned char)!!pressed;
+            native_held[usage]=0;
             pthread_mutex_unlock(&km_mu);
-            dm_pc_input_event(usage,pressed);
+            dm_pc_input_event(usage,0);
+        }
+        return;
+    }
+    if(pressed && !was_legacy) {
+        int status=dm_uiscreen_ingame()?dm_pc_profile_file_status():0;
+        if(status==1) {
+            // The guest .key is authoritative in a run. An earlier menu/
+            // missing-file WASD fallback must not coexist with its native
+            // action (e.g. A moving left while opening Character).
+            pthread_mutex_lock(&km_mu);
+            memset(down,0,sizeof down);
+            memset(active,0,sizeof active);
+            dm_kb_clear();
+            native_seen=1;
+            native_held[usage]=1;
+            pthread_mutex_unlock(&km_mu);
+            dm_pc_input_event(usage,1);
             return;
         }
-        if(!pressed && !was_legacy)return;
+        // Unsupported/corrupt .key must never turn a PC action into a
+        // different gamepad action. Nor can a temporary missing file undo
+        // native mode after this character's .key was already observed.
+        if(status<0 || seen_native)return;
     }
+    if(!pressed && !was_legacy)return;
     pthread_mutex_lock(&km_mu);load_locked();
     if((int)down[usage]==!!pressed) { pthread_mutex_unlock(&km_mu);return; }
     if(pressed) {
@@ -161,8 +172,14 @@ void dm_kbmap_controls_event(const char *cat,const char *action,const char *arg)
     if(!cat || !action) return;
     if(!strcmp(cat,"SettingsPanelMessage") && !strcmp(action,"CheckChanges")) {
         atomic_store(&controls_visible,arg && !strcmp(arg,"KeyBindingMenu"));
-    } else if(!strcmp(cat,"PanelManager") && (!strcmp(action,"ClosePanel") || !strcmp(action,"UnloadPanel"))
-              && arg && (!strcmp(arg,"SettingsPanel") || !strcmp(arg,"KeyBindingMenu"))) {
+    } else if(!strcmp(cat,"PanelManager") && arg &&
+              !strcmp(arg,"KeyBindingMenu") &&
+              (!strcmp(action,"OpenPanel") || !strcmp(action,"OpenExclusivePanel"))) {
+        atomic_store(&controls_visible,1);
+    } else if(!strcmp(cat,"PanelManager") &&
+              ((!strcmp(action,"UnloadAll")) ||
+               (( !strcmp(action,"ClosePanel") || !strcmp(action,"UnloadPanel")) &&
+                arg && (!strcmp(arg,"SettingsPanel") || !strcmp(arg,"KeyBindingMenu"))))) {
         atomic_store(&controls_visible,0);
     }
 }

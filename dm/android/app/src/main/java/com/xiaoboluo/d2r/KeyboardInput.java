@@ -15,8 +15,10 @@ final class KeyboardInput {
         if(d!=null && d.getKeyboardType()==InputDevice.KEYBOARD_TYPE_NONE) return false;
         int hid=hidUsage(e.getKeyCode());
         if(hid<0) return false;
-        if(e.getAction()==KeyEvent.ACTION_DOWN && e.getRepeatCount()==0)
+        if(e.getAction()==KeyEvent.ACTION_DOWN && e.getRepeatCount()==0) {
+            PadInput.externalInput();
             DmActivity.nativeKeyboardEvent(hid,true);
+        }
         else if(e.getAction()==KeyEvent.ACTION_UP)
             DmActivity.nativeKeyboardEvent(hid,false);
         return true; // suppress Android UI navigation and key-repeat toggling

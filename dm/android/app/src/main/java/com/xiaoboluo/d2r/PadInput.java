@@ -43,6 +43,7 @@ final class PadInput {
 
     private static final Map<Integer, State> pads = new HashMap<>();
     private static boolean padMode;       // 当前是不是手柄布局 | current layout: controller or touch
+    private static boolean externalPreferred; // physical keyboard/mouse owns layout until a finger takes over
     private static boolean needCenter;    // 碰过屏：摇杆要先回中 | screen was touched: sticks must return to center first
     private static boolean onL, onR;      // 摇杆是否推出（带迟滞） | sticks pushed out (with hysteresis)
     private static long prevButtons;
@@ -52,6 +53,14 @@ final class PadInput {
     private PadInput() {}
 
     static boolean isPadMode() { return padMode; }
+
+    static void externalInput() {
+        externalPreferred = true;
+        if (!padMode) {
+            DmActivity.nativePadGlyph(GLYPH_PAD); // Switch, never touch glyphs
+            setMode(true);
+        }
+    }
 
     static boolean onKey(KeyEvent e) {
         if (!isPadSource(e.getSource())) return false;
@@ -95,6 +104,7 @@ final class PadInput {
 
     // 玩家碰了屏幕：手柄布局 → 触屏布局，并等摇杆回中（iOS 的 dm_gamepad_touched） | The player touched the screen (iOS dm_gamepad_touched)
     static void onTouch() {
+        externalPreferred = false;
         if (!padMode) return;
         needCenter = true;
         setMode(false);
@@ -121,7 +131,7 @@ final class PadInput {
             if (InputDevice.getDevice(e.getKey()) == null) { it.remove(); removed = true; }
         }
         if (!removed) return;
-        if (pads.isEmpty()) { setMode(false); }
+        if (pads.isEmpty() && !externalPreferred) { setMode(false); }
         publish();
     }
 

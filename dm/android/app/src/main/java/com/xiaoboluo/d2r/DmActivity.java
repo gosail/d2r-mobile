@@ -294,6 +294,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         float d=getResources().getDisplayMetrics().density;
         float x=(e.getRawX()-location[0])/d, y=(e.getRawY()-location[1])/d;
         int wheel=op==7 ? Float.compare(e.getAxisValue(MotionEvent.AXIS_VSCROLL),0) : 0;
+        if(op!=4 && op!=8)PadInput.externalInput();
         nativeMouseEvent(op,x,y,wheel);
         // Use Android system cursor icons, never an extra host-drawn tooltip
         // or fake item sprite. The guest renders the held item itself.

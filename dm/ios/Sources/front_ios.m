@@ -348,7 +348,7 @@ static NSString *kbActionLabel(int action) {
     if(keyboard)[self kbSettingsRefresh];
 }
 - (void)kbSettingsSync {
-    BOOL visible=dm_kbmap_controls_visible()!=0 && !_feMode;
+    BOOL visible=dm_kbmap_controls_visible()!=0;
     if(!visible && !_kbDeviceTabs)return;
     if(!_kbDeviceTabs) {
         _kbDeviceTabs=[[UISegmentedControl alloc] initWithItems:@[
@@ -406,9 +406,12 @@ static NSString *kbActionLabel(int action) {
     if(@available(iOS 13.4,*)) for(UIPress *p in presses)
         if(p.key != nil) {
             unsigned usage=(unsigned)p.key.keyCode;
-            if(dm_kbmap_action(usage)!=DM_KB_UNBOUND) {
+            // The built-in fallback map is NOT a filter for native .key:
+            // a character may bind any encodable physical key, including X.
+            if(usage<256 && (dm_pc_vk_from_hid(usage)>=0 ||
+                             dm_kbmap_action(usage)!=DM_KB_UNBOUND)) {
+                dm_gamepad_external_input();
                 dm_kbmap_key_event(usage,1);handled=YES;
-                dm_padmode_request_glyph(DM_GLYPH_KBD);
             }
         }
     if(!handled) [super pressesBegan:presses withEvent:event];
@@ -422,7 +425,10 @@ static NSString *kbActionLabel(int action) {
     if(@available(iOS 13.4,*)) for(UIPress *p in presses)
         if(p.key != nil) {
             unsigned usage=(unsigned)p.key.keyCode;
-            if(dm_kbmap_action(usage)!=DM_KB_UNBOUND) {dm_kbmap_key_event(usage,0);handled=YES;}
+            if(usage<256 && (dm_pc_vk_from_hid(usage)>=0 ||
+                             dm_kbmap_action(usage)!=DM_KB_UNBOUND)) {
+                dm_kbmap_key_event(usage,0);handled=YES;
+            }
         }
     if(!handled) [super pressesEnded:presses withEvent:event];
 }
@@ -947,6 +953,9 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
 // original quality-coloured label and get a focus outline. Do not create a touch.
 // UIKit pointer events use separate world/UI coordinates; never create a fake finger.
 - (void)dmMouseEvent:(int)op point:(CGPoint)p arg:(int)arg {
+    // Physical mouse takes over from touch, including the native Switch
+    // layout and its original gamepad settings tab.
+    if(op!=DM_MOUSE_LEAVE && op!=DM_MOUSE_HOVER_END)dm_gamepad_external_input();
     CGSize b=self.bounds.size; CGRect wr=world_rect(self);
     if (b.width<=0 || b.height<=0 || wr.size.width<=0 || wr.size.height<=0) return;
     dm_external_mouse_event(op,(float)(p.x/b.width),(float)(p.y/b.height),

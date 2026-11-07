@@ -325,7 +325,9 @@ static void mouse_item_pickup_placement(void) {
     dm_tc_begin_at(&s,0,300,180,1.0);
     dm_tc_pointer_item(&s,1);
     dm_tc_end_at(&s,0,1.08);
-    CHECK(s.pulse_button==DM_BTN_A && s.pulse_epoch!=0);
+    CHECK(s.mouse_pick_pending && s.pulse_button==0);
+    dm_tc_tick(&s,1.48);
+    CHECK(!s.mouse_pick_pending && s.pulse_button==DM_BTN_A && s.pulse_epoch!=0);
     NEAR(s.pointer_x,300,0.001);
     CHECK(dm_tc_pulse_end(&s,s.pulse_epoch));
     dm_tc_tick(&s,1.6);
@@ -339,6 +341,18 @@ static void mouse_item_pickup_placement(void) {
     CHECK(dm_tc_pulse_end(&s,s.pulse_epoch));
     dm_tc_tick(&s,3.0);
     CHECK(s.pulse_button==0 && s.buttons==0); // no repeated place/pickup
+    // Two rapid clicks on an empty hand use/equip an item.
+    dm_tc_set_holding(&s,0);
+    dm_tc_begin_at(&s,0,300,180,4.0);
+    dm_tc_pointer_item(&s,1);
+    dm_tc_end_at(&s,0,4.05);
+    CHECK(s.mouse_pick_pending && s.pulse_button==0);
+    dm_tc_begin_at(&s,0,300,180,4.15);
+    dm_tc_pointer_item(&s,1);
+    dm_tc_end_at(&s,0,4.21);
+    CHECK(!s.mouse_pick_pending && s.use_seq==1 && s.pulse_button==0);
+    dm_tc_tick(&s,4.9);
+    CHECK(s.pulse_button==0 && s.use_seq==1);
 }
 /* 界面连续手势：鼠标点击模式下起手不在物品区 / 面板外、位移过 10 点阈值 → 按那一刻的方向定型（纵 1 = 滚动，横 2 = 滑块），定型后不变；
    不发任何键、不记鼠标点击（拖出去又拖回原处也不算点按）；物品区起手照旧是拖放；面板外起手不定型；没开鼠标点击模式不定型

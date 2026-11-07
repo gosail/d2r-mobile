@@ -15,6 +15,9 @@ class PhysicalMouseParity(unittest.TestCase):
         header = self.get("ios/Sources/dm_touch_controls.h")
         self.assertIn("int mouse_item_mode;", header)
         self.assertIn("done.mouse_item && s->pointer_item == 1", controls)
+        self.assertIn("s->mouse_pick_pending=1;", controls)
+        self.assertIn("else ++s->use_seq;", controls)
+        self.assertIn("now_s-s->mouse_pick_at_s >= DM_TC_DOUBLE_TAP_S", controls)
         self.assertIn("f->mouse_item || f->pointer_dragged", controls)
         self.assertIn("done.mouse_item || elapsed < DM_TC_POINTER_TAP_S", controls)
 

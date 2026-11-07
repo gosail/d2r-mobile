@@ -315,6 +315,7 @@ void dm_tc_set_panel_state(int bits) { atomic_store(&g_bank_open, (bits & 1) != 
 
 static void pointer_drag_begin(dm_tc_state *s, dm_tc_finger *f) {
     f->pointer_dragged = 1;
+    s->mouse_pick_pending=0; // Continuous drag picks up immediately.
     if (s->pointer_lock) { f->locked_drag = 1; return; }   /* 单件槽占用时从别的物品上起拖：不拿起，这次拖动什么都不做 | Drag starting from another item while the single-item slot is occupied: do not pick up; this drag does nothing */
     if (s->pointer_shop || s->pointer_stack) { f->shop_drag = 1; s->pointer_x = 2; s->pointer_y = 2; update(s); return; }   /* 从货架上的货起拖：不拿起；光标挪到屏幕角上，让货上的说明框收掉（买的时候宿主再把光标放回这件货上） | Drag starting from goods on the shelf: do not pick up; move the cursor to a screen corner so the tooltip on the goods closes (at purchase time the host puts the cursor back on that item) */
     s->pointer_pickup_done = 0;
@@ -338,6 +339,7 @@ void dm_tc_cancel_all(dm_tc_state *s) {
     s->pointer_slot = DM_TC_NONE;
     s->pointer_valid = 0; s->pointer_x = s->pointer_y = 0;
     s->pointer_pickup_done = 0;
+    s->mouse_pick_pending=0; // Cancel pending pickup on layout/page reset.
     s->pointer_pulse_active = s->pointer_pulse_pending = 0;
     s->pointer_pending_x = s->pointer_pending_y = 0;
 }
@@ -626,13 +628,26 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
             else if (done.mouse_item && s->pointer_item == 1 && !s->pointer_shop &&
                      !s->pointer_stack && !s->pointer_lock &&
                      !atomic_load(&g_imbue_open)) {
-                /* Physical mouse: left click directly picks the item up via
-                   the game's A pick-up transaction. A finger's single tap
-                   still only displays the tooltip; its double tap behaviour
-                   is unchanged. The existing holding branch above handles
-                   left-click placement, and drag uses the same pulse path. */
-                pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 1);
-                s->last_tap_s = -1e9;
+                /* Delay only single-click pickup. A second click on the
+                   same item before the timeout uses or equips it through
+                   the game's existing native item-use pump instead.
+                   Fingers and continuous mouse dragging stay unchanged. */
+                float ox=done.aim_origin_x,oy=done.aim_origin_y;
+                int dbl=s->mouse_pick_pending &&
+                    now_s-s->mouse_pick_at_s<DM_TC_DOUBLE_TAP_S &&
+                    now_s>=s->mouse_pick_at_s &&
+                    hypotf(ox-s->mouse_pick_x,oy-s->mouse_pick_y) <=
+                        2*DM_TC_POINTER_MOVE_PT*scale_for(&s->layout);
+                if(dbl) {
+                    s->mouse_pick_pending=0;
+                    if(atomic_load(&g_hover_unid)) ++s->ident_seq;
+                    else ++s->use_seq;
+                } else {
+                    s->mouse_pick_pending=1;
+                    s->mouse_pick_at_s=now_s;
+                    s->mouse_pick_x=ox;s->mouse_pick_y=oy;
+                }
+                s->last_tap_s=-1e9;
             }
             else if (s->pointer_item == 2) { ++s->tab_tap_seq; }
             else if (s->pointer_item == 6 || s->pointer_item == 11) { }   /* 压着被上层面板盖住的按钮：不点、不发键 | Pressing on a button covered by an upper panel: no click, no key */
@@ -714,6 +729,17 @@ void dm_tc_pointer_press(dm_tc_state *s, float x, float y, uint64_t button) {
 }
 void dm_tc_tick(dm_tc_state *s, double now_s) {
     s->last_time_s = now_s;
+    // Do not pick an item up until a double-click is ruled out. Waiting
+    // while another mouse press is active prevents a stale pickup underneath
+    // the second click. The original drag path does not use this delay.
+    if(s->mouse_pick_pending && s->navigation_mode &&
+       now_s-s->mouse_pick_at_s >= DM_TC_DOUBLE_TAP_S &&
+       s->pointer_slot==DM_TC_NONE && !s->pulse_button &&
+       !s->pointer_pulse_pending) {
+        s->mouse_pick_pending=0;
+        pointer_pulse_start(s,s->mouse_pick_x,s->mouse_pick_y,1);
+        update(s);
+    }
     /* 补发不许盖掉在发的脉冲（腰带喝药等）：在发就等；那个脉冲收回时（dm_tc_pulse_end）把补发时刻推到 ZL 再领先满 DM_TC_ZL_LEAD_S 之后（原先到点直接覆盖，腰带那下没了） | The make-up send must not overwrite a pulse being sent (belt potion, etc.): wait while one is being sent; when that pulse is released (dm_tc_pulse_end), push the make-up time to after ZL has again led for a full DM_TC_ZL_LEAD_S (it used to overwrite directly when due, and the belt press was lost) */
     if (s->belt_gap_cell && now_s >= s->belt_gap_at && !s->pulse_button) { uint64_t btn = s->layout.target[DM_TC_BELT1 + (s->belt_gap_cell & 0xf)].button; s->belt_gap_cell = 0;
         if (btn && !s->navigation_mode) { s->pulse_rx = s->pulse_ry = 0; s->pulse_button = btn; ++s->pulse_epoch; } update(s); }

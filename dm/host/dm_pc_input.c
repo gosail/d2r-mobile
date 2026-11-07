@@ -274,7 +274,7 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         // A bound skill under the mouse enters the guest binding dialog.
         if(skill_slot(action)>=0 &&
            (dm_ui_pc_skill_bind_request(action) ||
-            dm_ui_pc_skill_tree_active())) {
+            dm_ui_pc_skill_tree_active() || dm_uiscreen_panel())) {
             // In the skill tree the same native A/B/Y/X/R/ZR buttons also
             // mean Select/Allocate/Cancel. Never send a cast/confirm merely
             // because pointer hover was unavailable for one UI frame.

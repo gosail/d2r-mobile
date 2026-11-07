@@ -37,7 +37,8 @@ int dm_ui_mouse_hover_now(float nx, float ny);
 // Clear native PC skill hover on pointer exit or world transition.
 void dm_ui_pc_skill_hover_end(void);
 // Queue guest-owned skill binding for a verified hovered skill icon.
-int dm_ui_pc_skill_bind_request(uint32_t command_id);   // 游戏线程：Mac 无按键悬停，只更新自由光标；不点击、不吸附邻格 | Game thread: Mac button-free hover, updates the free cursor without clicking or snapping to nearby cells
+int dm_ui_pc_skill_bind_request(uint32_t command_id);
+int dm_ui_pc_skill_tree_active(void);   // 游戏线程：Mac 无按键悬停，只更新自由光标；不点击、不吸附邻格 | Game thread: Mac button-free hover, updates the free cursor without clicking or snapping to nearby cells
 // 摇杆闭环（过渡做法，原版鼠标模式开关找到前用）：真机上原版逐帧鼠标移动那条路不跑，直写的光标会被手柄光标逻辑盖回。
 // 改为：每次读手柄时读原版光标 (main+0x2d128f8/fc)，离目标 > DM_CURSOR_NEAR（9）像素就推左摇杆朝目标走（60 像素内按距离减力）；
 // 没到位时按下的 A 连同当时的目标位置排队扣住，光标走到该位置才放出（拖放的起点 / 终点各一下）；排队 1.5 秒没到位报红并丢掉。

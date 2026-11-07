@@ -285,7 +285,11 @@ static NSEventModifierFlags mac_modifier_mask(unsigned short code) {
     case 59:case 62:return NSEventModifierFlagControl;
     case 58:case 61:return NSEventModifierFlagOption;
     case 57:return NSEventModifierFlagCapsLock;
-    default:return 0; // Command remains owned by macOS keyboard shortcuts
+    // In PC keyboard/mouse mode Command previews the native second skill
+    // bank (ZL). AppKit reports its transitions through flagsChanged, not
+    // ordinary keyDown/keyUp. Both physical sides must be forwarded.
+    case 54:case 55:return NSEventModifierFlagCommand;
+    default:return 0;
     }
 }
 static void mac_modifier_changed(NSEvent *event) {

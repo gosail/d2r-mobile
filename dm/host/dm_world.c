@@ -9,6 +9,7 @@
 #include "touch_mac.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
+#include "dm_pc_input.h"
 #include "dm_external_mouse.h"
 #include "hle.h"
 #include "dm.h"
@@ -748,6 +749,9 @@ static int w_hostile(uint8_t *b, uint64_t u) { if (*(uint32_t *)u != 1) return 0
 static uint64_t g_mouse_attack_at;
 static void w_attack(uint64_t u, const char *how) { g_mouse_attack_at = w_now_ns(); if (g_go.on) g_go.on = 0; int r = w_interact(u); static int lg; if (lg++ < 300) LOG("鼠标攻击：%s 类型 1 cls %u id %u → 点击入口 %d", how, *(uint32_t *)(u + 4), *(uint32_t *)(u + 8), r); }
 static void w_walk_step(uint8_t *b) {
+    // Shift / native stand-still cancels only a pending mouse ground route.
+    // Keep the game's NPC approach and monster-ID lock behavior untouched.
+    if (dm_pc_input_stand_still() && g_go.on && g_go.type==W_GROUND) g_go.on=0;
     uint64_t t = atomic_exchange(&g_walk, 0); if (!t) return; uint64_t dm_stick_last_ns(void); uint64_t pl = w_player(), scene = *(uint64_t *)(b + 0x2e2a698); int W = 0, H = 0, px = 0, py = 0; float f[2];
     dm_screen_real(&W, &H); if (!pl || !scene || W <= 0 || H <= 0 || !w_unit_xy(pl, &px, &py) || !w_project(b, scene, pl, f, 0)) return;
     // A monster selected at button-down has priority over subsequent pointer
@@ -766,6 +770,9 @@ static void w_walk_step(uint8_t *b) {
     }
     { float d0 = 0; int lab0 = 0; g_hit_mon = 1; uint64_t mu = w_hit(b, ((t >> 16) & 0xffff) / 65535.0f * W, (t & 0xffff) / 65535.0f * H, H * 0.10f, &d0, &lab0, 0); g_hit_mon = 0;
       if (mu && w_hostile(b, mu)) { if (w_now_ns() - g_gnd_stick_at >= 300000000ull && w_now_ns() - g_mouse_attack_at >= 200000000ull) w_attack(mu, "按住"); return; } }   // 按住时光标下是敌对怪：再打一下（摇杆 / W A S D 刚动过就让给它） | while held with a hostile monster under the pointer: hit once more (yielding to the stick / W A S D if they have just moved)
+    // While stand-still is held, mouse-on-ground cannot issue a new route.
+    // Monster attacks above still go through the existing native action.
+    if (dm_pc_input_stand_still()) return;
     if (g_go.on && g_go.type != W_GROUND) return;   // 正走向某个目标去交互：不打断 | walking towards some target to interact: do not interrupt
     if (w_now_ns() - g_gnd_stick_at < 300000000ull) return;   // 摇杆 / W A S D 0.3 秒内动过：让给它 | the stick / W A S D moved within 0.3 s: yield to it
     float sx = ((t >> 16) & 0xffff) / 65535.0f * W, sy = (t & 0xffff) / 65535.0f * H, k = H * 0.00206f, a = (sx - f[0]) / k / 16, c = (sy - f[1]) / k / 8;

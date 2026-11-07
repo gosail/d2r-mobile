@@ -67,7 +67,7 @@ int main(void) {
     assert(!dm_kbmap_restore_defaults_checked());
     // Before the guest creates .key, keyboard still navigates as a pad.
     dm_kbmap_key_event(0x52,1);assert(left_y==32767);
-    dm_kbmap_key_event(0x4f,1);assert(left_x==32767 && left_y==32767);
+    dm_kbmap_key_event(0x4f,1);assert(left_x==23170 && left_y==23170);
     dm_kbmap_key_event(0x4f,0);
     dm_kbmap_key_event(0x52,0);assert(left_y==0);
     dm_kbmap_key_event(0x04,1);assert(left_x==0 && left_y==0);

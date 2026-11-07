@@ -16,7 +16,7 @@
 static pthread_mutex_t km_mu=PTHREAD_MUTEX_INITIALIZER;
 static unsigned char map[256],def[256],down[256],active[256],native_held[256];
 static int inited;
-// Once this character has a valid guest .key, never fall back to WASD just
+// Once this character has a valid guest .key, never fall back to the old map just
 // because the guest is temporarily rewriting or committing its profile.
 static int native_seen;
 static const int native_pc_mode=1;
@@ -124,7 +124,7 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
         int status=ingame?dm_pc_profile_file_status():0;
         if(status==1 || (ingame && arrow && (status<0 || seen_native))) {
             // The guest .key is authoritative in a run. An earlier menu/
-            // missing-file WASD fallback must not coexist with its native
+            // missing-file controller fallback must not coexist with its native
             // action (e.g. A moving left while opening Character).
             pthread_mutex_lock(&km_mu);
             int legacy_active=0;
@@ -181,7 +181,11 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
             bits|=btn[idx%6];
         }
     }
-    dm_kb_set(bits,(right-left)*32767,(up-dn)*32767,0,0);
+    // The fallback uses the same normalized Switch stick geometry as
+    // native .key mode, including opposing directions cancelling out.
+    int dx=right-left,dy=up-dn;
+    dm_kb_set(bits,dx*(dy?23170:DM_STICK_MAX),
+              dy*(dx?23170:DM_STICK_MAX),0,0);
     pthread_mutex_unlock(&km_mu);
 }
 

@@ -120,9 +120,13 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
             // missing-file WASD fallback must not coexist with its native
             // action (e.g. A moving left while opening Character).
             pthread_mutex_lock(&km_mu);
-            memset(down,0,sizeof down);
-            memset(active,0,sizeof active);
-            dm_kb_clear();
+            int legacy_active=0;
+            for(unsigned i=0;i<256;i++)legacy_active|=down[i]!=0;
+            if(legacy_active) {
+                memset(down,0,sizeof down);
+                memset(active,0,sizeof active);
+                dm_kb_clear();
+            }
             native_seen=1;
             native_held[usage]=1;
             pthread_mutex_unlock(&km_mu);

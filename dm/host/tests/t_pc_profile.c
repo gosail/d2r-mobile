@@ -17,7 +17,8 @@ uint64_t dm_input_samples(void) {return guest_samples;}
 static int32_t game_right_y,game_left_x,game_left_y;
 static int map_toggles,panel_open,poisoned;static unsigned native_writers;
 static unsigned panel_events[57];
-static int capture_skill, last_bound_skill=-1;
+static int capture_skill, last_bound_skill=-1, tree_open;
+int dm_ui_pc_skill_tree_active(void) { return tree_open; }
 int dm_ui_pc_skill_bind_request(uint32_t id) {
     if(!capture_skill)return 0;
     last_bound_skill=(int)id;
@@ -267,10 +268,30 @@ int main(void) {
     dm_pc_input_event(0x3a,0);
     assert(game_buttons==0);
     capture_skill=0;
+    // A missing hover must never turn the skill-tree shortcut into
+    // a native confirm or allocate-point action.
+    tree_open=1;
+    dm_pc_input_event(0x3a,1);
+    assert(game_buttons==0);
+    dm_pc_input_event(0x3a,0);
+    tree_open=0;
     dm_pc_input_event(0x3a,1); // F1 uses native skill 1 -> Switch A
     assert(game_buttons==DM_BTN_A && dm_pc_input_latched_command(0x3a)==14);
     dm_pc_input_event(0x3a,1);assert(game_buttons==DM_BTN_A);
     dm_pc_input_event(0x3a,0);assert(game_buttons==0);
+    // Cmd previews the second bank and Cmd+F1 resolves to original
+    // Skill7 (ZL+A); the character .key is still unchanged.
+    dm_pc_input_cmd_event(0xe3,1);
+    assert(dm_pc_input_second_group());
+    assert(game_buttons==DM_BTN_ZL);
+    dm_pc_input_event(0x3a,1);
+    assert(game_buttons==DM_BTN_ZL);
+    guest_samples++;dm_pc_input_guest_step();
+    guest_samples++;dm_pc_input_guest_step();
+    assert(game_buttons==(DM_BTN_ZL|DM_BTN_A));
+    dm_pc_input_event(0x3a,0);
+    dm_pc_input_cmd_event(0xe3,0);
+    assert(!dm_pc_input_second_group() && game_buttons==0);
     dm_pc_input_event(0x40,1); // F7 is skill7 -> ZL + A
     assert(game_buttons==DM_BTN_ZL); // modifier first
     guest_samples++;dm_pc_input_guest_step();assert(game_buttons==DM_BTN_ZL);

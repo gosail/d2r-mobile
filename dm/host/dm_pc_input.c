@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 // Implemented by the original guest PanelManager adapter in dm_cursor.c.
+int dm_ui_pc_skill_bind_request(uint32_t command_id);
 void dm_ui_pc_toggle_panel(unsigned command_id);
 
 static pthread_mutex_t input_mu=PTHREAD_MUTEX_INITIALIZER;

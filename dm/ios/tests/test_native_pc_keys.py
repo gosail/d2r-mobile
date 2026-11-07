@@ -77,6 +77,26 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn('int dm_pc_input_wheel_or_default(int delta)',c)
         self.assertIn('rc==DM_KEYFILE_NOT_FOUND',c)
         self.assertIn('dm_ui_pc_toggle_panel(batch[i])',c)
+    def test_native_mouse_skill_binding_is_guest_owned(self):
+        pc=src("host/dm_pc_input.c")
+        ui=src("host/dm_cursor.c")
+        mouse=src("host/dm_external_mouse.c")
+        self.assertIn('dm_ui_pc_skill_bind_request(command[hid])',pc)
+        self.assertIn('command[hid]=UNMAPPED;',pc)
+        self.assertIn('uint64_t dm_pc_input_skill_buttons(uint32_t id)',pc)
+        self.assertIn('static int pc_skill_hit_walk(',ui)
+        self.assertIn('!modal_any(root,1,NULL)',ui)
+        self.assertIn('int dm_ui_pc_skill_bind_request(uint32_t id)',ui)
+        self.assertIn('atomic_compare_exchange_strong(&g_pc_skill_bind_req',ui)
+        self.assertIn('ui_pc_skill_bind_pump(proot, fr);',ui)
+        self.assertIn('dm_ui_key_pulse(DM_BTN_Y,5)',ui)
+        self.assertIn('dm_ui_key_pulse(DM_BTN_MINUS,4)',ui)
+        self.assertIn('dm_ui_key_pulse(DM_BTN_ZL,30)',ui)
+        self.assertIn('dm_ui_pc_skill_hover_end();',mouse)
+        # Skill 13..16 have no validated original controller slots.
+        self.assertIn('if(id>=46 && id<=49)',pc)
+        self.assertIn('return -1;',pc.split('static int skill_slot(unsigned id)')[1].split('}',1)[0])
+
     def test_game_thread_panel_and_original_weapon_swap(self):
         world=src("host/dm_world.c")
         cursor=src("host/dm_cursor.c")

@@ -77,14 +77,22 @@ void dm_kb_clear(void) {
     atomic_store(&g_kb_latch,0);
 }
 void dm_pad_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
-    // The physical controller takes visual ownership on explicit input;
-    // standalone HID tests need not link the optional keyboard module.
-    extern void dm_kbmap_external_owner(int) __attribute__((weak));
-    if(dm_kbmap_external_owner && (buttons || lx>8192 || lx< -8192 ||
-           ly>8192 || ly< -8192 || rx>8192 || rx< -8192 ||
-           ry>8192 || ry< -8192))
-        dm_kbmap_external_owner(0);
     uint64_t old = atomic_exchange(&g_pad_btn, buttons); atomic_fetch_or(&g_pad_latch, buttons & ~old);
+    // Only an explicit *new* pad input can reclaim visual ownership from
+    // keyboard/mouse. A button already held before the keyboard takeover
+    // is not a new event, nor is a steady, deflected analog stick.
+    static _Atomic int pad_stick_out;
+    int deflected=(lx>8192 || lx< -8192 || ly>8192 || ly< -8192 ||
+                   rx>8192 || rx< -8192 || ry>8192 || ry< -8192);
+    int centred=(lx<4915 && lx> -4915 && ly<4915 && ly> -4915 &&
+                 rx<4915 && rx> -4915 && ry<4915 && ry> -4915);
+    int prev_stick=atomic_load(&pad_stick_out);
+    if(centred)atomic_store(&pad_stick_out,0);
+    else if(deflected)atomic_store(&pad_stick_out,1);
+    extern void dm_kbmap_external_owner(int) __attribute__((weak));
+    if(dm_kbmap_external_owner && ((buttons & ~old) ||
+                                  (deflected && !prev_stick)))
+        dm_kbmap_external_owner(0);
     atomic_store(&g_pad_axes, (uint64_t)(uint16_t)lx | (uint64_t)(uint16_t)ly << 16 | (uint64_t)(uint16_t)rx << 32 | (uint64_t)(uint16_t)ry << 48);
 }
 void dm_input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {

@@ -540,8 +540,10 @@ static void pc_hud_keys(uint8_t *b,uint64_t frame) {
     int native=status==1;
     uint64_t root=rd8((uint64_t)(uintptr_t)(b+0x2f05458));
     if(!root)return;
-    static const unsigned main_ids[6]={14,15,17,16,18,19};
-    static const unsigned alt_ids[6]={20,21,47,46,48,49};
+    // Guest native .key Skill 1..12 correspond to Switch A B Y X R ZR
+    // (and those same six buttons with ZL). No X/Y swap in the HUD label.
+    static const unsigned main_ids[6]={14,15,16,17,18,19};
+    static const unsigned alt_ids[6]={20,21,46,47,48,49};
     for(int i=0;i<10;i++) {
         char nm[36],label[60]={0};
         if(i<6)snprintf(nm,sizeof nm,"TouchPcKeySkill%d",i);

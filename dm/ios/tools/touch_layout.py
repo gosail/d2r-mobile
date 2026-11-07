@@ -1361,9 +1361,21 @@ PRESENT['controller/console/settingspanelhd.json'] = _settings_tabs
 # 选项页底部的手柄提示条（「默认」「返回」两段说明字；键图标已透明）：局内被外框底带挡着看不出，前端选项页没有外框、字露在三个按钮下面——挪走
 # The controller button legend at the bottom of the options page (the two caption texts 「默认」(Default) and 「返回」(Back); the key icons are already transparent): in-game it is hidden by the bottom band of the outer frame, but the front-end options page has no outer frame and the text shows below the three buttons -- moved away
 def _settings_no_legend(s):
+    # Both console/ and plain controller/ layouts may be selected by the
+    # original Switch UI. The console page is handled by _settings_tabs;
+    # apply the identical Controls-before-Custom transformation here only
+    # when this resource itself owns the five-tab bar. Wrapper variants
+    # that contain only a ButtonLegendWidget must remain untouched.
+    changed=0
+    if ('"@Controls"' in s and
+        'SettingsPanelMessage:CheckChanges:KeyBindingMenu' in s and
+        '"tabMessages"' in s and
+        'SettingsPanelMessage:CheckChanges:VideoOptionsPanel' in s and
+        '"@dmTabCustom"' not in s):
+        s,changed=_settings_tabs(s)
     s, n = offscreen(s, types=('ButtonLegendWidget',))
     if n != 1: raise SystemExit('touch_layout：选项页提示条应为 1 个，找到 %d 个' % n)
-    return s, n
+    return s, n+changed
 # 确认框正文：统一大字号（40）后正文一行约 87 单位高，而确认框的底图是固定大小的，框顶内沿到按钮上沿只有约 265 单位 = 三行；
 # 专家模式警告是四行，最后一行被「好 / 取消」压住。只加高正文区不够（标题顶出框上沿、第四行仍被压）；原版更大的那张底图也只多 62 单位。
 # 定法（与「同页不要两种大小」的原则有出入，属例外）：这个框的正文字号 40 → 30（一行约 65 单位，四行 260），

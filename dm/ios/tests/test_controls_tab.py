@@ -7,7 +7,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from touch_layout import _settings_tabs, pad_settings
+from touch_layout import _settings_tabs, pad_settings, _settings_no_legend
 
 class ControlsTabs(unittest.TestCase):
     def test_control_between_game_settings_and_custom(self):
@@ -32,6 +32,15 @@ class ControlsTabs(unittest.TestCase):
         # The controller tab layout must show the same Controls-before-Custom
         # ordering; a simple Video-label replacement would put Custom first.
         self.assertEqual(json.loads(pad_settings(src)), out)
+        # A second native controller settings resource sometimes owns the
+        # actual tabs, rather than acting as a legend-only wrapper.
+        wrapper = dict(json.loads(src))
+        wrapper["children"]=[{"type":"ButtonLegendWidget","name":"SettingsLegend",
+                              "fields":{"rect":{"x":0,"y":0}}}]
+        plain, _ = _settings_no_legend(json.dumps(wrapper))
+        self.assertEqual(json.loads(plain)["textStrings"],out["textStrings"])
+        self.assertIn('"@dmTabCustom"',plain)
+        self.assertNotIn('"@OptionsMenuVideo"',plain)
 
 if __name__ == "__main__":
     unittest.main()

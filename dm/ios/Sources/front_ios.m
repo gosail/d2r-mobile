@@ -353,7 +353,7 @@ static NSString *kbActionLabel(int action) {
     if(!visible && !_kbDeviceTabs)return;
     if(!_kbDeviceTabs) {
         _kbDeviceTabs=[[UISegmentedControl alloc] initWithItems:@[
-            dm_lang_zh()?@"键鼠":@"Keyboard & Mouse",
+            dm_lang_zh()?@"控制 · 键鼠":@"Controls · Keyboard & Mouse",
             dm_lang_zh()?@"手柄":@"Controller"]];
         _kbDeviceTabs.selectedSegmentIndex=1; // preserve native bindings until selected
         [_kbDeviceTabs addTarget:self action:@selector(kbDeviceSwitched:)

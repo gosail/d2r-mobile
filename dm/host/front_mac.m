@@ -600,7 +600,7 @@ static void mac_controls_sync(void) {
     if(!visible && !g_mac_keyboard_tab)return;
     if(!g_mac_keyboard_editor)g_mac_keyboard_editor=[DmMacKeyboardEditor new];
     if(!g_mac_keyboard_tab) {
-        g_mac_keyboard_tab=[NSButton buttonWithTitle:@"键鼠 / Keyboard & Mouse"
+        g_mac_keyboard_tab=[NSButton buttonWithTitle:@"控制 · 键鼠 / Keyboard"
             target:g_mac_keyboard_editor action:@selector(chooseDevice:)];
         g_mac_pad_tab=[NSButton buttonWithTitle:@"手柄 / Controller"
             target:g_mac_keyboard_editor action:@selector(chooseDevice:)];

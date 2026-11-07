@@ -3044,12 +3044,44 @@ void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线
         // 圆钮隐藏后这页就只剩点面板外能出去。点完替玩家按一下返回：应用 = 保存后退出，放弃 = 不保存退出
         // The settings page's 「应用 / 放弃」(Apply / Discard): this page uses controller-version logic and exits only on the back button (the original bottom hint is 「B 关闭菜单」(B Close Menu)); when these two keyboard-and-mouse-version buttons are tapped the game handles them but does not close the page.
         // With the round buttons hidden, the only way out of this page is tapping outside the panel. After the tap, press back once for the player: apply = save then exit, discard = exit without saving
-        { uint64_t sp = ui_find(root, "SettingsPanel", 1); char nm[40]; int px = x, py = y;
-          if (sp && *(uint8_t *)(sp + 0x50) && ui_snap(m, root, &px, &py) == 1 && (strlcpy(nm, g_click_name, sizeof nm), !strcmp(nm, "AcceptButton") || !strcmp(nm, "CancelButton") || !strcmp(nm, "TouchClose"))) {   // TouchClose = 这页右上角补的 X（它自己不发消息） | TouchClose = the X added at the top right of this page (it sends no message itself)
-              atomic_store(&g_set_back_at, dm_guest_frame() + 12); LOG("界面鼠标：设置页点了 %s → 随后按返回键退出设置页", nm);
-              // 「自定义」页的勾选：这两个按钮的 AcceptChanges / CancelChanges 消息观测门看不到（实测只见返回键关页），在这里按点中的按钮转给 dm_custom
-              // Checkmarks on the 「自定义」(Custom) page: the AcceptChanges / CancelChanges messages of these two buttons are not visible to the observation gate (in measurement only the back button closing the page was seen), so here they are forwarded to dm_custom according to the button tapped
-              dm_custom_on_uimsg("OptionsPanelMessage", nm[0] == 'A' ? "AcceptChanges" : "CancelChanges", ""); } }
+        { uint64_t sp = ui_find(root, "SettingsPanel", 1);
+          if (sp && *(uint8_t *)(sp + 0x50)) {
+              // An exact native-widget hit matters here. ui_snap may return
+              // 0/2 for a button in the outer bottom band (a scrolled row
+              // or controller focus layer can overlap it), and routing a
+              // close/cancel through nearest-neighbour snapping is unsafe.
+              const char *names[]={"AcceptButton","CancelButton","TouchClose"};
+              uint64_t xy=(uint64_t)(uint32_t)x | ((uint64_t)(uint32_t)y<<32);
+              const char *pressed=NULL;
+              for(unsigned i=0;i<3;i++) {
+                  uint64_t bw=ui_find(sp,names[i],0);
+                  if(bw && *(uint8_t *)(bw+0x50) && *(uint8_t *)(bw+0x51)) {
+                      uint64_t fn=*(uint64_t *)(*(uint64_t *)bw+0x48);
+                      if(fn && (((int (*)(uint64_t,uint64_t))fn)(bw,xy)&1)) {
+                          pressed=names[i];break;
+                      }
+                  }
+              }
+              // Preserve existing exact-snap support for widget types that
+              // delegate their bounds to an ancestor; never snap to Cancel.
+              if(!pressed) {int px=x,py=y;
+                  if(ui_snap(m,root,&px,&py)==1 &&
+                     (!strcmp(g_click_name,"AcceptButton") ||
+                      !strcmp(g_click_name,"CancelButton") ||
+                      !strcmp(g_click_name,"TouchClose")))
+                      pressed=g_click_name;
+              }
+              if(pressed) {
+                  atomic_store(&g_set_back_at,dm_guest_frame()+12);
+                  if(!strcmp(pressed,"AcceptButton") ||
+                     !strcmp(pressed,"CancelButton")) {
+                      dm_custom_on_uimsg("OptionsPanelMessage",
+                         !strcmp(pressed,"AcceptButton")?
+                           "AcceptChanges":"CancelChanges","");
+                  }
+                  LOG("键鼠设置页：命中 %s，保留游戏按钮动作并调度原版返回",pressed);
+              }
+          } }
         // 任务语音播着时点右上角 X：按下那一下被语音面板吃掉、只停语音（游戏发 DialogueFinished），X 没收到点击，要再点一次才关。
         // 这次点击落在 X 上、且语音是这半秒内刚停的：替玩家按一下返回 = 一下就停语音并关面板（到点时任务面板已经关了就不按）
         // Tapping the top-right X while quest speech is playing: that press is eaten by the speech panel and only stops the speech (the game sends DialogueFinished), the X does not receive the click, and another tap is needed to close.

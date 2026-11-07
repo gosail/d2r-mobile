@@ -202,12 +202,22 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
 
 // The original SettingsPanel action reports which child page is selected.
 // Only offer the keyboard editor while KeyBindingMenu is the active child.
-static _Atomic int controls_visible;
-int dm_kbmap_controls_visible(void) {return atomic_load(&controls_visible);}
+static _Atomic int controls_visible,settings_visible;
+// SettingsPanel always exposes the keyboard editor: the guest Controls tab
+// is preserved in layouts, but some versions fail to route its CheckChanges
+// message. The extra two-device selector is therefore reachable from the
+// Options panel without relying solely on that one child-tab notification.
+int dm_kbmap_controls_visible(void) {
+    return atomic_load(&settings_visible) || atomic_load(&controls_visible);
+}
 void dm_kbmap_controls_event(const char *cat,const char *action,const char *arg) {
     if(!cat || !action) return;
     if(!strcmp(cat,"SettingsPanelMessage") && !strcmp(action,"CheckChanges")) {
+        atomic_store(&settings_visible,1);
         atomic_store(&controls_visible,arg && !strcmp(arg,"KeyBindingMenu"));
+    } else if(!strcmp(cat,"PanelManager") && arg && !strcmp(arg,"SettingsPanel") &&
+              (!strcmp(action,"OpenPanel") || !strcmp(action,"OpenExclusivePanel"))) {
+        atomic_store(&settings_visible,1);
     } else if(!strcmp(cat,"PanelManager") && arg &&
               !strcmp(arg,"KeyBindingMenu") &&
               (!strcmp(action,"OpenPanel") || !strcmp(action,"OpenExclusivePanel"))) {
@@ -217,6 +227,7 @@ void dm_kbmap_controls_event(const char *cat,const char *action,const char *arg)
                (( !strcmp(action,"ClosePanel") || !strcmp(action,"UnloadPanel")) &&
                 arg && (!strcmp(arg,"SettingsPanel") || !strcmp(arg,"KeyBindingMenu"))))) {
         atomic_store(&controls_visible,0);
+        atomic_store(&settings_visible,0);
     }
 }
 

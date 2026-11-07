@@ -191,7 +191,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         kbDeviceTabs=new LinearLayout(this);
         kbDeviceTabs.setOrientation(LinearLayout.HORIZONTAL);
         kbSettingsButton=new Button(this);
-        kbSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"键鼠":"Keyboard & Mouse");
+        kbSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"控制 · 键鼠":"Controls · Keyboard & Mouse");
         controllerSettingsButton=new Button(this);
         controllerSettingsButton.setText(java.util.Locale.getDefault().getLanguage().equals("zh")?"手柄":"Controller");
         int tabW=(int)(142*density),tabH=(int)(44*density);

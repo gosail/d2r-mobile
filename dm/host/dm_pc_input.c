@@ -5,6 +5,7 @@
 #include "dm_world.h"
 #include "dm_uiscreen.h"
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
 // Implemented by the original guest PanelManager adapter in dm_cursor.c.
@@ -19,6 +20,10 @@ enum { UNMAPPED=255 };
 enum { PH_IDLE, PH_ZL_LEAD, PH_HELD, PH_ZL_TAP, PH_TAP_PULSE };
 static unsigned char skill_phase[256],arrow_walk[256];
 static uint64_t skill_sample[256];
+// Native PC "stand still" (command 36, typically Shift) is a held
+// movement modifier, not a toggle for the controller's second skill set.
+static _Atomic int stand_still;
+int dm_pc_input_stand_still(void) { return atomic_load(&stand_still); }
 // USB HID keyboard arrow cluster, reserved for the guest's Switch stick
 // when playing and D-pad navigation when a menu or panel is open.
 static uint64_t arrow_dpad(unsigned hid) {
@@ -47,7 +52,7 @@ int dm_pc_input_supported_action(uint32_t id) {
     return id==0 || id==1 || id==4 || id==12 || id==44 || id==54 ||
            id==38 || id==39 || id==40 || id==45 ||
            id==7 || id==23 || id==24 || id==25 || id==26 ||
-           id==35 || id==37 || id==56 || skill_slot(id)>=0;
+           id==35 || id==36 || id==37 || id==56 || skill_slot(id)>=0;
 }
 static uint64_t command_bits(unsigned id) {
     int slot=skill_slot(id);
@@ -89,6 +94,10 @@ static void publish_locked(void) {
     int dx=right-left,dy=up-downward;
     int32_t lx=dx*(dy?23170:DM_STICK_MAX);
     int32_t ly=dy*(dx?23170:DM_STICK_MAX);
+    int still=0;
+    for(unsigned i=0;i<256;i++)
+        if(down[i] && command[i]==36) { still=1;break; }
+    atomic_store(&stand_still,still);
     dm_kb_set(bits,lx,ly,0,right_y);
 }
 void dm_pc_input_reset(void) {
@@ -100,6 +109,7 @@ void dm_pc_input_reset(void) {
     memset(arrow_walk,0,sizeof arrow_walk);
     memset(skill_sample,0,sizeof skill_sample);
     queue_head=queue_tail=0;
+    atomic_store(&stand_still,0);
     dm_kb_set(0,0,0,0,0);
     pthread_mutex_unlock(&input_mu);
 }

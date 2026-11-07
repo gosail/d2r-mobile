@@ -185,7 +185,8 @@ int dm_mouse_pointer_hint(void) {
 }
 // Physical mouse skill hover is captured only on the guest game thread.
 static _Atomic uint64_t g_pc_skill_hover, g_pc_skill_bind_req;
-static _Atomic int g_pc_skill_binding_busy;
+static _Atomic int g_pc_skill_binding_busy, g_pc_skill_tree_visible;
+int dm_ui_pc_skill_tree_active(void) { return atomic_load(&g_pc_skill_tree_visible); }
 static void pc_skill_hover_note(module_t *m,int x,int y);
 void dm_ui_pc_skill_hover_end(void) { atomic_store(&g_pc_skill_hover,0); }
 int dm_ui_pc_skill_bind_request(uint32_t id) {
@@ -2133,6 +2134,7 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
     static uint64_t original_hover;
     uint64_t tree=root?ui_find(root,"SkillsTreePanel",0):0;
     int visible=tree && *(uint8_t *)(tree+0x50);
+    atomic_store(&g_pc_skill_tree_visible,visible);
     uint64_t md=root?ui_find(root,"ButtonBindingModal",0):0;
     int modal=md && *(uint8_t *)(md+0x50);
     int dm_padmode_busy(void);
@@ -2151,7 +2153,10 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         uint32_t id=(uint32_t)(req>>32);
         buttons=dm_pc_input_skill_buttons(id);
         original_hover=(1ull<<63)|(req&0xffffffffu);
-        if(!buttons || atomic_load(&g_pc_skill_hover)!=original_hover)return;
+        if(!buttons || atomic_load(&g_pc_skill_hover)!=original_hover) {
+            LOG("PC 技能绑定：鼠标已离开原技能，取消绑定请求");
+            return;
+        }
         int x=(int)((req>>16)&0xffff),y=(int)(req&0xffff);
         uint64_t xy=(uint64_t)(uint32_t)x | ((uint64_t)(uint32_t)y<<32);
         // Recheck native widget identity and panel visibility on the guest
@@ -2169,6 +2174,7 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
         // merely because UIKit/AppKit stopped delivering hover events.
         if(!modal) {
             if(fr-begun>60) {
+                LOG("【红】PC 技能绑定：60 帧内未打开原版 ButtonBindingModal，取消");
                 phase=0;atomic_store(&g_pc_skill_binding_busy,0);
             }
             return;
@@ -2197,7 +2203,8 @@ static void ui_pc_skill_bind_pump(uint64_t root,uint64_t fr) {
     if(phase==3) {
         if(!modal){phase=0;atomic_store(&g_pc_skill_binding_busy,0);return;}
         if(fr-at>60) {
-            dm_ui_key_pulse(DM_BTN_MINUS,4); // native cancellation, never guess
+            LOG("【红】PC 技能绑定：原版模态框未确认快捷键，按原生取消键");
+            dm_ui_key_pulse(DM_BTN_MINUS,4);
             phase=0;atomic_store(&g_pc_skill_binding_busy,0);
         }
     }

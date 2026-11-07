@@ -290,6 +290,7 @@ static int g_fb_used, g_fb_nudge;   // 这次松手走过「直接调原版放�
 static _Atomic int g_drop_loc;   // 最近一次松手落在装备槽上时那个槽的身体栏位（控件 +0x5d8）；0 = 落点不是装备槽 | Body location of the equipment slot (widget +0x5d8) the last time a release landed on an equipment slot; 0 = the landing point is not an equipment slot
 static _Atomic uint64_t g_pick_xy;   // 最近一次「空手按 A 拿起」那件物品的原位中心（位 63 = 有效）；放下时的 A 不改它 | Center of the original position of the item most recently 'picked up by pressing A with an empty hand' (bit 63 = valid); the A of a put-down does not change it
 static _Atomic uint64_t g_set_back_at;
+static _Atomic int g_pc_settings_back; // Only fall back to B if the settings page remains open.
 #define DROP_RETRY_ARM() do { dm_hud_info hi; dm_hud_get(&hi); if (g_rt.active && g_rt.stage) { /* 收尾自己按的 A：不重新登记 | The A pressed by the wrap-up itself: do not register again */ } else if (hi.valid && hi.holding) { int grid = g_dc.valid && abs(tx - g_dc.x) <= 5 && abs(ty - g_dc.y) <= 5; \
     g_rt = (drop_retry){ .active = 1, .id = hi.holding, .x = tx, .y = ty, .cell_h = grid ? g_dc.cell_h : 0, .r = grid ? g_dc.r : 0, .rows = grid ? g_dc.rows : 1, .t = now_ns() }; g_dc.valid = 0; } else g_rt.active = 0; } while (0)
 // 手上物品守门（手上拿着东西时按合成，服务端校验 0x6e8740 直接丢掉 0x20 包，不出声不提示；触摸上光标看不见，手上那件玩家也看不见）。
@@ -2922,7 +2923,15 @@ void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线
     // The settings page covers the function pages: tapping a top tab must first press back to exit the settings page and then switch tabs (otherwise the page underneath changes while the settings page stays on top).
     // With unapplied changes the back button pops up the 「是否应用」(Apply changes?) confirmation box -- if the settings page is still there after 0.6 seconds, do not switch and leave the confirmation box for the player to answer
     { static int st; static uint64_t at; uint64_t sb = atomic_load(&g_set_back_at); module_t *sm = main_module(); uint64_t hroot = 0; if (sm) memcpy(&hroot, sm->base + 0x2f05458, 8);
-      if (sb && fr >= sb) { atomic_store(&g_set_back_at, 0); ui_auto_key(DM_BTN_B); }
+      if (sb && fr >= sb) {
+          atomic_store(&g_set_back_at,0);
+          // Native Accept/Discard/Close may have closed SettingsPanel.
+          // Never apply a second B to the underlying inventory tab.
+          int setting=atomic_exchange(&g_pc_settings_back,0);
+          uint64_t sp=setting && hroot?ui_find(hroot,"SettingsPanel",1):0;
+          if(!setting || (sp && *(uint8_t *)(sp+0x50)))
+              ui_auto_key(DM_BTN_B);
+      }
       { uint64_t qb = atomic_load(&g_speech_back_at); if (qb && fr >= qb) { atomic_store(&g_speech_back_at, 0); uint64_t qp = hroot ? ui_find(hroot, "QuestLogPanelExpansion", 1) : 0; if (qp && *(uint8_t *)(qp + 0x50)) ui_auto_key(DM_BTN_B); } }
       if ((atomic_load(&g_tab_left) > 0 || atomic_load(&g_tab_direct)) && atomic_load(&g_tab_top) == 1) { uint64_t sp = hroot ? ui_find(hroot, "SettingsPanel", 1) : 0; int open = sp && *(uint8_t *)(sp + 0x50);
           if (st == 0 && open) { ui_auto_key(DM_BTN_B); st = 1; at = fr + 36; LOG("界面页签：设置页开着，先按返回键退出"); return; }
@@ -3072,14 +3081,20 @@ void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线
                       pressed=g_click_name;
               }
               if(pressed) {
+                  atomic_store(&g_pc_settings_back,1);
                   atomic_store(&g_set_back_at,dm_guest_frame()+12);
                   if(!strcmp(pressed,"AcceptButton") ||
                      !strcmp(pressed,"CancelButton")) {
-                      dm_custom_on_uimsg("OptionsPanelMessage",
-                         !strcmp(pressed,"AcceptButton")?
-                           "AcceptChanges":"CancelChanges","");
+                      // Explicitly relay the original native UI command:
+                      // a button inside the console settings frame can be
+                      // visible and hit-tested yet its PC mouse event gets
+                      // swallowed by the outer controller focus layer.
+                      const char *action=!strcmp(pressed,"AcceptButton")?
+                          "AcceptChanges":"CancelChanges";
+                      fe_send("OptionsPanelMessage",action,"");
+                      dm_custom_on_uimsg("OptionsPanelMessage",action,"");
                   }
-                  LOG("键鼠设置页：命中 %s，保留游戏按钮动作并调度原版返回",pressed);
+                  LOG("键鼠设置页：按了 %s（原版应用/放弃消息，随后仅在设置页仍开着时返回）",pressed);
               }
           } }
         // 任务语音播着时点右上角 X：按下那一下被语音面板吃掉、只停语音（游戏发 DialogueFinished），X 没收到点击，要再点一次才关。

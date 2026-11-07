@@ -15,6 +15,11 @@ void dm_kbmap_external_owner(int on);
 int dm_kbmap_is_external_owner(void);
 int dm_kbmap_pc_mode(void); // native mode on when original .key exists
 int dm_kbmap_set_pc_mode(int enabled); // compatibility no-op for enabled=true
+// Native single-page Controls editor. .key and .ctl remain independent.
+int dm_kbmap_native_pc_begin(unsigned command,unsigned slot);
+int dm_kbmap_native_pc_capture(unsigned *command,unsigned *slot);
+void dm_kbmap_native_pc_cancel(void);
+int dm_kbmap_native_pc_result(void);
 int dm_kbmap_controls_visible(void);
 void dm_kbmap_controls_event(const char *category,const char *action,const char *arg);
 int dm_kbmap_mouse_action(unsigned physical); // fixed PC mouse roles

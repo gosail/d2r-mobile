@@ -119,6 +119,17 @@ void dm_kbmap_key_event(unsigned usage,int pressed) {
     }
     if(pressed && !was_legacy) {
         int ingame=dm_uiscreen_ingame();
+        // native_seen belongs to a particular active game session. The
+        // frontend must regain keyboard navigation after exiting the game.
+        // Reset only once an actual front-end key is requested, so the
+        // in-game .key stays authoritative through temporary save rewrites.
+        if(!ingame && seen_native) {
+            pthread_mutex_lock(&km_mu);
+            native_seen=0;
+            pthread_mutex_unlock(&km_mu);
+            dm_pc_input_reset();
+            seen_native=0;
+        }
         int arrow=usage==0x50 || usage==0x52 ||
                   usage==0x4f || usage==0x51;
         int status=ingame?dm_pc_profile_file_status():0;

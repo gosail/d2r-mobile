@@ -119,6 +119,12 @@ int main(void) {
     dm_kbmap_key_event(0x52,0);assert(left_y==0);
     dm_kbmap_key_event(0x04,1);assert(left_x==0 && left_y==0 && buttons==0);
     dm_kbmap_key_event(0x04,0);
+    // Returning to frontend recovers fallback keyboard navigation.
+    in_game=0;
+    dm_kbmap_key_event(0x28,1);
+    assert(buttons & DM_BTN_A);
+    dm_kbmap_key_event(0x28,0);
+    in_game=1;
     dm_kbmap_controls_event("SettingsPanelMessage","CheckChanges","KeyBindingMenu");
     assert(dm_kbmap_controls_visible());
     dm_kbmap_controls_event("PanelManager","ClosePanel","SettingsPanel");

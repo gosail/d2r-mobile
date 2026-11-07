@@ -38,6 +38,9 @@ static struct { _Atomic uint64_t buttons; _Atomic int32_t lx, ly, rx, ry; } g_in
 #include "dm_external_mouse.h"
 #endif
 static _Atomic int64_t g_sampling;
+// Only successful GetNpadState reads count toward a multi-sample skill
+// modifier lead. Unsupported controller styles must not advance it.
+static _Atomic uint64_t g_valid_sampling;
 static _Atomic uint64_t g_sampled_right;
 void dm_input_sampled_right(int32_t *rx,int32_t *ry) {
     uint64_t v=atomic_load_explicit(&g_sampled_right,memory_order_acquire);
@@ -123,7 +126,7 @@ static void ui_taps_step(void) {
 }
 static _Atomic uint64_t g_stick_ns;
 uint64_t dm_stick_last_ns(void) { return atomic_load(&g_stick_ns); }   // 「点地移动包只许来自摇杆」的判据（diag.c c2s_deliver） | criterion for "click-to-move packets may only come from the stick" (diag.c c2s_deliver)
-uint64_t dm_input_samples(void) { return (uint64_t)atomic_load(&g_sampling); }   // 游戏已取手柄的累计次数（前端据此判断一下按键是否已被游戏看到） | cumulative number of times the game has read the controller (the front end uses it to judge whether a key press has been seen by the game)
+uint64_t dm_input_samples(void) { return atomic_load(&g_valid_sampling); }   // 游戏已取手柄的累计次数（前端据此判断一下按键是否已被游戏看到） | cumulative number of times the game has read the controller (the front end uses it to judge whether a key press has been seen by the game)
 
 static uint32_t connected_id(void) { return dm_opmode() == 0 ? NPAD_HANDHELD : 0; }   // 跟运行模式走（hle_oe.c 唯一来源） | follows the operation mode (hle_oe.c is the single source)
 static uint32_t style_of(uint32_t id) {
@@ -404,6 +407,7 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
     memset(s, 0, sizeof *s);
     s->sampling = ++g_sampling;
     if (!(style_of(id) & style)) { receipt(s, id, style, 0, read_start_ns); return; } // 没接这个样式：全0返回也收样 | this style is not connected: an all-zero return is sampled as well
+    atomic_fetch_add(&g_valid_sampling,1);
     uint64_t km = keys_now();
     // 各通道的键先合起来（触屏 / 按键脚本 / 宿主替按 + 手柄；手柄没连时全 0），再裁决「独占的一下」——替玩家按的那一下要看的是游戏这一次实际会收到什么，
     // 不是某一个通道（先前只看了触屏通道，手柄玩家进局头 1.5 秒按 ＋ 开背包仍会把独占的 L 撞成换页签）

@@ -65,8 +65,11 @@ class NativePcKeyContracts(unittest.TestCase):
         self.assertIn('skill_slot(id)>=0',c)
         self.assertIn('sampled-skill_sample[i]>=2',c)
         self.assertIn('dm_input_samples()',c)
+        hid=src("host/hle_hid.c")
+        self.assertIn('atomic_fetch_add(&g_valid_sampling,1);',hid)
+        self.assertIn('return atomic_load(&g_valid_sampling);',hid)
         self.assertIn('dm_pc_input_guest_step',c)
-        self.assertIn('dm_kb_set(bits,0,0,0,right_y)',c)
+        self.assertIn('dm_kb_set(bits,lx,ly,0,right_y)',c)
         self.assertIn('dm_pc_input_wheel(int delta)',c)
         self.assertIn('dm_ui_pc_toggle_panel(batch[i])',c)
     def test_game_thread_panel_and_original_weapon_swap(self):

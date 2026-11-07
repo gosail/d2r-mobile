@@ -145,9 +145,10 @@ void dm_android_touch_event(int phase, int slot, float x, float y) {
     if (focused) {
         // A real finger exits the physical-mouse session; re-enable the
         // ordinary touch-only idle-item guard after the device switch.
-        if (phase == 0 && slot < DM_TC_MAX_TOUCH - 1)
+        if (phase == 0 && slot < DM_TC_MAX_TOUCH - 1) {
             dm_ui_mouse_ownership_release();
             dm_external_mouse_event(DM_MOUSE_LEAVE,0,0,0,0,0);
+        }
         /* 溢出只取消，绝不遗留按住的摇杆/按键。 | Overflow cancels instead of leaving a stick/key held. */
         if (tail - head == 256) { cancel = 1; head = tail = 0; }
         /* Java 给的是窗口 dp：减视图原点换成 dm_tc 的视图坐标；真全屏下 y 可为负（视图上方那条只有 3D 的区域，点怪 / 点地照常，界面与控件点不到）。

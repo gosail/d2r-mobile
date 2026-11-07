@@ -368,6 +368,11 @@ static void cursor_apply(uint64_t *buttons, int32_t *lx, int32_t *ly) {
     // While the single-item task slot panel is open, the item in hand is 'the item in the slot' (in the original game, entering the slot = holding it in hand); having something in hand is the normal state, not 'the put-down failed': do not wrap up.
     // When the slot was occupied and another item in the inventory was dragged, this section put the long sword in the slot back into its original inventory cell, bypassing the slot widget -- the sword's image stayed on the slot, and the transaction packet sent by tapping confirm was rejected by the server
     if (g_rt.active && (dm_ui_panel_state() & DM_PS_IMBUE)) g_rt.active = 0;
+    // For physical mouse input, a failed item placement must leave the
+    // item on the cursor. The touch-only recovery chain may silently stow
+    // or drop it, which violates explicit PC pick/move/place semantics.
+    if (g_rt.active && physical_mouse_owns_item() && !g_rt.pending)
+        g_rt.active = 0;
     // 「按返回」这一步（会关玩家的面板）对同一件手上物品只做一轮：g_back_id = 已经为它按过返回的那件；手上空了（或换了别的）才清。
     // 原先没有上限：手上读数是假的时（卡死：服务端光标挂着已进仓库的魔盒），每拖一次物品就整条走一遍、按两次返回，刚开的面板一开就被关
     // The "press Back" step (which closes the player's panels) runs only one round per held item: g_back_id = the item for which Back has already been pressed; cleared only when the hand empties (or holds something else).

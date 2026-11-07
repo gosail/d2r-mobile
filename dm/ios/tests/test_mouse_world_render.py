@@ -44,6 +44,10 @@ class PointerWorldRender(unittest.TestCase):
         self.assertIn("nativeMouseHover(h)", overlay)
         self.assertIn("(int)h[0] >= 1 && (int)h[0] <= 4", overlay)
         self.assertIn("h[5]/h[6]", overlay)
+        self.assertIn("h[9]==0", overlay)
+        self.assertIn("new float[10]", overlay)
+        self.assertIn("dm_world_hover_native_visible()", source("android/jni_android.c"))
+        self.assertIn("g_native_hover_name_id==current", source("host/dm_world.c"))
 
     def test_apple_hovers_are_painted(self):
         ios = source("ios/Sources/front_ios.m")

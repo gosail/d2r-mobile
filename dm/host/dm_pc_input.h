@@ -4,6 +4,8 @@
 #include <stdint.h>
 void dm_pc_input_event(unsigned hid,int pressed);
 void dm_pc_input_reset(void);
+// Held original command 36 (Shift by default); never repurpose it as ZL.
+int dm_pc_input_stand_still(void);
 // Guest-frame dispatch of menu panel requests; input/UI threads only enqueue.
 void dm_pc_input_guest_step(void);
 // Resolve physical wheel delta via 0x103/0x104 .key records. Returns -1/0/+1

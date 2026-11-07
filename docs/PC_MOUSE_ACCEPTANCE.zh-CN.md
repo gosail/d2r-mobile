@@ -4,6 +4,9 @@
 
 | 场景 | 源码状态 | 仍需实机确认 |
 | --- | --- | --- |
+| 游戏原生“控制”子标签 | 在“游戏设定”之后、“自定义”之前沿用原版 Controls/KeyBindingMenu；原生行模板并排显示操作名、键鼠主/副键、手柄主/副键；不同设备允许重复 A；禁用额外 UIKit/AppKit/Android 双标签面板 | 编译后的真实布局、原生 KeyBindingMenu 行克隆以及三端点击命中仍需实机确认 |
+| 角色原生按键分别保存 | 键鼠捕获调用 dm_pc_profile_bind 写当前角色 `.key`；原版手柄 PrimaryKeyButton/SecondaryKeyButton 及 `.ctl` 保存入口不变；禁止跨设备冲突检查 | 各自修改“技能 1”为 A → 退出保存 → 重进角色，分别检查文件和行为 |
+| d2 Bundle ID 不变 | 私有 `gosail/d2/scripts/source/build.py` 仍固定 `org.d2rmobile.app`，修改控制 UI 不改应用标识 | Sideloadly 等重签后的实际 Bundle ID、Team ID 和覆盖安装一致性 |
 | Mac 外接物理键盘与鼠标 | 物理键 HID 适配、世界鼠标/菜单 UI、原生 `.key` 编辑入口已接入 | 原游戏完整运行与全部命令响应 |
 | iPad 外接键盘与鼠标 | `UIPress`、间接指针、鼠标中右键、游戏/UI 焦点和原生编辑入口已接入 | iPad mini USB/蓝牙真实事件与输入法抢焦点 |
 | Android 键盘与鼠标 | Android `KeyEvent`/触摸/鼠标 JNI、原生 `.key` 编辑入口已接入 | 实机外设、系统事件与编辑对话框 |

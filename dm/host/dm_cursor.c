@@ -1191,6 +1191,24 @@ static int ui_classify(module_t *m, uint64_t root, int x, int y, char *hit, size
     { uint64_t ip = ui_find(root, "ImbueItemsPanel", 0), tc = ip && *(uint8_t *)(ip + 0x50) ? ui_find(ip, "TouchClose", 1) : 0;
       if (tc && *(uint8_t *)(tc + 0x50) && (((int (*)(uint64_t, uint64_t))*(uint64_t *)(*(uint64_t *)tc + 0x48))(tc, (uint64_t)(uint32_t)x | ((uint64_t)(uint32_t)y << 32)) & 1)) {
           g_inside_owner = ""; atomic_store(&g_bd_hit, 0); atomic_store(&g_close_down, 0); snprintf(hit, hn, "单件任务槽面板的关闭钮（按面板外算）"); return 3; } }
+    // The waypoint close button sits in the native controller frame notch,
+// outside its panel hit rectangle. Without this exact hit the PC mouse
+// would pass through to the world and issue a walk command. Route that
+// original CloseButton into the same B/back mechanism already used for
+// covered ImbueItemsPanel X, without disturbing other waypoint tabs.
+    { uint64_t wp=ui_find(root,"WaypointsPanelExpansion",0);
+      uint64_t close=wp && *(uint8_t *)(wp+0x50)?ui_find(wp,"TouchClose",1):0;
+      if(close && *(uint8_t *)(close+0x50)) {
+          uint64_t fn=*(uint64_t *)(*(uint64_t *)close+0x48);
+          uint64_t xy=(uint64_t)(uint32_t)x | ((uint64_t)(uint32_t)y<<32);
+          if(fn && (((int (*)(uint64_t,uint64_t))fn)(close,xy)&1)) {
+              g_inside_owner="";
+              atomic_store(&g_close_down,0);
+              snprintf(hit,hn,"小站页原生 X（按返回关闭，不点地图）");
+              return 3;
+          }
+      }
+    }
     if (dm_runeword_list_open()) {   // 符文之语清单开着（dm_runeword.c）：点清单上任何地方都吃掉、交给宿主按控件名处理；点清单外关清单并吃掉 | Runeword list open (dm_runeword.c): a tap anywhere on the list is swallowed and handed to the host to handle by widget name; a tap outside the list closes the list and is swallowed
         // 一律不发鼠标点击（同技能树 I / II 页签）：清单压在物品格上，发鼠标点击的话游戏自己的分发先给了底下的格子
         // （第 2 页的左箭头落在腰带格上，鼠标点击发了、箭头没收到，页没翻）——点清单绝不能落成点物品

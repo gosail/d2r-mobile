@@ -83,6 +83,8 @@ class PhysicalMouseParity(unittest.TestCase):
         cursor = self.get("host/dm_cursor.c")
         mac = self.get("host/touch_mac.c")
         self.assertIn("physical_mouse_owns_item()", cursor)
+        self.assertIn('ui_find(root,"WaypointsPanelExpansion",0)', cursor)
+        self.assertIn('ui_find(wp,"TouchClose",1)', cursor)
         self.assertIn("dm_ui_hover_now(x,y);", cursor)
         self.assertIn("g_live_hover_latest", mac)
         self.assertIn("controlsMouseCaptured",self.get("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))

@@ -73,23 +73,18 @@ class KeyboardContract(unittest.TestCase):
         self.assertIn('if(legacy_active)',native)
         self.assertIn('dm_gamepad_external_input(void)',src("ios/Sources/dm_gamepad.m"))
         self.assertIn('if(op!=4 && op!=8)PadInput.externalInput()',android)
-        self.assertIn('[self kbSettingsSync]',ui)
-        self.assertIn('[self kbPcOpen]',ui)
-        self.assertIn('KeyboardSettings.createInline(this)',android)
-        self.assertIn('KeyboardSettings.refreshInline(this,kbInlinePanel)',android)
-        self.assertIn('kbKeyboardMode',android)
-        self.assertIn('if(libraryLoaded && started)nativeKeyboardReset();',android)
-        self.assertIn('controllerSettingsButton',android)
-        self.assertIn('mouseHitsControls(e)',android)
-        self.assertIn('kbDeviceTabs.getVisibility()==View.VISIBLE)return super.dispatchKeyEvent(e)',android)
-        self.assertIn('dm_kbmap_reset(); // clear held keys before editor takes first responder',ui)
+        # The user sees one original-style KeyBindingMenuHD with keyboard
+        # and gamepad columns, not additional UIKit/AppKit/Android panels.
+        self.assertIn('No UIKit device tabs, sheet or panel is mounted here.',ui)
+        self.assertIn('Native KeyBindingMenuHD is the one shared controls page',src("host/front_mac.m"))
+        self.assertIn('never mount a separate',android.lower())
+        self.assertIn('keyboard and controller columns share',android.lower())
         mac=src("host/front_mac.m")
-        self.assertIn('!g_mac_keyboard_panel.hidden) return e;',mac)
         event_code=mac.split('NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged handler:')[1]
-        self.assertLess(event_code.find('!g_mac_keyboard_panel.hidden) return e;'),
-                        event_code.find('mac_modifier_changed(e);'),
-                        "Settings editor must intercept modifiers before gameplay")
         self.assertIn('mac_modifier_changed(e);',event_code)
+        self.assertIn('dm_kbmap_native_pc_begin(',src("host/dm_kbmap.c"))
+        self.assertIn('pc_controls_template_visit(',src("host/dm_cursor.c"))
+        self.assertIn('controls_layout.integrate(original_controls)',src("ios/tools/gen_romfs_overlay.py"))
         self.assertIn('dm_kbmap_key_event((unsigned)usage,down)',mac)
         self.assertIn('if(a==DM_KB_ENTER)a=dm_uiscreen_ingame()&&!dm_uiscreen_panel()?10:0',src("host/dm_kbmap.c"))
         self.assertNotIn('g_mac_keys_down',mac) # never maintain a competing Mac mapping

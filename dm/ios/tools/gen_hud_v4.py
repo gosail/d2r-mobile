@@ -124,6 +124,25 @@ eb['fields']['rect']['x']=-6000   # 挪出屏幕（实例仍在）。靠底图�
 # Native skill buttons 1–5: instances kept (bindings are read from them), moved under the slot 5 base image to hide them -- the right-side skill area has iOS draw PC-style round skill buttons, and the native square frames no longer show under the circles
 for n in ('SkillButton1','SkillButton2','SkillButton3','SkillButton4','SkillButton5'):
     w_=by[n]; kids.remove(w_); kids.insert(kids.index(by['Overlay']),w_); w_['fields']['rect']=dict(by['SkillButton6']['fields']['rect']); w_['fields']['anchor']={'x':0.5,'y':1}
+# Keyboard/mouse switches to the native Switch HUD, hiding the touch overlay.
+# Add real character .key labels to THAT layout rather than showing baked
+# F1..F8 text in the hidden touch layer. Empty until the host sets them.
+def pc_label(name,cx,cy,width=152,point=27):
+    j['children'].append({'type':'TextBoxWidget','name':name,'fields':{
+        'anchor':{'x':0.5,'y':1},
+        'rect':{'x':round(X(cx)-width/2,1),'y':round(Y(cy),1),'width':width,'height':48},
+        'text':'',
+        'style':{'pointSize':point,
+                 'fontColor':{'r':227,'g':210,'b':161,'a':255},
+                 'alignment':{'h':'center','v':'center'}}}})
+for i in range(1,5):
+    x0,y0,x1,y1=g['slots'][i]
+    pc_label('TouchPcKeyBelt%d'%i,(x0+x1)/2,y1-30,152,27)
+k=H/440.0
+mx,my=W-74*k,H-84*k
+for i,(dx,dy) in enumerate([(0,0),(-96,18),(-84,-50),(-34,-92),(34,-92)]):
+    pc_label('TouchPcKeySkill%d'%i,mx+dx*k,my+(dy+25)*k,152,25)
+pc_label('TouchPcKeySkill5',mx+34*k,my-150*k,152,24)
 json.dump(j,open(f'{OUT}/hud.json','w'),ensure_ascii=False,indent=1)
 
 # ---- 前端 UIKit 素材（hud_v4_ui/）：几何（效果图像素，前端按 屏高/1320 换算、以屏宽中线对齐效果图 x=1434）、预渲染字形、难度数字、选择条格子 ----

@@ -506,6 +506,76 @@ static void legend_pump(uint8_t *b, uint64_t frame) {   // 游戏主线程每帧
         for (uint64_t i = 0; arr && i < n && i < 10; i++) L += (size_t)snprintf(o + L, L < sizeof o ? sizeof o - L : 0, " %x", *(uint32_t *)(uintptr_t)(arr + 0x40 * i));
         LOG("手柄提示条：帧 %llu，近 120 帧声明 %d 次、补加 %d 次；提示条现有 %llu 条，字形%s", (unsigned long long)frame, tot, miss, (unsigned long long)n, o); tot = miss = 0; }
 }
+// Dynamic keyboard labels for the real Switch HUD. Runs only on the guest
+// game thread with original TextBoxWidget setters and validated .key records.
+static void pc_key_name(char out[24],uint16_t vk) {
+    out[0]=0;
+    if(vk==0xffff || !vk)return;
+    if((vk>='A' && vk<='Z') || (vk>='0' && vk<='9')) {
+        out[0]=(char)vk;out[1]=0;return;
+    }
+    if(vk>=0x70 && vk<=0x7b){snprintf(out,24,"F%u",(unsigned)(vk-0x70+1));return;}
+    if(vk>=0x60 && vk<=0x69){snprintf(out,24,"Num%u",(unsigned)(vk-0x60));return;}
+    switch(vk) {
+    case 0x09:strlcpy(out,"Tab",24);break;
+    case 0x0d:strlcpy(out,"Enter",24);break;
+    case 0x1b:strlcpy(out,"Esc",24);break;
+    case 0x20:strlcpy(out,"Space",24);break;
+    case 0x10:strlcpy(out,"Shift",24);break;
+    case 0x11:strlcpy(out,"Ctrl",24);break;
+    case 0x12:strlcpy(out,"Alt",24);break;
+    case 0x100:strlcpy(out,"Mouse3",24);break;
+    case 0x103:strlcpy(out,"Wheel+",24);break;
+    case 0x104:strlcpy(out,"Wheel-",24);break;
+    default:snprintf(out,24,"VK%02X",(unsigned)vk);
+    }
+}
+static void pc_hud_keys(uint8_t *b,uint64_t frame) {
+    if(!g_cur || frame%12)return;
+    extern int dm_kbmap_is_external_owner(void);
+    extern int dm_pc_profile_file_status(void);
+    extern int dm_pc_profile_get(uint32_t,unsigned,uint16_t *);
+    int owner=dm_kbmap_is_external_owner();
+    int native=owner && dm_pc_profile_file_status()==1;
+    uint64_t root=rd8((uint64_t)(uintptr_t)(b+0x2f05458));
+    if(!root)return;
+    static const unsigned main_ids[6]={14,15,17,16,18,19};
+    static const unsigned alt_ids[6]={20,21,47,46,48,49};
+    for(int i=0;i<10;i++) {
+        char nm[36],label[60]={0};
+        if(i<6)snprintf(nm,sizeof nm,"TouchPcKeySkill%d",i);
+        else snprintf(nm,sizeof nm,"TouchPcKeyBelt%d",i-5);
+        uint64_t w=pm_find(root,nm,0);
+        if(!w || rd8(w)-(uint64_t)(uintptr_t)b!=0x20ba4c8)continue;
+        if(owner) {
+            char first[24]={0},second[24]={0};
+            if(native) {
+                unsigned id=i<6?main_ids[i]:(unsigned)(23+i-6);
+                uint16_t vk=0xffff;
+                if(dm_pc_profile_get(id,0,&vk)!=0 || vk==0xffff)
+                    (void)dm_pc_profile_get(id,1,&vk);
+                pc_key_name(first,vk);
+                if(i<6) {
+                    vk=0xffff; unsigned alt=alt_ids[i];
+                    if(dm_pc_profile_get(alt,0,&vk)!=0 || vk==0xffff)
+                        (void)dm_pc_profile_get(alt,1,&vk);
+                    pc_key_name(second,vk);
+                }
+            } else {
+                // Temporary default before the guest writes its .key.
+                if(i<6)snprintf(first,sizeof first,"F%d",i+1);
+                else snprintf(first,sizeof first,"%d",i-5);
+            }
+            if(first[0] && second[0] && strcmp(first,second))
+                snprintf(label,sizeof label,"%s / %s",first,second);
+            else strlcpy(label,first,sizeof label);
+        }
+        size_t len=strlen(label);uint64_t oldp=rd8(w+0x88);
+        if(rd8(w+0x90)==len && (!len || (oldp && !memcmp((void *)(uintptr_t)oldp,label,len))))continue;
+        ((void (*)(uint64_t,const char *,uint64_t))(b+0x136e5c))(w+0x88,label,(uint64_t)len);
+        ((void (*)(uint64_t))(b+0xadc434))(w);
+    }
+}
 static void diff_text(uint8_t *b, uint64_t frame) {   // 游戏主线程：菜单开着时每 6 帧核一次这行的字（只写我们自己的 TouchPadDiffTxt，文字控件虚表 main+0x20ba4c8，同 dm_pouch.c w_text） | Game main thread: while the menu is open, check this row's text every 6 frames (only writes our own TouchPadDiffTxt; text widget vtable main+0x20ba4c8, same as w_text in dm_pouch.c)
     if (!g_cur || !atomic_load(&g_pause_open) || frame % 6) return;
     uint64_t w = pm_find(rd8((uint64_t)(uintptr_t)(b + 0x2f05458)), "TouchPadDiffTxt", 0); if (!w || rd8(w) - (uint64_t)(uintptr_t)b != 0x20ba4c8) return;
@@ -528,6 +598,7 @@ void dm_padmode_step(uint8_t *b, uint64_t frame) {   // 游戏主线程每帧（
     { uint64_t tc = atomic_exchange(&g_test_cur, 0); if (tc >> 63) { int dm_ui_hover_now(int, int); int W = *(int32_t *)(b + 0x211da38), H = *(int32_t *)(b + 0x211da3c), x = (int)(((tc >> 16) & 0xffff) / 65535.0 * W), y = (int)((tc & 0xffff) / 65535.0 * H);
         int ok = dm_ui_hover_now(x, y); LOG("测试 padcur：手柄光标放到 (%d,%d) → %d", x, y, ok); } }
     diff_text(b, frame);
+    pc_hud_keys(b, frame);
     legend_pump(b, frame);
     if (g_have) hint_pump();
     void dm_oe_ui_opmode(int m); int dm_opmode(void);

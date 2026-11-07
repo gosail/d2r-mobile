@@ -146,7 +146,7 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     UIView *_rsCover;   // 一键重开期间的黑屏（宿主 dm_cursor.c 经 g_dm_restart_cover_hook 开关）：盖在窗口最上层（整屏，含真全屏的留边），不露主菜单，吞掉这段时间的触点 | Black screen during one-tap restart (toggled by the host's dm_cursor.c via g_dm_restart_cover_hook): covers the top of the window (whole screen, including the true-fullscreen margins), does not reveal the main menu, and swallows touch points during this period
     int _navigation;
     CATextLayer *_mouseHoverLabel;
-    CALayer *_mouseHoverBacking, *_mouseHoverHpBg, *_mouseHoverHpFill;
+    CALayer *_mouseHoverBacking;
     CAShapeLayer *_mouseHoverOutline;
     CALayer *_mhPtr, *_thr[8];   // _thr：画面外怪物的指针（threatsSync） | _thr: pointers for monsters off the picture (threatsSync)
     BOOL _mouseSecondaryDown, _mouseMiddleDown;
@@ -818,15 +818,10 @@ static NSString *kbActionLabel(int action) {
         _mouseHoverLabel.foregroundColor=UIColor.whiteColor.CGColor;
         _mouseHoverLabel.wrapped=YES;
         [_info.layer addSublayer:_mouseHoverLabel];
-        _mouseHoverHpBg=[CALayer layer];
-        _mouseHoverHpBg.backgroundColor=UIColor.darkGrayColor.CGColor;
-        [_info.layer addSublayer:_mouseHoverHpBg];
-        _mouseHoverHpFill=[CALayer layer];
-        _mouseHoverHpFill.backgroundColor=UIColor.systemRedColor.CGColor;
-        [_info.layer addSublayer:_mouseHoverHpFill];
+
     }
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    _mouseHoverLabel.hidden=_mouseHoverBacking.hidden=_mouseHoverHpBg.hidden=_mouseHoverHpFill.hidden=YES;
+    _mouseHoverLabel.hidden=_mouseHoverBacking.hidden=YES;
     _mouseHoverOutline.hidden=YES;
     if (active) {
         CGRect w=world_rect(self);
@@ -836,37 +831,20 @@ static NSString *kbActionLabel(int action) {
             _mouseHoverOutline.path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(area,-3,-3) cornerRadius:4].CGPath;
             _mouseHoverOutline.hidden=NO;
         }
-// Draw the actual monster stats alongside the selection outline.
-// The game may have a hit rectangle even when its native target HUD has not
-// admitted the hovered monster (range/LOS). That rectangle must not hide HP.
-if ((h.kind==1 && h.title[0]) ||
-    (h.kind==3 && (h.title[0] || h.details[0] || h.hp_max>0))) {
-    NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
-    NSString *detail=h.kind==3 && h.details[0] ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
-    NSString *label=name.length && detail.length ?
-        [NSString stringWithFormat:@"%@\n%@",name,detail] :
-        (name.length ? name : detail);
-    BOOL health=h.kind==3 && h.hp_max>0;
-    CGFloat width=MIN(w.size.width,MIN(260,MAX(120,w.size.width*0.28)));
-    CGFloat height=label.length ? (detail.length && name.length ? 66 : 42) : 22;
-    if(!health && label.length)height-=6;
-    CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+(h.x+h.w*.5f)*w.size.width-width/2));
-    CGFloat y=MAX(CGRectGetMinY(w),CGRectGetMinY(w)+h.y*w.size.height-height-9);
-    CGRect panel=CGRectMake(x,y,width,height);
-    _mouseHoverBacking.frame=panel; _mouseHoverBacking.hidden=NO;
-    if(label.length) {
-        _mouseHoverLabel.string=label;
-        _mouseHoverLabel.frame=CGRectMake(x+8,y+5,width-16,height-(health?16:10));
-        _mouseHoverLabel.hidden=NO;
-    }
-    if (health) {
-        CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
-        CGRect track=CGRectMake(x+8,y+height-9,width-16,4);
-        _mouseHoverHpBg.frame=track;
-        _mouseHoverHpFill.frame=CGRectMake(track.origin.x,track.origin.y,track.size.width*ratio,track.size.height);
-        _mouseHoverHpBg.hidden=_mouseHoverHpFill.hidden=NO;
-    }
-}
+        // The original MonsterHealth panel displays enemy HP, names and affixes.
+        // Host overlay is limited to NPC names and a passive target outline.
+        if (h.kind==1 && h.title[0]) {
+            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+            CGFloat width=MIN(w.size.width,MIN(260,MAX(120,w.size.width*0.28)));
+            CGFloat height=36;
+            CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+(h.x+h.w*.5f)*w.size.width-width/2));
+            CGFloat y=MAX(CGRectGetMinY(w),CGRectGetMinY(w)+h.y*w.size.height-height-9);
+            _mouseHoverBacking.frame=CGRectMake(x,y,width,height);
+            _mouseHoverBacking.hidden=NO;
+            _mouseHoverLabel.string=name;
+            _mouseHoverLabel.frame=CGRectMake(x+8,y+5,width-16,height-10);
+            _mouseHoverLabel.hidden=NO;
+        }
     }
     [CATransaction commit];
 }

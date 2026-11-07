@@ -443,8 +443,12 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv
 JNIEXPORT jstring JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseHover(JNIEnv *env,jclass cls,jfloatArray out) {
     (void)cls; dm_world_hover_view h={0}; dm_world_hover_read(&h);
     if (out && (*env)->GetArrayLength(env,out)>=9) {
-        float v[9]={(float)h.kind,h.x,h.y,h.w,h.h,(float)h.hp,(float)h.hp_max,(float)h.tier,(float)h.immune_mask};
-        (*env)->SetFloatArrayRegion(env,out,0,9,v);
+        // The 10th float is an optional native-HUD-present bit. Preserve
+        // the previous nine-field JNI contract for an older caller.
+        float v[10]={(float)h.kind,h.x,h.y,h.w,h.h,(float)h.hp,(float)h.hp_max,
+                    (float)h.tier,(float)h.immune_mask,
+                    (float)dm_world_hover_native_visible()};
+        (*env)->SetFloatArrayRegion(env,out,0,(*env)->GetArrayLength(env,out)>=10?10:9,v);
     }
     char label[sizeof(h.title)+sizeof(h.details)+4];
     if(h.kind==3 && h.details[0]) snprintf(label,sizeof label,"%s\n%s",h.title,h.details);

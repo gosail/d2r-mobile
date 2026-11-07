@@ -104,6 +104,7 @@ static void mouse_clear(void) {
     atomic_store(&mouse_scroll, 0);
     atomic_store(&mouse_hud_button, 0);
     dm_world_hover_end();
+    dm_ui_pc_skill_hover_end();
     mouse_hover_valid=0; mouse_right_item=0;
 }
 static int mouse_world_ok(void) {
@@ -118,10 +119,13 @@ static void mouse_hover_at(const mouse_event *e) {
     atomic_store(&mouse_active, 1);
     if (mouse_down) return;
     if (mouse_over_world(e->ux, e->uy, e->wx, e->wy)) {
+        dm_ui_pc_skill_hover_end();
         dm_world_hover_move(e->wx, e->wy);
     } else {
         dm_world_hover_end();
-        if (e->ux >= 0 && e->ux <= 1 && e->uy >= 0 && e->uy <= 1) dm_ui_mouse_hover_now(e->ux, e->uy);
+        if (e->ux >= 0 && e->ux <= 1 && e->uy >= 0 && e->uy <= 1)
+            dm_ui_mouse_hover_now(e->ux, e->uy);
+        else dm_ui_pc_skill_hover_end();
     }
 }
 void dm_external_mouse_step(void) {
@@ -140,7 +144,8 @@ void dm_external_mouse_step(void) {
             // Indirect-pointer presses in iOS/Android panels are handled by
             // the native item state machine, but still own the mouse session.
             atomic_store(&mouse_active,1);
-            mouse_hover_valid=0; dm_world_hover_end(); continue;
+            mouse_hover_valid=0; dm_world_hover_end();
+            dm_ui_pc_skill_hover_end(); continue;
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
             int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;

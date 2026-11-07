@@ -37,7 +37,7 @@ static NSView *g_view;
 static NSRect game_rect(void); // used by the passive hover overlay below
 static void mac_controls_sync(void);
 static CAShapeLayer *g_mouse_outline;
-static CALayer *g_mouse_back,*g_mouse_hp_bg,*g_mouse_hp_fill;
+static CALayer *g_mouse_back;
 static CATextLayer *g_mouse_label;
 static void mouse_hover_draw(void) {
     if (!g_mouse_outline) {
@@ -52,17 +52,13 @@ static void mouse_hover_draw(void) {
         g_mouse_label.foregroundColor=NSColor.whiteColor.CGColor;
         g_mouse_label.fontSize=15;
         g_mouse_label.wrapped=YES;
-        g_mouse_hp_bg=[CALayer layer];
-        g_mouse_hp_bg.backgroundColor=NSColor.darkGrayColor.CGColor;
-        g_mouse_hp_fill=[CALayer layer];
-        g_mouse_hp_fill.backgroundColor=NSColor.systemRedColor.CGColor;
-        for (CALayer *l in @[g_mouse_outline,g_mouse_back,g_mouse_label,g_mouse_hp_bg,g_mouse_hp_fill])
+        for (CALayer *l in @[g_mouse_outline,g_mouse_back,g_mouse_label])
             [g_view.layer addSublayer:l];
     }
     dm_world_hover_view h={0};
     BOOL active=g_live && dm_world_hover_read(&h);
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    g_mouse_outline.hidden=g_mouse_back.hidden=g_mouse_label.hidden=g_mouse_hp_bg.hidden=g_mouse_hp_fill.hidden=YES;
+    g_mouse_outline.hidden=g_mouse_back.hidden=g_mouse_label.hidden=YES;
     if (active) {
         NSRect gr=game_rect(); double W=gr.size.width,H=gr.size.height;
         g_mouse_label.contentsScale=g_view.window.backingScaleFactor ?: 2;
@@ -72,33 +68,18 @@ static void mouse_hover_draw(void) {
             CGPathRef p=CGPathCreateWithRoundedRect(r,4,4,NULL);
             g_mouse_outline.path=p; CGPathRelease(p); g_mouse_outline.hidden=NO;
         }
-// Hover feedback remains passive. The original selector may draw its own
-// health HUD, but a valid target rectangle must not suppress this snapshot.
-if ((h.kind==1 && h.title[0]) ||
-    (h.kind==3 && (h.title[0] || h.details[0] || h.hp_max>0))) {
-    NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
-    NSString *details=(h.kind==3 && h.details[0]) ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
-    NSString *msg=name.length && details.length ?
-        [NSString stringWithFormat:@"%@\n%@",name,details] :
-        (name.length ? name : details);
-    BOOL health=h.kind==3 && h.hp_max>0;
-    CGFloat w=MIN(W,MIN(260,MAX(135,W*0.27)));
-    CGFloat ht=msg.length ? (name.length && details.length ? 66 : 42) : 22;
-    if(!health && msg.length)ht-=6;
-    CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+(h.x+h.w*.5f)*W-w/2));
-    CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
-    g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
-    if(msg.length) {
-        g_mouse_label.frame=CGRectMake(x+8,y+(health?12:5),w-16,ht-(health?17:10));
-        g_mouse_label.string=msg;g_mouse_label.hidden=NO;
-    }
-    if (health) {
-        CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
-        g_mouse_hp_bg.frame=CGRectMake(x+8,y+4,w-16,4);
-        g_mouse_hp_fill.frame=CGRectMake(x+8,y+4,(w-16)*ratio,4);
-        g_mouse_hp_bg.hidden=g_mouse_hp_fill.hidden=NO;
-    }
-}
+        // The game's native MonsterHealth panel owns enemy names, HP and affixes.
+        // Keep only the NPC label as a host fallback; never duplicate monster UI.
+        if (h.kind==1 && h.title[0]) {
+            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+            CGFloat w=MIN(W,MIN(260,MAX(135,W*0.27)));
+            CGFloat ht=36;
+            CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+(h.x+h.w*.5f)*W-w/2));
+            CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
+            g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
+            g_mouse_label.frame=CGRectMake(x+8,y+5,w-16,ht-10);
+            g_mouse_label.string=name;g_mouse_label.hidden=NO;
+        }
     }
     [CATransaction commit];
     mac_controls_sync();

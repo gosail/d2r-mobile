@@ -590,6 +590,15 @@ void dm_world_hover_native_name(uint32_t id,const char *name) {
     }
     pthread_mutex_unlock(&g_hover_mu);
 }
+// The original target info message is authoritative when its unit ID matches
+// the currently hovered target. A fallback must not cover it a second time.
+int dm_world_hover_native_visible(void) {
+    pthread_mutex_lock(&g_hover_mu);
+    uint32_t current=atomic_load(&g_native_hover_mon_id);
+    int visible=current && g_native_hover_name_id==current && g_hover_view.kind==3;
+    pthread_mutex_unlock(&g_hover_mu);
+    return visible;
+}
 int dm_world_hover_read(dm_world_hover_view *out) {
     if (!out) return 0;
     pthread_mutex_lock(&g_hover_mu);

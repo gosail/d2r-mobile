@@ -20,6 +20,45 @@ static int inited;
 // because the guest is temporarily rewriting or committing its profile.
 static int native_seen;
 static _Atomic int external_owner;
+// In-game native Controls editor: 0 idle, otherwise 1 + command*2 + slot.
+// It edits only the guest-created character .key. Controller .ctl stays
+// entirely owned by KeyBindingMenu, including its own button capture.
+static _Atomic unsigned native_pc_capture;
+static _Atomic int native_pc_result;
+int dm_kbmap_native_pc_begin(unsigned command,unsigned slot) {
+    uint16_t vk=0xffff;
+    if(command>=57 || slot>=2 ||
+       dm_pc_profile_get(command,slot,&vk)!=DM_KEYFILE_OK)return 0;
+    atomic_store(&native_pc_result,DM_KEYFILE_OK);
+    atomic_store(&native_pc_capture,1u+command*2+slot);
+    return 1;
+}
+void dm_kbmap_native_pc_cancel(void) { atomic_store(&native_pc_capture,0); }
+int dm_kbmap_native_pc_capture(unsigned *command,unsigned *slot) {
+    unsigned v=atomic_load(&native_pc_capture);
+    if(!v)return 0;
+    if(command)*command=(v-1)/2;
+    if(slot)*slot=(v-1)%2;
+    return 1;
+}
+int dm_kbmap_native_pc_result(void) {return atomic_load(&native_pc_result);}
+static int native_pc_capture_key(unsigned usage,int pressed) {
+    unsigned v=atomic_load(&native_pc_capture);
+    if(!v)return 0;
+    // Consume both press and release while capturing; releasing the final
+    // key may be delivered after the successful bind.
+    if(!pressed)return 1;
+    if(usage==0x29) { // Escape cancels capture, never clears a binding
+        dm_kbmap_native_pc_cancel();
+        return 1;
+    }
+    int vk=dm_pc_vk_from_hid(usage);
+    if(vk<0) {atomic_store(&native_pc_result,DM_KEYFILE_UNSUPPORTED);return 1;}
+    int rc=dm_pc_profile_bind((v-1)/2,(v-1)%2,(uint16_t)vk,NULL,NULL);
+    atomic_store(&native_pc_result,rc);
+    if(rc==DM_KEYFILE_OK)dm_kbmap_native_pc_cancel();
+    return 1;
+}
 void dm_kbmap_external_owner(int on) { atomic_store(&external_owner,!!on); }
 int dm_kbmap_is_external_owner(void) { return atomic_load(&external_owner); }
 static const int native_pc_mode=1;
@@ -96,6 +135,7 @@ int dm_kbmap_bind(unsigned usage,unsigned action) {
 int dm_kbmap_restore_defaults_checked(void) { return 0; }
 void dm_kbmap_restore_defaults(void) {}
 void dm_kbmap_reset(void) {
+    dm_kbmap_native_pc_cancel();
     dm_kbmap_external_owner(0);
     pthread_mutex_lock(&km_mu);
     memset(down,0,sizeof down);memset(active,0,sizeof active);
@@ -105,6 +145,7 @@ void dm_kbmap_reset(void) {
 }
 void dm_kbmap_key_event(unsigned usage,int pressed) {
     if(usage>=256)return;
+    if(native_pc_capture_key(usage,pressed))return;
     if(pressed)dm_kbmap_external_owner(1);
     // Physical left/right Command is exclusively a transient PC second-bank
     // modifier. It must not also activate an unrelated native .key command.

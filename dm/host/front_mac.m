@@ -71,23 +71,34 @@ static void mouse_hover_draw(void) {
                                 h.w*W+6,h.h*H+6);
             CGPathRef p=CGPathCreateWithRoundedRect(r,4,4,NULL);
             g_mouse_outline.path=p; CGPathRelease(p); g_mouse_outline.hidden=NO;
-        } else if ((h.kind==1 || h.kind==3) && h.title[0]) {
-            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
-            NSString *details=(h.kind==3 && h.details[0]) ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
-            NSString *msg=details.length ? [NSString stringWithFormat:@"%@\n%@",name,details] : name;
-            CGFloat w=MIN(260,MAX(135,W*0.27)), ht=details.length ? 63 : 38;
-            CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+(h.x+h.w*.5f)*W-w/2));
-            CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
-            g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
-            g_mouse_label.frame=CGRectMake(x+8,y+7,w-16,ht-12);
-            g_mouse_label.string=msg;g_mouse_label.hidden=NO;
-            if (h.kind==3 && h.hp_max>0) {
-                CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
-                g_mouse_hp_bg.frame=CGRectMake(x+8,y+4,w-16,4);
-                g_mouse_hp_fill.frame=CGRectMake(x+8,y+4,(w-16)*ratio,4);
-                g_mouse_hp_bg.hidden=g_mouse_hp_fill.hidden=NO;
-            }
         }
+// Hover feedback remains passive. The original selector may draw its own
+// health HUD, but a valid target rectangle must not suppress this snapshot.
+if ((h.kind==1 && h.title[0]) ||
+    (h.kind==3 && (h.title[0] || h.details[0] || h.hp_max>0))) {
+    NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+    NSString *details=(h.kind==3 && h.details[0]) ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
+    NSString *msg=name.length && details.length ?
+        [NSString stringWithFormat:@"%@\n%@",name,details] :
+        (name.length ? name : details);
+    BOOL health=h.kind==3 && h.hp_max>0;
+    CGFloat w=MIN(W,MIN(260,MAX(135,W*0.27)));
+    CGFloat ht=msg.length ? (name.length && details.length ? 66 : 42) : 22;
+    if(!health && msg.length)ht-=6;
+    CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+(h.x+h.w*.5f)*W-w/2));
+    CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
+    g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
+    if(msg.length) {
+        g_mouse_label.frame=CGRectMake(x+8,y+(health?12:5),w-16,ht-(health?17:10));
+        g_mouse_label.string=msg;g_mouse_label.hidden=NO;
+    }
+    if (health) {
+        CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
+        g_mouse_hp_bg.frame=CGRectMake(x+8,y+4,w-16,4);
+        g_mouse_hp_fill.frame=CGRectMake(x+8,y+4,(w-16)*ratio,4);
+        g_mouse_hp_bg.hidden=g_mouse_hp_fill.hidden=NO;
+    }
+}
     }
     [CATransaction commit];
     mac_controls_sync();

@@ -835,27 +835,38 @@ static NSString *kbActionLabel(int action) {
                                   h.w*w.size.width,h.h*w.size.height);
             _mouseHoverOutline.path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(area,-3,-3) cornerRadius:4].CGPath;
             _mouseHoverOutline.hidden=NO;
-        } else if ((h.kind==1 || h.kind==3) && h.title[0]) {
-            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
-            NSString *detail=h.kind==3 && h.details[0] ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
-            NSString *label=detail.length ? [NSString stringWithFormat:@"%@\n%@",name,detail] : name;
-            CGFloat width=MIN(260,MAX(120,w.size.width*0.28));
-            CGFloat height=detail.length ? 61 : 36;
-            CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+(h.x+h.w*.5f)*w.size.width-width/2));
-            CGFloat y=MAX(CGRectGetMinY(w),CGRectGetMinY(w)+h.y*w.size.height-height-9);
-            CGRect panel=CGRectMake(x,y,width,height);
-            _mouseHoverBacking.frame=panel; _mouseHoverBacking.hidden=NO;
-            _mouseHoverLabel.string=label;
-            _mouseHoverLabel.frame=CGRectInset(panel,8,6);
-            _mouseHoverLabel.hidden=NO;
-            if (h.kind==3 && h.hp_max>0) {
-                CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
-                CGRect track=CGRectMake(x+8,y+height-9,width-16,4);
-                _mouseHoverHpBg.frame=track;
-                _mouseHoverHpFill.frame=CGRectMake(track.origin.x,track.origin.y,track.size.width*ratio,track.size.height);
-                _mouseHoverHpBg.hidden=_mouseHoverHpFill.hidden=NO;
-            }
         }
+// Draw the actual monster stats alongside the selection outline.
+// The game may have a hit rectangle even when its native target HUD has not
+// admitted the hovered monster (range/LOS). That rectangle must not hide HP.
+if ((h.kind==1 && h.title[0]) ||
+    (h.kind==3 && (h.title[0] || h.details[0] || h.hp_max>0))) {
+    NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+    NSString *detail=h.kind==3 && h.details[0] ? ([NSString stringWithUTF8String:h.details] ?: @"") : @"";
+    NSString *label=name.length && detail.length ?
+        [NSString stringWithFormat:@"%@\n%@",name,detail] :
+        (name.length ? name : detail);
+    BOOL health=h.kind==3 && h.hp_max>0;
+    CGFloat width=MIN(w.size.width,MIN(260,MAX(120,w.size.width*0.28)));
+    CGFloat height=label.length ? (detail.length && name.length ? 66 : 42) : 22;
+    if(!health && label.length)height-=6;
+    CGFloat x=MIN(CGRectGetMaxX(w)-width,MAX(CGRectGetMinX(w),CGRectGetMinX(w)+(h.x+h.w*.5f)*w.size.width-width/2));
+    CGFloat y=MAX(CGRectGetMinY(w),CGRectGetMinY(w)+h.y*w.size.height-height-9);
+    CGRect panel=CGRectMake(x,y,width,height);
+    _mouseHoverBacking.frame=panel; _mouseHoverBacking.hidden=NO;
+    if(label.length) {
+        _mouseHoverLabel.string=label;
+        _mouseHoverLabel.frame=CGRectMake(x+8,y+5,width-16,height-(health?16:10));
+        _mouseHoverLabel.hidden=NO;
+    }
+    if (health) {
+        CGFloat ratio=MAX(0,MIN(1,(CGFloat)h.hp/h.hp_max));
+        CGRect track=CGRectMake(x+8,y+height-9,width-16,4);
+        _mouseHoverHpBg.frame=track;
+        _mouseHoverHpFill.frame=CGRectMake(track.origin.x,track.origin.y,track.size.width*ratio,track.size.height);
+        _mouseHoverHpBg.hidden=_mouseHoverHpFill.hidden=NO;
+    }
+}
     }
     [CATransaction commit];
 }

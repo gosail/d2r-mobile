@@ -55,6 +55,15 @@ class PointerWorldRender(unittest.TestCase):
         self.assertIn("dm_world_hover_read(&h)", mac)
         self.assertIn('h.kind>=1 && h.kind<=4',ios)
         self.assertIn('h.kind>=1 && h.kind<=4',mac)
+        # Monster name/details/HP are painted independently from the outline.
+        # Both can coexist on every normal mouse-hover hit.
+        for code in (ios, mac):
+            self.assertNotIn('} else if ((h.kind==1 || h.kind==3) && h.title[0])',code)
+            self.assertIn('h.title[0] || h.details[0] || h.hp_max>0',code)
+            self.assertIn('if (health)',code)
+        android=source("android/app/src/main/java/com/xiaoboluo/d2r/MouseHoverOverlay.java")
+        self.assertIn('if(!title.isEmpty() || !detail.isEmpty() || health)',android)
+        self.assertIn('boolean health=monster && h[6]>0',android)
 
     def test_held_items_do_not_snap_back(self):
         cursor=source("host/dm_cursor.c")

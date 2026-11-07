@@ -32,7 +32,7 @@ class PhysicalMouseWiring(unittest.TestCase):
         target = self.read("host/hle_target.c")
         self.assertNotIn("worldHoverSync", ios)
         self.assertNotIn("hoverTimer", mac)
-        self.assertNotIn("new MouseHoverOverlay", android)
+        self.assertIn("new MouseHoverOverlay", android)
         self.assertIn("dm_world_hover_monster_id()", target)
 
     def test_physical_mouse_uses_hud_and_panel_gestures(self):
@@ -72,7 +72,7 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("dm_world_hover_monster_id", world)
         self.assertIn("candidate_id==hover", target)
         self.assertIn("gate_obs_set(OBS_TARGET_RANK, target_rank_obs)", target)
-        self.assertNotIn("new MouseHoverOverlay", self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
+        self.assertIn("new MouseHoverOverlay", self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java"))
 
     def test_mac_right_and_middle_buttons_use_same_actions(self):
         mac = self.read("host/front_mac.m")

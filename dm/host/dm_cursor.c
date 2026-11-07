@@ -2108,7 +2108,9 @@ static void ui_bind_pump(uint64_t root, uint64_t fr) {
 static int g_pc_full_page_pending;
 static uint64_t g_pc_full_page_started;
 static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
-    if(!g_pc_full_page_pending || !m || !root)return;
+    if(!g_pc_full_page_pending)return;
+    if(!dm_uiscreen_ingame()){g_pc_full_page_pending=0;return;}
+    if(!m || !root)return;
     if(fr-g_pc_full_page_started>90) {
         LOG("【红】PC 功能页：原版 UISwitcher 未出现，放弃切页");
         g_pc_full_page_pending=0;
@@ -2118,8 +2120,11 @@ static void ui_pc_full_page_pump(module_t *m,uint64_t root,uint64_t fr) {
     if(!us || !*(uint8_t *)(us+0x50))return;
     int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
     int to=g_pc_full_page_pending-1;
+    // The native UISwitcher may appear before its tab count and current
+    // selection are initialized. Retry on subsequent guest frames.
+    if(n<=0 || n>16 || cur<0 || cur>=n)return;
     g_pc_full_page_pending=0;
-    if(n<=0 || n>16 || to>=n || cur<0 || cur>=n) {
+    if(to>=n) {
         LOG("【红】PC 功能页：目标 %d 不在原版页签范围 %d（当前 %d）",to,n,cur);
         return;
     }

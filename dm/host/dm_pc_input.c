@@ -24,7 +24,21 @@ static uint64_t skill_sample[256];
 // Native PC "stand still" (command 36, typically Shift) is a held
 // movement modifier, not a toggle for the controller's second skill set.
 static _Atomic int stand_still;
+static _Atomic unsigned cmd_down;
+static void publish_locked(void);
 int dm_pc_input_stand_still(void) { return atomic_load(&stand_still); }
+int dm_pc_input_second_group(void) { return atomic_load(&cmd_down)!=0; }
+// Reserve both physical Command keys for the PC skill-bank preview.
+// This is transient input state, not a guessed edit to the character .key.
+void dm_pc_input_cmd_event(unsigned hid,int pressed) {
+    unsigned bit=hid==0xe3?1u:hid==0xe7?2u:0;
+    if(!bit)return;
+    pthread_mutex_lock(&input_mu);
+    unsigned cur=atomic_load(&cmd_down);
+    unsigned next=pressed?(cur|bit):(cur&~bit);
+    if(next!=cur){atomic_store(&cmd_down,next);publish_locked();}
+    pthread_mutex_unlock(&input_mu);
+}
 // USB HID keyboard arrow cluster, reserved for the guest's Switch stick
 // when playing and D-pad navigation when a menu or panel is open.
 static uint64_t arrow_dpad(unsigned hid) {
@@ -60,6 +74,11 @@ int dm_pc_input_supported_action(uint32_t id) {
 uint64_t dm_pc_input_skill_buttons(uint32_t id) {
     int slot=skill_slot(id);
     return slot>=0?slot_buttons[slot%6] | (slot>=6?DM_BTN_ZL:0):0;
+}
+static unsigned second_action(unsigned id) {
+    int slot=skill_slot(id);
+    if(slot<0 || slot>=6)return id;
+    return slot<2 ? (unsigned)(20+slot) : (unsigned)(46+slot-2);
 }
 static uint64_t command_bits(unsigned id) {
     int slot=skill_slot(id);
@@ -105,6 +124,10 @@ static void publish_locked(void) {
     for(unsigned i=0;i<256;i++)
         if(down[i] && command[i]==36) { still=1;break; }
     atomic_store(&stand_still,still);
+    // Only the gameplay HUD receives ZL from Command. Controller-style
+    // menus must never interpret Command as a tab-switch or a binding key.
+    if(atomic_load(&cmd_down) && dm_uiscreen_ingame() &&
+       !dm_uiscreen_panel())bits|=DM_BTN_ZL;
     dm_kb_set(bits,lx,ly,0,right_y);
 }
 void dm_pc_input_reset(void) {
@@ -117,6 +140,7 @@ void dm_pc_input_reset(void) {
     memset(skill_sample,0,sizeof skill_sample);
     queue_head=queue_tail=0;
     atomic_store(&stand_still,0);
+    atomic_store(&cmd_down,0);
     dm_kb_set(0,0,0,0,0);
     pthread_mutex_unlock(&input_mu);
 }
@@ -239,16 +263,19 @@ void dm_pc_input_event(unsigned hid,int pressed) {
         down[hid]=1;
         command[hid]=rc==0 && id<=56 && dm_pc_input_supported_action(id)?
             (unsigned char)id:UNMAPPED;
-        held_mask[hid]=command[hid]==UNMAPPED?0:command_bits(command[hid]);
+        int slot_index=skill_slot(command[hid]);
+        unsigned action=slot_index>=0 && slot_index<6 &&
+            atomic_load(&cmd_down)?second_action(command[hid]):command[hid];
+        held_mask[hid]=command[hid]==UNMAPPED?0:command_bits(action);
         skill_phase[hid]=PH_IDLE;
-        // With the physical pointer over an actual skill icon, pressing its
-        // assigned PC shortcut enters the guest's own controller bind modal.
-        // This key-down must NOT also cast its old skill.
-        if(skill_slot(command[hid])>=0 && dm_ui_pc_skill_bind_request(command[hid])) {
+        // Cmd+Skill1..6 uses the native second bank, while dedicated
+        // Skill7..12 shortcuts retain their original .key behavior.
+        // A bound skill under the mouse enters the guest binding dialog.
+        if(skill_slot(action)>=0 && dm_ui_pc_skill_bind_request(action)) {
             command[hid]=UNMAPPED;
             held_mask[hid]=0;
         }
-        if(skill_slot(command[hid])>=6) {
+        if(skill_slot(command[hid])>=0 && (held_mask[hid]&DM_BTN_ZL)) {
             skill_phase[hid]=PH_ZL_LEAD;
             skill_sample[hid]=dm_input_samples();
         }

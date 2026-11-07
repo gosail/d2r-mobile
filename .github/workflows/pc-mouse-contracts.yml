@@ -78,8 +78,13 @@ jobs:
               static native boolean nativeMouseBind(int physical,int logical);
           }
           STUB
+          cat > /tmp/dmkb/com/xiaoboluo/d2r/PadInput.java <<'STUB'
+          package com.xiaoboluo.d2r;
+          class PadInput { static void externalInput() {} }
+          STUB
           javac -cp "$jar" -d /tmp/dmkb-classes \
             /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java \
+            /tmp/dmkb/com/xiaoboluo/d2r/PadInput.java \
             dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardInput.java \
             dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardSettings.java \
             dm/android/app/src/main/java/com/xiaoboluo/d2r/NativePcKeyboardSettings.java

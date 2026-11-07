@@ -67,7 +67,16 @@ int main(void) {
     dm_kbmap_key_event(0x1a,0);assert(left_y==0);
     // After guest .key exists, keyboard X resolves native Skill 1, then
     // uses the original SkillButton1 A binding (including its assigned skill).
+    // A is the original Character action, not the legacy WASD left
+    // movement. Even a previously held compatibility movement key must
+    // stop before dispatching the native action.
+    dm_kbmap_key_event(0x1a,1);assert(left_y==32767);
     game_seed("Alice");
+    dm_kbmap_key_event(0x04,1);
+    assert(left_x==0 && left_y==0);
+    dm_pc_input_guest_step();assert(pc_native_panels==1);
+    dm_kbmap_key_event(0x04,0);
+    dm_kbmap_key_event(0x1a,0);
     dm_kbmap_key_event(0x1b,1);assert(buttons & DM_BTN_A);
     dm_kbmap_key_event(0x1b,0);assert(buttons==0);
     char worksidecar[1200],savedsidecar[1200];

@@ -292,8 +292,12 @@ def compile_binary_overlays(romfs, outdir, patched, report):
         raise IncompatibleGameData("Missing localization keys needed to compile native skill tables")
 
     def compile_to(destination):
+        # The third-party 3.3 compiler prints platform-localized, sometimes
+        # non-UTF8 diagnostics; decode lossily *only for its log text*. Source
+        # game tables and binary SHA checks always remain byte-exact.
         run = subprocess.run([tool, "compile", str(excel), str(destination)],
-                             capture_output=True, text=True, timeout=180)
+                             capture_output=True, text=True, errors="replace",
+                             timeout=180)
         if run.returncode:
             raise IncompatibleGameData(
                 "3.3 datatable compilation failed: " + (run.stderr or run.stdout)[-1300:])

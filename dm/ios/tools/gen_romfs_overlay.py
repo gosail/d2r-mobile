@@ -19,6 +19,14 @@ REPL={'data/hd/global/ui/panel/hud_02/bugbtn.sprite':'base.sprite',            #
       'data/hd/global/ui/panel/hud_02/front_panel.sprite':'close.sprite',       # 借用路径：局内面板外框右上角的关闭按钮图（NativeHUD/touch/close.png，gen_close_btn.py） | Borrowed path: the close button image at the top-right corner of the in-game panel outer frame (NativeHUD/touch/close.png, gen_close_btn.py)
       'data/global/ui/layouts/controller/hudpanelhd.json':os.path.join(V4,'hud.json')}
 with tempfile.TemporaryDirectory() as t:
+    # Offline-only experimental Druid summons. Default overlays remain byte-for-byte
+    # unchanged; the explicit build flag is never inferred from saves or input mode.
+    _druid_flag = os.environ.get('DM_OFFLINE_DRUID_SUMMON', '0')
+    if _druid_flag not in ('0', '1'):
+        raise SystemExit('DM_OFFLINE_DRUID_SUMMON must be 0 or 1')
+    if _druid_flag == '1':
+        import druid_summon_balance
+        REPL.update(druid_summon_balance.build(romfs, t))
     # 系统通知框（如改难度后的「游戏难度设为 N…」）：左边 = 七格行最左格（难度格）左外沿，右边 = 最右格（红十字）右外沿，停留 5 秒；高度不动，纵向比原版上移 100 单位（原位 y=-500 压住底栏上方「Lv · 经验」那行）
     # （原版宽 1200 单位居中屏幕、停 10 秒）。几何从 hud_v4_ui/ui.json 的七格算，不手写：布局 1 单位 = 屏高/2160（gen_hud_v4.py 实测），框锚点在屏幕水平中心。
     # 落点按真机量（界面按游戏内部分辨率画，落到 2868 宽屏幕上约 1.8 px 一格取整）：边框亮线两侧各有 1 px 暗边，宽度两边各放 1 px；
@@ -232,6 +240,9 @@ with tempfile.TemporaryDirectory() as t:
         open(os.path.join(dst,'ps_glyphs'),'w').write('ztouch_controller_buttons_ui/switchp*.sprite\n')   # 标记文件：覆盖层带 PlayStation 键帽，宿主 dm_padmode.c 见到它才在 PS 手柄输入时换
         if os.environ.get('DM_OVERLAY_MAC'): open(os.path.join(dst,'kbd_glyphs'),'w').write('ztouch_controller_buttons_ui/switchk*.sprite\n')   # 标记文件：覆盖层带键盘键帽，宿主 dm_padmode.c 见到它才用 | marker file: the overlay carries keyboard key caps; the host's dm_padmode.c uses them only when it sees this
         open(os.path.join(dst,'ctrl_touch'),'w').write('触屏版布局在 layouts/xtouch_lay、ztouch_console_lay、0touch_console_switch_lay（dm_padmode.c 见到本文件才改写前缀）\n')
+        if _druid_flag == '1':
+            shutil.copyfile(os.path.join(t, 'offline_druid_patch_report.json'),
+                            os.path.join(dst, 'offline_druid_patch_report.json'))
         GENERATED_OVERLAYS.append(dst)
         return new[0], os.path.getsize(os.path.join(dst,'data',new[0]))
     n0,z0=emit(REPL,out,'')

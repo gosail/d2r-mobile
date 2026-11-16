@@ -99,7 +99,7 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private FrameLayout gameFrame;
     private TouchOverlay touchOverlay;
     private boolean started;
-    private boolean secondaryMouseDown;
+    private boolean primaryMouseDown, secondaryMouseDown, tertiaryMouseDown;
     boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
     private boolean importing, savesTransferred;
     private boolean libraryLoaded;
@@ -159,31 +159,61 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
         if (!libraryLoaded || !started || (e.getSource() & InputDevice.SOURCE_MOUSE) != InputDevice.SOURCE_MOUSE) return false;
         final int a = e.getActionMasked();
         int op;
+        // Android may emit ACTION_DOWN/UP and BUTTON_PRESS/RELEASE for the
+        // same physical button. Track edges here so every gesture enters the
+        // native queue exactly once (especially right-use and middle-map).
         switch (a) {
             case MotionEvent.ACTION_HOVER_ENTER:
             case MotionEvent.ACTION_HOVER_MOVE: op=3; break;
             case MotionEvent.ACTION_HOVER_EXIT: op=8; break;
-            case MotionEvent.ACTION_CANCEL: op=4; break;
-            case MotionEvent.ACTION_DOWN:
-            case MotionEvent.ACTION_BUTTON_PRESS:
-                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0 ||
-                    (a==MotionEvent.ACTION_DOWN && (e.getButtonState() & MotionEvent.BUTTON_TERTIARY)!=0)) {
-                    op=9;
-                } else if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
-                    (a == MotionEvent.ACTION_DOWN && (e.getButtonState() & MotionEvent.BUTTON_SECONDARY) != 0)) {
-                    op=5; secondaryMouseDown=true;
-                } else if (a == MotionEvent.ACTION_DOWN) op=0;
-                else return true;
+            case MotionEvent.ACTION_CANCEL:
+                primaryMouseDown=secondaryMouseDown=tertiaryMouseDown=false;
+                op=4; break;
+            case MotionEvent.ACTION_DOWN: {
+                int buttons=e.getButtonState();
+                if ((buttons & MotionEvent.BUTTON_PRIMARY)!=0 || buttons==0) {
+                    if(primaryMouseDown)return true;
+                    primaryMouseDown=true; op=0;
+                } else if ((buttons & MotionEvent.BUTTON_SECONDARY)!=0) {
+                    if(secondaryMouseDown)return true;
+                    secondaryMouseDown=true; op=5;
+                } else if ((buttons & MotionEvent.BUTTON_TERTIARY)!=0) {
+                    if(tertiaryMouseDown)return true;
+                    tertiaryMouseDown=true; op=9;
+                } else return true;
                 break;
+            }
+            case MotionEvent.ACTION_BUTTON_PRESS: {
+                int button=e.getActionButton();
+                if ((button & MotionEvent.BUTTON_PRIMARY)!=0) {
+                    if(primaryMouseDown)return true;
+                    primaryMouseDown=true; op=0;
+                } else if ((button & MotionEvent.BUTTON_SECONDARY)!=0) {
+                    if(secondaryMouseDown)return true;
+                    secondaryMouseDown=true; op=5;
+                } else if ((button & MotionEvent.BUTTON_TERTIARY)!=0) {
+                    if(tertiaryMouseDown)return true;
+                    tertiaryMouseDown=true; op=9;
+                } else return true;
+                break;
+            }
             case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_BUTTON_RELEASE:
-                if ((e.getActionButton() & MotionEvent.BUTTON_TERTIARY) != 0) return true;
-                if ((e.getActionButton() & MotionEvent.BUTTON_SECONDARY) != 0 ||
-                    (a == MotionEvent.ACTION_UP && secondaryMouseDown)) {
-                    op=6; secondaryMouseDown=false;
-                } else if (a == MotionEvent.ACTION_UP) op=2;
+                if(primaryMouseDown) { primaryMouseDown=false; op=2; }
+                else if(secondaryMouseDown) { secondaryMouseDown=false; op=6; }
+                else if(tertiaryMouseDown) { tertiaryMouseDown=false; return true; }
                 else return true;
                 break;
+            case MotionEvent.ACTION_BUTTON_RELEASE: {
+                int button=e.getActionButton();
+                if ((button & MotionEvent.BUTTON_PRIMARY)!=0 && primaryMouseDown) {
+                    primaryMouseDown=false; op=2;
+                } else if ((button & MotionEvent.BUTTON_SECONDARY)!=0 && secondaryMouseDown) {
+                    secondaryMouseDown=false; op=6;
+                } else if ((button & MotionEvent.BUTTON_TERTIARY)!=0 && tertiaryMouseDown) {
+                    tertiaryMouseDown=false; return true;
+                } else return true;
+                break;
+            }
             case MotionEvent.ACTION_MOVE: op=1; break;
             case MotionEvent.ACTION_SCROLL: op=7; break;
             default: return false;

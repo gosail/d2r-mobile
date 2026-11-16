@@ -231,6 +231,11 @@ void dm_android_mouse_event(int op, float xdp, float ydp, int arg) {
         if(tail-head<256) queue[tail++%256]=(touch_event){phase,mouse_slot,1,local_x,local_y,now_ns()/1e9};
         else { cancel=1;head=tail=0; }
         if(phase>=2) mouse_touch_on=0;
+        // A lost pointer cancels the native item gesture AND the shared
+        // external-mouse owner. Otherwise the touch-only held-item guard
+        // stays disabled after the mouse leaves or Android cancels input.
+        if(op==DM_MOUSE_LEAVE)
+            dm_external_mouse_event(DM_MOUSE_LEAVE,ux,uy,wx,wy,0);
     } else dm_external_mouse_event(op,ux,uy,wx,wy,arg);
     pthread_mutex_unlock(&lock);
 }

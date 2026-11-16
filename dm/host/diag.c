@@ -793,6 +793,132 @@ static void cube_diag_tick(uint64_t G, uint64_t player) {   // 合成请求后 2
 // All three "who is the controlled player" sites go by it: the per-tick feature entry hud_tick, the state dump state_dump, the position check poschk. A corpse left in the player table after the character dies is also a player-type unit with "mode ≠ 0 and coordinates",
 // so counting units present reports "living player + own corpse" as non-unique. That is a stale measuring criterion, not two players on the field
 static uint32_t local_player_id(void) { uint32_t slot = 8, lid = 0xffffffffu; module_t *mm = main_mod(); if (mm && tk_rd((uint64_t)mm->base + 0x2d20e4c, &slot, 4) && slot < 8) tk_rd((uint64_t)mm->base + 0x2d60380 + 4 * slot, &lid, 4); return lid; }
+// ---- DM_DUAL_MERC_PROBE=1: passive, offline-only dual-hireling feasibility trace ----
+// This observes the original pet type 7 list on the server and the owner's
+// client pet list. It MUST NOT create units, reassign owner IDs, change hire
+// logic, mutate saves, or interfere with regular mercenary management.
+// It establishes whether the current engine retains one or two tracked units
+// across a player-initiated hire, travel, death, and save/exit/reload.
+typedef struct { uint32_t id, cls, mode, flags; } dm_merc_probe_unit;
+typedef struct {
+    uint32_t server_n, client_n;
+    dm_merc_probe_unit server[8], client[8];
+} dm_merc_probe_snapshot;
+
+static void dm_merc_probe_sort(dm_merc_probe_unit *a, unsigned n) {
+    for (unsigned i = 1; i < n; i++) {
+        dm_merc_probe_unit v = a[i]; unsigned j = i;
+        while (j && a[j-1].id > v.id) { a[j] = a[j-1]; j--; }
+        a[j] = v;
+    }
+}
+
+static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint64_t client_base) {
+    dm_merc_probe_unit r = { .id = id, .mode = UINT32_MAX };
+    if (id == 0xffffffffu) return r;
+    uint64_t h = client_base
+        ? client_base + 0x2d603a0 + 0x400 + (uint64_t)(id & 0x7f) * 8
+        : G + 0x2630 + (uint64_t)(id & 0x7f) * 8;
+    uint64_t u = 0;
+    if (!tk_rd(h, &u, sizeof u)) return r;
+    for (int i = 0; u && i < 512; i++) {
+        uint32_t uid = 0;
+        if (!tk_rd(u + 8, &uid, 4)) break;
+        if (uid == id) {
+            tk_rd(u + 4, &r.cls, 4);
+            tk_rd(u + 0xc, &r.mode, 4);
+            break;
+        }
+        if (!tk_rd(u + 0x158, &u, 8)) break;
+    }
+    return r;
+}
+
+static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player) {
+    static int enabled = -1, have_last;
+    static uint64_t last_game;
+    static uint32_t last_print;
+    static dm_merc_probe_snapshot last;
+    if (enabled < 0) {
+        const char *e = getenv("DM_DUAL_MERC_PROBE");
+        enabled = e && !strcmp(e, "1");
+        if (enabled) LOG("DM_DUAL_MERC_PROBE：只读双佣兵观测已启用；不创建佣兵、不写角色存档");
+    }
+    if (!enabled || !G) return;
+    if (!player) { have_last = 0; return; }
+    uint32_t tick = 0, owner = 0xffffffffu;
+    if (!tk_rd(G + 0x170, &tick, 4) || tick % 25) return;
+    if (!tk_rd(player + 8, &owner, 4)) return;
+    if (last_game != G) { last_game = G; have_last = 0; }
+
+    dm_merc_probe_snapshot now = {0};
+    // Server: [[player+0x10]+0x98] is the pet-list header, the first
+    // pointer is the array; type 7 is an array entry at 7 * 0x20.
+    uint64_t pd = 0, lst = 0, arr = 0, nd = 0;
+    if (tk_rd(player + 0x10, &pd, 8) && pd &&
+        tk_rd(pd + 0x98, &lst, 8) && lst &&
+        tk_rd(lst, &arr, 8) && arr &&
+        tk_rd(arr + 7 * 0x20, &nd, 8)) {
+        for (unsigned i = 0; nd && i < 64; i++) {
+            uint32_t id = 0;
+            if (!tk_rd(nd + 4, &id, 4)) break;
+            if (id != 0xffffffffu) {
+                if (now.server_n < 8)
+                    now.server[now.server_n] = dm_merc_probe_unit_read(G, id, 0);
+                now.server_n++;
+            }
+            if (!tk_rd(nd + 0x18, &nd, 8)) break;
+        }
+    }
+
+    // Client: type +4 == 7, owner +0xc == local character unit ID,
+    // node +0x20 is an observed state flag, next +0x30. Do not assume
+    // any one record means a *living* mercenary until its unit mode
+    // agrees with the server-side monster unit.
+    module_t *main = main_mod();
+    uint64_t ndc = 0, base = main ? (uint64_t)main->base : 0;
+    if (base) tk_rd(base + 0x2d33528, &ndc, 8);
+    for (unsigned i = 0; ndc && i < 512; i++) {
+        uint32_t type = 0, id = 0, owner_id = 0, flags = 0;
+        if (!tk_rd(ndc + 4, &type, 4) ||
+            !tk_rd(ndc + 8, &id, 4) ||
+            !tk_rd(ndc + 0xc, &owner_id, 4)) break;
+        tk_rd(ndc + 0x20, &flags, 4);
+        if (type == 7 && owner_id == owner && id != 0xffffffffu) {
+            if (now.client_n < 8) {
+                dm_merc_probe_unit u = dm_merc_probe_unit_read(G, id, base);
+                u.flags = flags;
+                now.client[now.client_n] = u;
+            }
+            now.client_n++;
+        }
+        if (!tk_rd(ndc + 0x30, &ndc, 8)) break;
+    }
+    unsigned ns = now.server_n < 8 ? now.server_n : 8;
+    unsigned nc = now.client_n < 8 ? now.client_n : 8;
+    dm_merc_probe_sort(now.server, ns);
+    dm_merc_probe_sort(now.client, nc);
+
+    if (!have_last || memcmp(&now, &last, sizeof now) || tick - last_print >= 250) {
+        char srv[256] = "", cli[256] = "", part[64];
+        for (unsigned i = 0; i < ns; i++) {
+            snprintf(part, sizeof part, "%s%u:%u:%u", i ? "," : "",
+                     now.server[i].id, now.server[i].cls, now.server[i].mode);
+            strlcat(srv, part, sizeof srv);
+        }
+        for (unsigned i = 0; i < nc; i++) {
+            snprintf(part, sizeof part, "%s%u:%u:%u:f%u", i ? "," : "",
+                     now.client[i].id, now.client[i].cls, now.client[i].mode,
+                     now.client[i].flags);
+            strlcat(cli, part, sizeof cli);
+        }
+        LOG("DM_DUAL_MERC_PROBE：拍 %u 玩家 id %u 服务端宠物类型7=%u [%s] 客户端属主佣兵=%u [%s]%s",
+            tick, owner, now.server_n, srv, now.client_n, cli,
+            now.server_n > 8 || now.client_n > 8 ? "（仅显示前8个）" : "");
+        last = now; have_last = 1; last_print = tick;
+    }
+}
+
 static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本级经验‰ / 腰带四列件数 / 回城次数 + 当前人数档 → g_hud（前端 dm_hud_get） | Every tick: controlled player's level / current-level experience ‰ / item counts of the four belt columns / town portal count + current /players setting → g_hud (front end dm_hud_get)
     dm_hud_info h = {0};
     uint64_t player = 0, inv = 0, u = 0, next = 0;
@@ -815,6 +941,7 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             if (!tk_rd(u + 0x158, &u, 8)) break;
         }
     }
+    dm_dual_merc_probe_tick(G, player);
     uint32_t sig = 0;
     if (player && tk_rd(player + 0x90, &inv, 8) && tk_rd(inv, &sig, 4) && sig == 0x01020304) {
         { static int hp1 = -1; if (hp1 < 0) { const char *e = getenv("DM_TEST_HP1"); hp1 = e != NULL; if (e && e[0] == '0') g_hp1_to = 0; } if (hp1 && cur_tick() > 200) test_hp1(player); }

@@ -32,9 +32,11 @@ class PhysicalMouseParity(unittest.TestCase):
         android = self.get("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java")
         mac = self.get("host/front_mac.m")
         self.assertIn("DM_MOUSE_MIDDLE_DOWN", shared)
-        self.assertIn("dm_world_mouse_map_toggle()", shared)
+        self.assertIn("dm_pc_input_middle_or_default()", shared)
+        self.assertIn("dm_pc_input_wheel_or_default(e->arg)", shared)
         self.assertIn("dm_ui_map_full(!dm_ui_map_is_full())", world)
-        self.assertIn("_mouseMiddleDown", ios)
+        self.assertIn("dmMouseMiddleTap:", ios)
+        self.assertIn("UIEventButtonMaskForButtonNumber(3)", ios)
         self.assertIn("BUTTON_TERTIARY", android)
         self.assertIn("NSEventMaskOtherMouseDown", mac)
 

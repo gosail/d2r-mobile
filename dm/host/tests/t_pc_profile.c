@@ -390,6 +390,26 @@ int main(void) {
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='L');
     dm_pc_profile_pre_commit_locked(work_dir);
     assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='L');
+    // If a different native action now owns the desired host key, never
+    // steal that binding during the next save Commit.
+    dir("ConflictGuest");game_seed("ConflictGuest",1);
+    assert(dm_pc_profile_select("ConflictGuest")==DM_KEYFILE_OK);
+    assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_OK);
+    game_seed("ConflictGuest",1); // restore B for the guest's old command
+    char conflicting_path[1200];path("ConflictGuest",conflicting_path);
+    dm_keyfile conflict_edit={0};
+    assert(dm_keyfile_read(&conflict_edit,conflicting_path)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&conflict_edit,2,0,'K')==DM_KEYFILE_OK);
+    size_t conflict_size=0;const uint8_t *conflict_bytes=dm_keyfile_data(&conflict_edit,&conflict_size);
+    { FILE *guest=fopen(conflicting_path,"wb");assert(guest);
+      assert(fwrite(conflict_bytes,1,conflict_size,guest)==conflict_size);
+      assert(!fclose(guest)); }
+    dm_keyfile_free(&conflict_edit);
+    dm_pc_profile_pre_commit_locked(work_dir);
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
+    assert(dm_pc_profile_get(2,0,&vk)==DM_KEYFILE_OK && vk=='K');
+    dm_pc_profile_pre_commit_locked(work_dir);
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='B');
     assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     char backup[1220];snprintf(backup,sizeof backup,"%s.bak",alice);
     assert(access(backup,F_OK)==0);

@@ -8,6 +8,7 @@
 #include "dm_hud_exp.h"
 #include "dm_elysium.h"
 #include "dm_bossrush.h"
+#include "dm_dualmerc_policy.h"
 #include <TargetConditionals.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -799,6 +800,11 @@ static uint32_t local_player_id(void) { uint32_t slot = 8, lid = 0xffffffffu; mo
 // logic, mutate saves, or interfere with regular mercenary management.
 // It establishes whether the current engine retains one or two tracked units
 // across a player-initiated hire, travel, death, and save/exit/reload.
+/* The next 100 server ticks after a candidate hire request are sampled
+ * every tick, catching short-lived simultaneous mercenaries that the usual
+ * 25-tick observation interval might otherwise miss. Read only. */
+static _Atomic uint64_t g_dm_merc_probe_event_G;
+static _Atomic uint32_t g_dm_merc_probe_event_tick;
 typedef struct { uint32_t id, cls, mode, flags; } dm_merc_probe_unit;
 typedef struct {
     uint32_t server_n, client_n;
@@ -834,7 +840,7 @@ static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint6
     return r;
 }
 
-static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player) {
+static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     static int enabled = -1, have_last;
     static uint64_t last_game;
     static uint32_t last_print;
@@ -847,7 +853,11 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player) {
     if (!enabled || !G) return;
     if (!player) { have_last = 0; return; }
     uint32_t tick = 0, owner = 0xffffffffu;
-    if (!tk_rd(G + 0x170, &tick, 4) || tick % 25) return;
+    if (!tk_rd(G + 0x170, &tick, 4)) return;
+    uint64_t armed_G = atomic_load(&g_dm_merc_probe_event_G);
+    uint32_t armed_tick = atomic_load(&g_dm_merc_probe_event_tick);
+    int watch = armed_G == G && (uint32_t)(tick - armed_tick) <= 100;
+    if (!force && tick % 25 && !watch) return;
     if (!tk_rd(player + 8, &owner, 4)) return;
     if (last_game != G) { last_game = G; have_last = 0; }
 
@@ -899,22 +909,33 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player) {
     dm_merc_probe_sort(now.server, ns);
     dm_merc_probe_sort(now.client, nc);
 
-    if (!have_last || memcmp(&now, &last, sizeof now) || tick - last_print >= 250) {
+    if (force || !have_last || memcmp(&now, &last, sizeof now) || tick - last_print >= 250) {
         char srv[256] = "", cli[256] = "", part[64];
         for (unsigned i = 0; i < ns; i++) {
-            snprintf(part, sizeof part, "%s%u:%u:%u", i ? "," : "",
-                     now.server[i].id, now.server[i].cls, now.server[i].mode);
+            snprintf(part, sizeof part, "%s%u:%u:%u:a%u", i ? "," : "",
+                     now.server[i].id, now.server[i].cls, now.server[i].mode,
+                     dm_dualmerc_act_for_class(now.server[i].cls));
             strlcat(srv, part, sizeof srv);
         }
         for (unsigned i = 0; i < nc; i++) {
-            snprintf(part, sizeof part, "%s%u:%u:%u:f%u", i ? "," : "",
+            snprintf(part, sizeof part, "%s%u:%u:%u:f%u:a%u", i ? "," : "",
                      now.client[i].id, now.client[i].cls, now.client[i].mode,
-                     now.client[i].flags);
+                     now.client[i].flags, dm_dualmerc_act_for_class(now.client[i].cls));
             strlcat(cli, part, sizeof cli);
         }
         LOG("DM_DUAL_MERC_PROBE：拍 %u 玩家 id %u 服务端宠物类型7=%u [%s] 客户端属主佣兵=%u [%s]%s",
             tick, owner, now.server_n, srv, now.client_n, cli,
             now.server_n > 8 || now.client_n > 8 ? "（仅显示前8个）" : "");
+        /* One-act-only validation includes the two Act V class variants.
+         * A dead entry remains a member until actually dismissed. */
+        if (now.server_n > DM_DUALMERC_SLOTS)
+            LOG("DM_DUAL_MERC_PROBE：异常，服务端佣兵数量 %u 超过上限 2", now.server_n);
+        for (unsigned i = 0; i < ns; i++) for (unsigned j = 0; j < i; j++) {
+            unsigned act = dm_dualmerc_act_for_class(now.server[i].cls);
+            if (act && act == dm_dualmerc_act_for_class(now.server[j].cls))
+                LOG("DM_DUAL_MERC_PROBE：异常，同幕 %u 佣兵 id %u 与 id %u 同时存在", act,
+                    now.server[j].id, now.server[i].id);
+        }
         last = now; have_last = 1; last_print = tick;
     }
 }
@@ -941,7 +962,7 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             if (!tk_rd(u + 0x158, &u, 8)) break;
         }
     }
-    dm_dual_merc_probe_tick(G, player);
+    dm_dual_merc_probe_tick(G, player, 0);
     uint32_t sig = 0;
     if (player && tk_rd(player + 0x90, &inv, 8) && tk_rd(inv, &sig, 4) && sig == 0x01020304) {
         { static int hp1 = -1; if (hp1 < 0) { const char *e = getenv("DM_TEST_HP1"); hp1 = e != NULL; if (e && e[0] == '0') g_hp1_to = 0; } if (hp1 && cur_tick() > 200) test_hp1(player); }
@@ -1382,6 +1403,9 @@ static void c2s_obs(const uint64_t *regs) {
           hex[cap * 2] = 0;
           LOG("DM_DUAL_MERC_PROBE：拍 %u 玩家 %s%u 收到候选雇佣包 0x36 len=%u 前%u字节=%s（Switch 3.3 语义待核实，只读）",
               tick, hu ? "" : "未知/", uid, len, cap, hex);
+          atomic_store(&g_dm_merc_probe_event_G, regs[0]);
+          atomic_store(&g_dm_merc_probe_event_tick, tick);
+          dm_dual_merc_probe_tick(regs[0], regs[1], 1);  /* before native C2S dispatch */
       }
     }
     if (n >= 1 && b[0] == 0x20) cube_diag_req(regs[0], regs[1], b, n);   // 合成读数 | Transmute readout

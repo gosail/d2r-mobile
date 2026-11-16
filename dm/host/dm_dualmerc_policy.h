@@ -14,6 +14,19 @@ static inline int dm_dualmerc_valid_act(unsigned act) {
     return act == 1 || act == 2 || act == 3 || act == 5;
 }
 
+/* Observed hireling monster classes for Switch 3.3 (diag.c threat filtering).
+ * 560 and 561 are two barbarian variants, both consuming the Act V slot.
+ * This is diagnostic only: candidate hires must use the real Hireling row. */
+static inline unsigned dm_dualmerc_act_for_class(uint32_t cls) {
+    switch (cls) {
+    case 271: return 1;   /* Rogue Scout */
+    case 338: return 2;   /* Desert Mercenary */
+    case 359: return 3;   /* Iron Wolf */
+    case 560: case 561: return 5; /* Barbarian */
+    default: return 0;
+    }
+}
+
 typedef struct {
     uint8_t occupied;          /* Occupied even when the hireling is dead. */
     uint8_t act;               /* Act of origin, independent of difficulty. */

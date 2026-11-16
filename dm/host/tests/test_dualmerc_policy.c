@@ -39,6 +39,12 @@ int main(void) {
     assert(dm_dualmerc_plan(&r, 3, 3).action == DM_DUALMERC_REJECT);
     assert(dm_dualmerc_plan(NULL, 3, 0).action == DM_DUALMERC_REJECT);
     assert(!dm_dualmerc_choice_allowed(NULL, 0));
+    assert(dm_dualmerc_act_for_class(271) == 1);
+    assert(dm_dualmerc_act_for_class(338) == 2);
+    assert(dm_dualmerc_act_for_class(359) == 3);
+    assert(dm_dualmerc_act_for_class(560) == 5);
+    assert(dm_dualmerc_act_for_class(561) == 5);
+    assert(dm_dualmerc_act_for_class(0) == 0);
     puts("dual mercenary roster policy: all assertions passed");
     return 0;
 }

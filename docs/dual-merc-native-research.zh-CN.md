@@ -48,3 +48,7 @@ PR #5 在所有引擎语义与存档测试满足前保持 Draft。
     python3 dm/verify/merc_probe_report.py /path/to/diagnostic.log --json /tmp/merc-observation.json
 
 如果没有候选命令，输出 `0 requests`，表示暂缺真实对应操作码的证据，**不代表客户端没有发送雇佣请求**。装备字段来自有限的只读指针扫描，不能据指纹相等认定物品未丢，也不能跨存档比较。
+
+## 函数边界防漂移检查
+
+新增 `dm/verify/hire_chain_contract.py`：对已验证 Switch 3.3 Prepared 游戏映像内 8 个关键 AArch64 `B/BL` 指令的位置、类型、目标 RVA 进行只读校验；游戏更新或代码改写导致调用关系变化时明确失败。已验证的具体关系包括命令入口 `0x6dadcc→0x7f2320`、下游 `0x6dadf8→0x7ef690`、旧宠物处理 `0x6877f0→0x6c0c30`、`0x68786c→0x7cb6d0`、`0x687940→0x6c1b00`。**这仅证明分支关系，没有证明任何调用可安全跳过。**

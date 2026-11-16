@@ -27,6 +27,20 @@ static inline unsigned dm_dualmerc_act_for_class(uint32_t cls) {
     }
 }
 
+/* Decode only a direct AArch64 BL (not BLR / indirect calls).
+ * Supports both forward and negative branch offsets without touching code. */
+static inline int dm_dualmerc_bl_target(uint32_t insn, uint64_t at_rva,
+                                        uint64_t text_end, uint64_t *target) {
+    if (!target || (insn & 0xfc000000u) != 0x94000000u ||
+        at_rva >= text_end) return 0;
+    int64_t delta = (int64_t)(insn & 0x03ffffffu);
+    if (delta & 0x02000000) delta -= 0x04000000;
+    int64_t dest = (int64_t)at_rva + 4 * delta;
+    if (dest < 0 || (uint64_t)dest >= text_end || (dest & 3)) return 0;
+    *target = (uint64_t)dest;
+    return 1;
+}
+
 typedef struct {
     uint8_t occupied;          /* Occupied even when the hireling is dead. */
     uint8_t act;               /* Act of origin, independent of difficulty. */

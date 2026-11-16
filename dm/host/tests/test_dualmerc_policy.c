@@ -45,6 +45,14 @@ int main(void) {
     assert(dm_dualmerc_act_for_class(560) == 5);
     assert(dm_dualmerc_act_for_class(561) == 5);
     assert(dm_dualmerc_act_for_class(0) == 0);
+    uint64_t bl_target = 0xffff;
+    assert(dm_dualmerc_bl_target(0x9400000c, 0x40, 0x200, &bl_target));
+    assert(bl_target == 0x70);
+    assert(dm_dualmerc_bl_target(0x97fffff8, 0x100, 0x200, &bl_target));
+    assert(bl_target == 0xe0);
+    assert(!dm_dualmerc_bl_target(0xd503201f, 0x40, 0x200, &bl_target));
+    assert(!dm_dualmerc_bl_target(0x9400000c, 0x40, 0x60, &bl_target));
+    assert(!dm_dualmerc_bl_target(0x9400000c, 0x40, 0x200, NULL));
     puts("dual mercenary roster policy: all assertions passed");
     return 0;
 }

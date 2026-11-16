@@ -840,6 +840,54 @@ static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint6
     return r;
 }
 
+/* Resolve runtime C2S dispatch table pointers after the engine's own RELA
+ * relocation. The original Switch 3.3 table RVA was verified by the upstream
+ * command packet replay; opcode meanings are only historic D2 candidates.
+ * This strictly reads signed guest code, and never changes a register/code.
+ * A 128-byte direct-BL scan may cross function boundaries: treat every
+ * printed target as a candidate, not a proven native replacement hook. */
+static void dm_dual_merc_native_handler_probe(void) {
+    static int shown;
+    if (shown) return;
+    module_t *m = main_mod();
+    if (!m || !m->base || !m->text_end) return;
+    shown = 1;
+    const uint64_t base = (uint64_t)(uintptr_t)m->base;
+    const uint64_t table = 0x20a4190;
+    const unsigned opcodes[] = {0x36, 0x38, 0x62};
+    if (table + 0x67 * 8 > m->size) {
+        LOG("DM_DUAL_MERC_PROBE：原生命令表 0x%llx 不在已装载 main 的长度内，跳过",
+            (unsigned long long)table);
+        return;
+    }
+    for (unsigned k = 0; k < sizeof opcodes / sizeof opcodes[0]; k++) {
+        unsigned opcode = opcodes[k];
+        uint64_t address = 0;
+        if (!tk_rd(base + table + (uint64_t)opcode * 8, &address, 8)) {
+            LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 的处理函数表项不可读", opcode);
+            continue;
+        }
+        if (address < base || address - base >= m->text_end ||
+            ((address - base) & 3)) {
+            LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 表项不是有效正文函数指针（数值经校验不公布）", opcode);
+            continue;
+        }
+        uint64_t rva = address - base;
+        LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 运行时处理入口 main+0x%llx（语义待核实）",
+            opcode, (unsigned long long)rva);
+        uint64_t scan = m->text_end - rva;
+        if (scan > 128) scan = 128;
+        unsigned calls = 0;
+        for (uint64_t d = 0; d + 4 <= scan; d += 4) {
+            uint32_t insn = 0; uint64_t target = 0;
+            if (!tk_rd(address + d, &insn, 4)) break;
+            if (dm_dualmerc_bl_target(insn, rva + d, m->text_end, &target) && calls++ < 16)
+                LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 直调 main+0x%llx → main+0x%llx（首128字节内，未证明属于同函数）",
+                    opcode, (unsigned long long)(rva + d), (unsigned long long)target);
+        }
+    }
+}
+
 static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     static int enabled = -1, have_last;
     static uint64_t last_game;
@@ -851,6 +899,7 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
         if (enabled) LOG("DM_DUAL_MERC_PROBE：只读双佣兵观测已启用；不创建佣兵、不写角色存档");
     }
     if (!enabled || !G) return;
+    dm_dual_merc_native_handler_probe();
     if (!player) { have_last = 0; return; }
     uint32_t tick = 0, owner = 0xffffffffu;
     if (!tk_rd(G + 0x170, &tick, 4)) return;

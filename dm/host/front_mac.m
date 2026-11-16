@@ -11,7 +11,13 @@
 #import <ImageIO/ImageIO.h>
 #include "dm.h"
 #include "dm_input.h"
+#include "dm_kbmap.h"
+#include "dm_pc_profile.h"
+#include "dm_pc_input.h"
+#include "dm_keyfile.h"
 #include "dm_uiscreen.h"
+#include "dm_world.h"
+#include "dm_cursor.h"
 #include "touch_mac.h"
 #import "../ios/Sources/dm_rift_hud.h"
 void mtl_set_ui_rect_fn(void (*fn)(double *y, double *h));
@@ -26,6 +32,58 @@ static int g_live;   // App 形态（或 DM_TOUCH_LIVE=1）：鼠标进我们的
 static CAMetalLayer *g_layer;
 static NSWindow *g_win;
 static NSView *g_view;
+// Mouse-only overlay above Metal. It consumes no clicks and uses the same
+// guest-owned target snapshot as iPad/Android. AppKit layers use bottom-left Y.
+static NSRect game_rect(void); // used by the passive hover overlay below
+static void mac_controls_sync(void);
+static CAShapeLayer *g_mouse_outline;
+static CALayer *g_mouse_back;
+static CATextLayer *g_mouse_label;
+static void mouse_hover_draw(void) {
+    if (!g_mouse_outline) {
+        g_mouse_outline=[CAShapeLayer layer];
+        g_mouse_outline.strokeColor=NSColor.systemYellowColor.CGColor;
+        g_mouse_outline.fillColor=NSColor.clearColor.CGColor;
+        g_mouse_outline.lineWidth=2;
+        g_mouse_back=[CALayer layer];
+        g_mouse_back.backgroundColor=[NSColor colorWithCalibratedWhite:0 alpha:0.82].CGColor;
+        g_mouse_back.cornerRadius=4;
+        g_mouse_label=[CATextLayer layer];
+        g_mouse_label.foregroundColor=NSColor.whiteColor.CGColor;
+        g_mouse_label.fontSize=15;
+        g_mouse_label.wrapped=YES;
+        for (CALayer *l in @[g_mouse_outline,g_mouse_back,g_mouse_label])
+            [g_view.layer addSublayer:l];
+    }
+    dm_world_hover_view h={0};
+    BOOL active=g_live && dm_world_hover_read(&h);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    g_mouse_outline.hidden=g_mouse_back.hidden=g_mouse_label.hidden=YES;
+    if (active) {
+        NSRect gr=game_rect(); double W=gr.size.width,H=gr.size.height;
+        g_mouse_label.contentsScale=g_view.window.backingScaleFactor ?: 2;
+        if (h.kind>=1 && h.kind<=4 && h.w>0 && h.h>0) {
+            CGRect r=CGRectMake(gr.origin.x+h.x*W-3,gr.origin.y+(1-h.y-h.h)*H-3,
+                                h.w*W+6,h.h*H+6);
+            CGPathRef p=CGPathCreateWithRoundedRect(r,4,4,NULL);
+            g_mouse_outline.path=p; CGPathRelease(p); g_mouse_outline.hidden=NO;
+        }
+        // The game's native MonsterHealth panel owns enemy names, HP and affixes.
+        // Keep only the NPC label as a host fallback; never duplicate monster UI.
+        if (h.kind==1 && h.title[0]) {
+            NSString *name=[NSString stringWithUTF8String:h.title] ?: @"";
+            CGFloat w=MIN(W,MIN(260,MAX(135,W*0.27)));
+            CGFloat ht=36;
+            CGFloat x=MAX(gr.origin.x,MIN(NSMaxX(gr)-w,gr.origin.x+(h.x+h.w*.5f)*W-w/2));
+            CGFloat y=MIN(NSMaxY(gr)-ht,MAX(gr.origin.y,gr.origin.y+(1-h.y)*H+10));
+            g_mouse_back.frame=CGRectMake(x,y,w,ht);g_mouse_back.hidden=NO;
+            g_mouse_label.frame=CGRectMake(x+8,y+5,w-16,ht-10);
+            g_mouse_label.string=name;g_mouse_label.hidden=NO;
+        }
+    }
+    [CATransaction commit];
+    mac_controls_sync();
+}
 // 真全屏（App 形态，屏幕比 16:9 窄——16:10 的 MacBook，「不能全屏」：全屏后上下各 56 点黑边）：照 iPad 那套（front_ios.m、dm_uiscreen.c）——
 // 启动时按屏幕比例（全屏时的内容区：屏幕扣掉刘海安全区）定游戏分辨率，局内 3D 铺满、界面按 16:9 贴底（开大面板居中），前端各页与读取画面游戏自己按 16:9 出、上下留边。
 // 窗口锁成同一比例，窗口态与全屏态都铺满。屏幕不比 16:9 窄（外接 16:9 / 更宽的屏）：照旧全程 16:9。比例在启动时按主屏定，之后挪到别的屏不重算（游戏分辨率只在启动时定）。
@@ -139,8 +197,7 @@ double front_display_refresh(char *name, size_t n) {
 - (void)keys:(id)s { (void)s; show_keys(); }
 - (void)share:(id)s { (void)s; share_logs_ui(); }
 @end
-static uint64_t g_btn;
-static int g_w, g_a, g_s, g_d;
+static uint64_t g_mouse_btn; // pointer channel; all physical keyboard keys use dm_kb_set
 
 void *front_metal_layer(void) { return (__bridge void *)g_layer; }
 // 原版 16:9 常数，行为不变；DM_GAME_RES=宽x高（主机模式，掌机按 720/900 同比）只供与 iOS 宽屏对拍
@@ -155,29 +212,408 @@ uint64_t front_game_res(int docked) {
 static NSPoint g_test_last;   // 合成鼠标脚本：上一条带坐标的指令落在视图里的点（dragto 从这里起拖） | synthetic mouse script: the point in the view where the last instruction with coordinates landed (dragto starts dragging from here)
 static int g_wheel;   // 滚轮：+1 / −1 = 右摇杆向上 / 向下推一小会儿（原版手柄版用右摇杆滚列表） | Wheel: +1 / -1 = push the right stick up / down for a short while (the original gamepad UI scrolls lists with the right stick)
 static void push(void) {
-    int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
-    dm_input_set(g_btn, lx, ly, 0, g_wheel * 32767);
+    dm_input_set(g_mouse_btn, 0, 0, 0, g_wheel * 32767);
 }
-static int key_bit(unsigned short code) {
-    switch (code) {
-        case 38: return 0;  case 40: return 1;  case 32: return 2;  case 34: return 3;    // J K U I → A B X Y
-        case 3: return 4;   case 5: return 5;                                            // F G → 按摇杆 | F G → press stick
-        case 12: return 6;  case 14: return 7;  case 6: return 8;   case 8: return 9;    // Q E Z C → L R ZL ZR
-        case 36: return g_live ? 40 : 10; case 48: return 11;                            // 回车 Tab → + −（App 形态：回车交给 touch_mac.c 按当前页决定是 ＋ 还是确认，见那里） | Return Tab -> + - (App form: Return is handed to touch_mac.c, which decides by the current page whether it is + or confirm, see there)
-        case 24: case 69: return 10;                                                     // = 键（＋ 那个键）、小键盘 + → ＋ | the = key (the one with +) and keypad + -> +
-        case 49: return 0;                                                               // 空格 → A（确认） | Space -> A (confirm)
-        case 53: return g_live ? 41 : -1;                                                // Esc → 返回（App 形态；局内没有面板时是开功能页，touch_mac.c） | Esc -> back (App form; with no panel open in game it opens the function page, touch_mac.c)
-        case 123: return 12; case 126: return 13; case 124: return 14; case 125: return 15; // ← ↑ → ↓
+// USB HID usage adapter for AppKit virtual-key codes; same local binding
+// file as iPad/Android. Default J/K/U/I, WASD etc. remain unchanged.
+// The same HID-to-guest dispatcher is shared by AppKit, UIKit and Android.
+static unsigned char g_mac_modifier_down[256];
+static int mac_hid_usage(unsigned short c) {
+    switch(c) {
+        case 0:return 0x04; case 1:return 0x16; case 2:return 0x07;
+        case 3:return 0x09; case 5:return 0x0a; case 6:return 0x1d;
+        case 8:return 0x06; case 12:return 0x14; case 13:return 0x1a;
+        case 14:return 0x08; case 24:return 0x2e; case 32:return 0x18;
+        case 34:return 0x0c; case 36:return 0x28; case 38:return 0x0d;
+        case 40:return 0x0e; case 46:return 0x10; case 48:return 0x2b;
+        case 49:return 0x2c; case 53:return 0x29; case 69:return 0x57;
+        case 123:return 0x50; case 126:return 0x52;
+        case 124:return 0x4f; case 125:return 0x51;
+        case 18:return 0x1e; case 19:return 0x1f;
+        case 20:return 0x20; case 21:return 0x21;
+        case 122:return 0x3a; case 120:return 0x3b;
+        case 99:return 0x3c; case 118:return 0x3d;
+        case 96:return 0x3e; case 97:return 0x3f;
+        case 98:return 0x40; case 100:return 0x41;
+        // Standard macOS virtual keycodes for USB HID physical key capture.
+        case 4:return 0x0b; case 7:return 0x1b; case 9:return 0x19;
+        case 11:return 0x05; case 15:return 0x15;
+        case 16:return 0x1c; case 17:return 0x17;
+        case 22:return 0x23; case 23:return 0x22; case 25:return 0x26;
+        case 26:return 0x24; case 27:return 0x2d;
+        case 28:return 0x25; case 29:return 0x27;
+        case 30:return 0x30; case 31:return 0x12;
+        case 33:return 0x2f; case 35:return 0x13;
+        case 37:return 0x0f; case 39:return 0x34;
+        case 41:return 0x33; case 42:return 0x31;
+        case 43:return 0x36; case 44:return 0x38;
+        case 45:return 0x11; case 47:return 0x37;
+        case 50:return 0x35; case 51:return 0x2a;
+        case 54:return 0xe7; case 55:return 0xe3;
+        case 56:return 0xe1; case 57:return 0x39;
+        case 58:return 0xe2; case 59:return 0xe0;
+        case 60:return 0xe5; case 61:return 0xe6;
+        case 62:return 0xe4; case 65:return 0x63;
+        case 67:return 0x55; case 75:return 0x54;
+        case 76:return 0x58; case 78:return 0x56;
+        case 82:return 0x62; case 83:return 0x59;
+        case 84:return 0x5a; case 85:return 0x5b;
+        case 86:return 0x5c; case 87:return 0x5d;
+        case 88:return 0x5e; case 89:return 0x5f;
+        case 91:return 0x60; case 92:return 0x61;
+        case 101:return 0x42;case 109:return 0x43;
+        case 103:return 0x44;case 111:return 0x45;
     }
     return -1;
 }
 static void on_key(NSEvent *e, int down) {
-    unsigned short c = e.keyCode;
-    switch (c) { case 13: g_w = down; break; case 0: g_a = down; break; case 1: g_s = down; break; case 2: g_d = down; break; }
-    int b = key_bit(c);
-    if (down && (b >= 0 || c == 13 || c <= 2)) dm_padmode_request_glyph(DM_GLYPH_KBD);   // 按了游戏用的键：键位图标换成键盘键帽（鼠标移动 / 点击不算） | a key used by the game was pressed: switch the key icons to keyboard key caps (mouse moves / clicks do not count)
-    if (b >= 0) g_btn = down ? (g_btn | 1ull << b) : (g_btn & ~(1ull << b));
+    int usage=mac_hid_usage(e.keyCode);
+    if(usage<0)return;
+    // Use native .key commands with menu-time controller fallback, latched
+    // release and keyboard channel as iPadOS and Android. The Mac's
+    // independent g_in pad channel remains reserved for mouse and wheel.
+    dm_kbmap_key_event((unsigned)usage,down);
+    if(down)dm_padmode_request_glyph(DM_GLYPH_KBD);
+}
+
+// flagsChanged is how AppKit delivers modifier *edges*; ordinary keyDown
+// and keyUp are not sent for Shift/Control/Option. A separate per-side latch
+// handles L+R Shift without interpreting the second left-side release as down.
+static NSEventModifierFlags mac_modifier_mask(unsigned short code) {
+    switch(code) {
+    case 56:case 60:return NSEventModifierFlagShift;
+    case 59:case 62:return NSEventModifierFlagControl;
+    case 58:case 61:return NSEventModifierFlagOption;
+    case 57:return NSEventModifierFlagCapsLock;
+    // In PC keyboard/mouse mode Command previews the native second skill
+    // bank (ZL). AppKit reports its transitions through flagsChanged, not
+    // ordinary keyDown/keyUp. Both physical sides must be forwarded.
+    case 54:case 55:return NSEventModifierFlagCommand;
+    default:return 0;
+    }
+}
+static void mac_modifier_changed(NSEvent *event) {
+    NSEventModifierFlags flag=mac_modifier_mask(event.keyCode);
+    int usage=mac_hid_usage(event.keyCode);
+    if(!flag || usage<0)return;
+    if(event.keyCode==57) {
+        // Caps Lock toggles state; do not leave a game action held until
+        // the next toggle. A physical press is a short independent pulse.
+        on_key(event,1);on_key(event,0);
+        return;
+    }
+    int previous=g_mac_modifier_down[usage];
+    int pressed=(event.modifierFlags & flag)?!previous:0;
+    if(pressed==previous)return;
+    g_mac_modifier_down[usage]=(unsigned char)pressed;
+    on_key(event,pressed);
+}
+// All three physical mouse buttons can be assigned to a *logical* primary,
+// secondary, or map action. The role is captured on mouse-down and kept until
+// that same physical button is released. Only one primary touch is active.
+static int mac_mouse_role[3]={0,1,2};
+static int mac_mouse_down[3],mac_mouse_secondary[3],mac_mouse_primary_owner=-1;
+static int mac_mouse_ui_pos(NSView *view,NSEvent *event,float *ux,float *uy,float *wx,float *wy) {
+    NSPoint p=[view convertPoint:event.locationInWindow fromView:nil];
+    NSRect gr=game_rect();
+    if(gr.size.width<=0 || gr.size.height<=0)return 0;
+    float x=(p.x-gr.origin.x)/gr.size.width;
+    float y=1.0-(p.y-gr.origin.y)/gr.size.height;
+    float worldX=x,worldY=y,uiY=y;
+    if(g_full && g_live) {
+        int rw=0,rh=0;double cx=0,cy=0,cw=1,ch=1;
+        if(dm_screen_real(&rw,&rh) && rw>0 && rh>0) {
+            double ca=(double)rw/rh,ga=gr.size.width/gr.size.height;
+            if(fabs(ga/ca-1)>=0.01) {
+                if(ga>ca){cw=ca/ga;cx=(1-cw)/2;}
+                else{ch=ga/ca;cy=(1-ch)/2;}
+            }
+        }
+        worldX=(x-cx)/cw;worldY=(y-cy)/ch;
+        double fy=0,fh=1;ui_rect_frac(&fy,&fh);
+        uiY=fh>0?(worldY-fy)/fh:worldY;
+    }
+    *ux=worldX;*uy=uiY;*wx=worldX;*wy=worldY;
+    return 1;
+}
+static void mac_primary_pointer(NSView *view,NSEvent *event,int op) {
+    float ux=0,uy=0,wx=0,wy=0;
+    if(!mac_mouse_ui_pos(view,event,&ux,&uy,&wx,&wy))return;
+    if(op==0 && (wx<0 || wx>1 || wy<0 || wy>1))return;
+    if(op==0 && !dm_uiscreen_ingame() && (ux<0 || ux>1 || uy<0 || uy>1))return;
+    if(g_live)dm_touch_host_live(op,ux,uy);
+    else if(op==2)dm_touch_set(NULL,0);
+    else if(op!=3) {
+        dm_touch t={0,fmaxf(0,fminf(1,ux)),fmaxf(0,fminf(1,uy))};
+        dm_touch_set(&t,1);
+    }
+}
+static void mac_secondary_pointer(NSView *view,NSEvent *event,int physical,int press) {
+    if(press) {
+        float ux,uy,wx,wy;
+        if(mac_mouse_ui_pos(view,event,&ux,&uy,&wx,&wy) &&
+           dm_ui_free_cursor() && ux>=0 && ux<=1 && uy>=0 && uy<=1) {
+            // Host thread may only enqueue. ui_use_pump() on the guest
+            // thread performs the exact item hit-test (and rejects empty
+            // cells/vendor goods). Never dereference game widgets from
+            // AppKit's event thread.
+
+            dm_ui_mouse_right_use(ux,uy);return;
+        }
+        mac_mouse_secondary[physical]=1;
+    } else mac_mouse_secondary[physical]=0;
+    g_mouse_btn=(mac_mouse_secondary[0]||mac_mouse_secondary[1]||mac_mouse_secondary[2])?DM_BTN_B:0;
     push();
+}
+static void mac_mouse_physical(NSView *view,NSEvent *event,int physical,int phase) {
+    // phase 0=down,1=drag,2=up
+    dm_kbmap_external_owner(1);
+    if(phase==0) {
+        if(mac_mouse_down[physical])return;
+        mac_mouse_down[physical]=1;
+        mac_mouse_role[physical]=dm_kbmap_mouse_action((unsigned)physical);
+        if(mac_mouse_role[physical]==0 && mac_mouse_primary_owner<0) {
+            mac_mouse_primary_owner=physical;mac_primary_pointer(view,event,0);
+        } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,1);
+        else if(mac_mouse_role[physical]==2) {
+            int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
+            if(source==1)(void)dm_pc_input_middle_or_default();
+            else if(source==0)dm_world_mouse_map_toggle();
+        }
+    } else if(phase==1) {
+        if(mac_mouse_down[physical] && mac_mouse_primary_owner==physical)
+            mac_primary_pointer(view,event,1);
+    } else {
+        if(!mac_mouse_down[physical])return;
+        mac_mouse_down[physical]=0;
+        if(mac_mouse_primary_owner==physical) {
+            mac_primary_pointer(view,event,2);mac_mouse_primary_owner=-1;
+        } else if(mac_mouse_role[physical]==1)mac_secondary_pointer(view,event,physical,0);
+    }
+}
+
+// In-page device switch. The native KeyBindingMenu/character .ctl remains
+// the Controller page; Keyboard & Mouse is our own per-character .key editor.
+// The original Key 1/Key 2 are controller *alternate slots*, not file types.
+typedef struct { unsigned usage; const char *name; } mac_key_row;
+static const mac_key_row mac_key_rows[]={
+    {0x1a,"W"},{0x04,"A"},{0x16,"S"},{0x07,"D"},
+    {0x0d,"J"},{0x0e,"K"},{0x18,"U"},{0x0c,"I"},
+    {0x09,"F"},{0x0a,"G"},{0x14,"Q"},{0x08,"E"},{0x1d,"Z"},{0x06,"C"},
+    {0x28,"Enter"},{0x29,"Esc"},{0x2b,"Tab"},{0x2c,"Space"},{0x2e,"="},
+    {0x50,"Left"},{0x52,"Up"},{0x4f,"Right"},{0x51,"Down"},
+    {0x1e,"1"},{0x1f,"2"},{0x20,"3"},{0x21,"4"},
+    {0x3a,"F1"},{0x3b,"F2"},{0x3c,"F3"},{0x3d,"F4"},
+    {0x3e,"F5"},{0x3f,"F6"},{0x40,"F7"},{0x41,"F8"},{0x10,"M"}
+};
+static const unsigned mac_actions[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+    16,17,18,19,40,41,42,48,49,50,51,52,53,54,55,255};
+static const char *const mac_action_names[]={
+    "A / Confirm","B / Back","X","Y","Left Stick","Right Stick",
+    "L","R","ZL","ZR","Menu (+)","Menu (-)",
+    "Potion 1","Potion 2","Potion 3","Potion 4",
+    "Move Up","Move Left","Move Down","Move Right",
+    "Enter / Confirm","Escape / Back","Toggle Map",
+    "Skill 1","Skill 2","Skill 3","Skill 4",
+    "Skill 5","Skill 6","Skill 7","Skill 8","Unbound"
+};
+static NSButton *g_mac_keyboard_tab,*g_mac_pad_tab;
+static NSView *g_mac_keyboard_panel;
+static NSScrollView *g_mac_keyboard_scroll;
+static int g_mac_keyboard_mode;
+static int g_mac_pc_capture_id=-1,g_mac_pc_capture_slot=-1;
+static NSString *mac_pc_vk_label(int vk) {
+    if(vk<0)return @"Invalid";
+    if(vk==0xffff)return @"Unbound";
+    if(vk>='A'&&vk<='Z')return [NSString stringWithFormat:@"%c",vk];
+    if(vk>='0'&&vk<='9')return [NSString stringWithFormat:@"%c",vk];
+    if(vk>=0x70&&vk<=0x7b)return [NSString stringWithFormat:@"F%d",vk-0x70+1];
+    if(vk==0x100)return @"Mouse middle";
+    if(vk==0x103)return @"Wheel up";
+    if(vk==0x104)return @"Wheel down";
+    return [NSString stringWithFormat:@"VK 0x%04X",vk];
+}
+@interface DmMacFlippedView : NSView @end
+@implementation DmMacFlippedView
+- (BOOL)isFlipped {return YES;}
+@end
+@interface DmMacKeyboardEditor : NSObject
+- (void)chooseDevice:(id)sender;
+- (void)chooseBinding:(id)sender;
+- (void)chooseNativeBinding:(id)sender;
+- (void)refresh;
+@end
+@implementation DmMacKeyboardEditor
+- (void)chooseDevice:(id)sender {
+    g_mac_keyboard_mode=sender==g_mac_keyboard_tab;
+    g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
+    // Flush any held game key when switching from gameplay to the editor.
+    memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down);
+    dm_kbmap_reset();
+    push();
+    if(g_mac_keyboard_panel)g_mac_keyboard_panel.hidden=!g_mac_keyboard_mode;
+    if(g_mac_keyboard_mode)[self refresh];
+}
+- (void)refresh {
+    if(!g_mac_keyboard_scroll)return;
+    NSView *old=g_mac_keyboard_scroll.documentView;
+    if(old)[old removeFromSuperview];
+    CGFloat w=MAX(230,g_mac_keyboard_scroll.contentSize.width-14);
+    DmMacFlippedView *rows=[[DmMacFlippedView alloc] initWithFrame:NSMakeRect(0,0,w,120)];
+    NSString *name=g_mac_pc_capture_id>=0?
+        [NSString stringWithFormat:@"原生 .key · cmd %d / slot %d · 请按物理键",
+            g_mac_pc_capture_id,g_mac_pc_capture_slot]:
+        @"原生角色 .key · 编辑主键 / 副键";
+    NSButton *entry=[NSButton buttonWithTitle:name target:self
+        action:@selector(chooseNativeBinding:)];
+    entry.frame=NSMakeRect(8,4,w-16,40);
+    entry.alignment=NSTextAlignmentLeft;
+    [rows addSubview:entry];
+    NSTextField *info=[NSTextField labelWithString:
+        @"方向键=Switch 左摇杆（面板中为十字键）；Skill 5=Switch R，可用 .key 改绑。手柄沿用 .ctl。"];
+    info.frame=NSMakeRect(10,49,w-20,28);
+    [rows addSubview:info];
+    NSTextField *mouse=[NSTextField labelWithString:
+        @"鼠标左键：交互　右键：使用　中键/滚轮：可在 .key 中绑定"];
+    mouse.frame=NSMakeRect(10,78,w-20,28);
+    [rows addSubview:mouse];
+    g_mac_keyboard_scroll.documentView=rows;
+}
+- (void)chooseNativeBinding:(id)sender {
+    (void)sender;
+    static const char *const commands[57]={
+        "Character","Inventory","Party","Message Log","Quests","Chat","Help","Automap",
+        "Center Map","Fade Map","Map Party","Map Party Names","Skill Tree","Skill Bar",
+        "Skill 1 (Switch A)","Skill 2 (Switch B)","Skill 3 (Switch Y)","Skill 4 (Switch X)","Skill 5 (Switch R)","Skill 6 (Switch ZR)","Skill 7 (ZL+A)","Skill 8 (ZL+B)",
+        "Show Belt","Potion 1","Potion 2","Potion 3","Potion 4",
+        "Say 1","Say 2","Say 3","Say 4","Say 5","Say 6","Say 7",
+        "Run Hold","Toggle Run","Stand Still","Show Items","Close Panels",
+        "Previous Skill","Next Skill","Clear Messages","Screenshot","Portraits",
+        "Weapon Swap","Toggle Minimap","Skill 9 (ZL+Y)","Skill 10 (ZL+X)","Skill 11 (ZL+R)","Skill 12 (ZL+ZR)",
+        "Skill 13","Skill 14","Skill 15","Skill 16","Hireling","Say 8","Escape"
+    };
+    // A valid game profile may contain fewer (or additional) action pairs.
+    // Preserve the numeric command ID even when a row is absent: never
+    // mistake a popup's compacted row index for an original .key command ID.
+    if(dm_pc_profile_file_status()!=1) {
+        NSAlert *fail=[NSAlert new];fail.messageText=@"The game has not created a supported .key";
+        fail.informativeText=@"Load the character and save its original keyboard settings. This editor does not create replacement files.";
+        [fail runModal];return;
+    }
+    NSPopUpButton *which=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,43,460,32) pullsDown:NO];
+    unsigned present=0;NSInteger first_present=-1;
+    for(unsigned id=0;id<57;id++) {
+        uint16_t vk=0xffff;
+        int rc=dm_pc_profile_get(id,0,&vk);
+        if(rc!=DM_KEYFILE_OK && rc!=DM_KEYFILE_NOT_FOUND) {
+            NSBeep();return;
+        }
+        NSString *state=dm_pc_input_supported_action(id)?@"":@" · ⚠ runtime pending";
+        if(rc==DM_KEYFILE_OK) {
+            if(first_present<0)first_present=(NSInteger)id;
+            present++;
+            [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · %@%@",id,commands[id],mac_pc_vk_label(vk),state]];
+        } else {
+            [which addItemWithTitle:[NSString stringWithFormat:@"%02u  %s · not in guest .key",id,commands[id]]];
+            [[which itemAtIndex:(NSInteger)id] setEnabled:NO];
+        }
+    }
+    if(!present) {NSBeep();return;}
+    [which selectItemAtIndex:first_present]; // ID 0 can be absent
+    NSPopUpButton *slot=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,2,460,32) pullsDown:NO];
+    [slot addItemsWithTitles:@[@"Primary key",@"Secondary key"]];
+    NSView *panel=[[NSView alloc] initWithFrame:NSMakeRect(0,0,460,79)];
+    [panel addSubview:which];[panel addSubview:slot];
+    NSAlert *dialog=[NSAlert new];dialog.messageText=@"Original Diablo II .key binding";
+    dialog.informativeText=@"Select command and key slot. Bind captures the next physical key.";
+    dialog.accessoryView=panel;
+    [dialog addButtonWithTitle:@"Bind next key"];
+    [dialog addButtonWithTitle:@"Cancel"];
+    [dialog addButtonWithTitle:@"Clear binding"];
+    [dialog addButtonWithTitle:@"Mouse / Wheel"];
+    NSModalResponse response=[dialog runModal];
+    if(response==NSAlertFirstButtonReturn) {
+        g_mac_pc_capture_id=(int)which.indexOfSelectedItem;
+        g_mac_pc_capture_slot=(int)slot.indexOfSelectedItem;
+        [self refresh];
+    } else if(response==NSAlertThirdButtonReturn) {
+        if(dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,(unsigned)slot.indexOfSelectedItem,0xffff,NULL,NULL)!=DM_KEYFILE_OK ||
+           !dm_kbmap_set_pc_mode(1)) {
+            NSAlert *fail=[NSAlert new];fail.messageText=@"Could not clear binding";[fail runModal];
+        }
+        [self refresh];
+    } else if(response==NSAlertThirdButtonReturn+1) {
+        NSPopUpButton *mouse=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,310,32) pullsDown:NO];
+        [mouse addItemsWithTitles:@[@"Mouse middle (0x100)",@"Wheel up (0x103)",@"Wheel down (0x104)"]];
+        NSAlert *choose=[NSAlert new];
+        choose.messageText=@"Native .key mouse / wheel binding";
+        choose.accessoryView=mouse;
+        [choose addButtonWithTitle:@"Bind"];
+        [choose addButtonWithTitle:@"Cancel"];
+        if([choose runModal]==NSAlertFirstButtonReturn) {
+            static const uint16_t codes[]={0x100,0x103,0x104};
+            unsigned idx=(unsigned)mouse.indexOfSelectedItem;
+            if(idx<3 && (dm_pc_profile_bind((uint32_t)which.indexOfSelectedItem,
+                  (unsigned)slot.indexOfSelectedItem,codes[idx],NULL,NULL)!=DM_KEYFILE_OK ||
+                  !dm_kbmap_set_pc_mode(1))) {
+                NSAlert *fail=[NSAlert new];fail.messageText=@"Mouse binding conflicts or could not be saved";
+                fail.informativeText=@"Clear the previous action's binding before reassigning this input.";
+                [fail runModal];
+            }
+            [self refresh];
+        }
+    }
+}
+- (void)chooseBinding:(NSButton *)button {
+    [self chooseNativeBinding:button];
+}
+@end
+// AppKit controls must receive their own pointer events. The normal mouse
+// input monitor consumes game clicks, so exempt the settings editor subviews.
+static BOOL mac_controls_hit(NSView *view,NSEvent *event) {
+    if(!g_mac_keyboard_tab || g_mac_keyboard_tab.hidden)return NO;
+    NSPoint p=[view convertPoint:event.locationInWindow fromView:nil];
+    NSView *hit=[view hitTest:p];
+    for(NSView *it=hit;it;it=it.superview)
+        if(it==g_mac_keyboard_tab || it==g_mac_pad_tab || it==g_mac_keyboard_panel)
+            return YES;
+    return NO;
+}
+static DmMacKeyboardEditor *g_mac_keyboard_editor;
+static void mac_controls_sync(void) {
+    // Native KeyBindingMenuHD is the one shared controls page; AppKit must
+    // not add a second Keyboard/Controller tab or a separate window.
+    return;
+    if(!g_live || !g_view)return;
+    BOOL visible=dm_kbmap_controls_visible()!=0;
+    if(!visible && !g_mac_keyboard_tab)return;
+    if(!g_mac_keyboard_editor)g_mac_keyboard_editor=[DmMacKeyboardEditor new];
+    if(!g_mac_keyboard_tab) {
+        g_mac_keyboard_tab=[NSButton buttonWithTitle:@"控制 · 键鼠 / Keyboard"
+            target:g_mac_keyboard_editor action:@selector(chooseDevice:)];
+        g_mac_pad_tab=[NSButton buttonWithTitle:@"手柄 / Controller"
+            target:g_mac_keyboard_editor action:@selector(chooseDevice:)];
+        [g_view addSubview:g_mac_keyboard_tab];[g_view addSubview:g_mac_pad_tab];
+        g_mac_keyboard_panel=[[NSView alloc] initWithFrame:NSZeroRect];
+        g_mac_keyboard_panel.wantsLayer=YES;
+        g_mac_keyboard_panel.layer.backgroundColor=[NSColor colorWithCalibratedWhite:.07 alpha:.97].CGColor;
+        g_mac_keyboard_panel.layer.cornerRadius=8;
+        g_mac_keyboard_scroll=[[NSScrollView alloc] initWithFrame:NSZeroRect];
+        g_mac_keyboard_scroll.hasVerticalScroller=YES;
+        [g_mac_keyboard_panel addSubview:g_mac_keyboard_scroll];
+        [g_view addSubview:g_mac_keyboard_panel];
+    }
+    NSRect b=g_view.bounds;CGFloat w=MIN(b.size.width*.73,810);
+    CGFloat h=MIN(b.size.height*.70,690);
+    CGFloat x=(b.size.width-w)/2;
+    g_mac_keyboard_tab.frame=NSMakeRect(x,b.size.height*.90,w*.5,35);
+    g_mac_pad_tab.frame=NSMakeRect(x+w*.5,b.size.height*.90,w*.5,35);
+    g_mac_keyboard_panel.frame=NSMakeRect(x,b.size.height*.16,w,h);
+    g_mac_keyboard_scroll.frame=NSInsetRect(g_mac_keyboard_panel.bounds,8,8);
+    g_mac_keyboard_tab.hidden=g_mac_pad_tab.hidden=!visible;
+    g_mac_keyboard_panel.hidden=!visible || !g_mac_keyboard_mode;
+    if(visible && g_mac_keyboard_mode && !g_mac_keyboard_scroll.documentView)
+        [g_mac_keyboard_editor refresh];
 }
 
 typedef struct { void (*fn)(void); } guest_arg;
@@ -215,10 +651,15 @@ void front_run(void (*guest)(void)) {
             (void)timer;
             BOOL hide = !dm_uiscreen_ingame() || (g_live && !dm_touch_host_world_active());
             dm_rift_hud_draw(v, NSRectToCGRect(game_rect()), hide);
+            mouse_hover_draw();
         }];
         [NSRunLoop.mainRunLoop addTimer:riftHUDTimer forMode:NSRunLoopCommonModes];
         [win center];
         g_live = getenv("DM_APP") || getenv("DM_TOUCH_LIVE"); if (g_live) dm_touch_host_live_enable();
+
+        // The game supplies target data; our passive overlay shows the
+        // highlight even when this console UI does not draw a PC hover label.
+
         if (g_live) {
             win.acceptsMouseMovedEvents = YES;
             [v addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:v userInfo:nil]];
@@ -235,54 +676,80 @@ void front_run(void (*guest)(void)) {
         screen_note();
         [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) { (void)n; screen_note(); }];
         [NSApp activateIgnoringOtherApps:YES];
-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
+        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;   // 只吃游戏窗口的键；软键盘输入框等其他窗口照常收字 | Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
+            if (g_mac_pc_capture_id>=0) {
+                if(e.type==NSEventTypeKeyUp || e.isARepeat)return nil;
+                int usage=mac_hid_usage(e.keyCode),vk=usage<0?-1:dm_pc_vk_from_hid((unsigned)usage);
+                if(vk>=0 && !(e.modifierFlags & NSEventModifierFlagCommand)) {
+                    int rc=dm_pc_profile_bind((uint32_t)g_mac_pc_capture_id,
+                        (unsigned)g_mac_pc_capture_slot,(uint16_t)vk,NULL,NULL);
+                    if(rc==DM_KEYFILE_OK && dm_kbmap_set_pc_mode(1)){
+                        g_mac_pc_capture_id=g_mac_pc_capture_slot=-1;
+                        [g_mac_keyboard_editor refresh];
+                    } else NSBeep(); // conflict or save failure, stay in capture
+                }
+                return nil;
+            }
+            // Do not dispatch modifiers into the game while a settings
+            // editor is accepting input. flagsChanged fires independently
+            // from keyDown and previously bypassed the editor guard.
+            if (g_mac_keyboard_mode && g_mac_keyboard_panel &&
+                !g_mac_keyboard_panel.hidden) return e;
+            if(g_mac_keyboard_mode && g_mac_keyboard_panel &&
+               !g_mac_keyboard_panel.hidden) return e; // UI editor owns keys
+            if(e.type==NSEventTypeFlagsChanged) {
+                mac_modifier_changed(e);
+                return e;
+            }
             if (e.modifierFlags & NSEventModifierFlagCommand) return e;   // 带 ⌘ 的留给菜单（⌘Q、⌃⌘F） | Keys with ⌘ are left to the menu (⌘Q, ⌃⌘F)
             if (!e.isARepeat) on_key(e, e.type == NSEventTypeKeyDown);
             return nil;   // 吃掉，免得系统提示音 | Swallow it to avoid the system beep
         }];
-        // 左键沿用单点触屏；Mac App 的无按键悬停只交坐标，复用同一套窗口 / 全屏换算，不合成点击。
-        // Left clicks reuse single-point touch; Mac App button-free hover only submits coordinates using the same window / full-screen conversion, without synthesizing clicks.
-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp | NSEventMaskMouseMoved | NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
-            if (e.window != win) return e;
-            BOOL hover = e.type == NSEventTypeMouseMoved || e.type == NSEventTypeMouseExited;
-            if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停输入：类型 %ld", (long)e.type);
-            if (hover && !g_live) return e;
-            if (e.type == NSEventTypeMouseExited) { dm_touch_host_live(3, -1, -1); return e; }
-            if (e.type == NSEventTypeLeftMouseUp) { if (g_live) dm_touch_host_live(2, 0, 0); else dm_touch_set(NULL, 0); return nil; }
-            NSPoint p = [v convertPoint:e.locationInWindow fromView:nil]; NSRect gr = game_rect();
-            if (hover && getenv("DM_TEST_HOVER_LOG")) LOG("鼠标悬停坐标：窗口 %.1f,%.1f 视图 %.1f,%.1f 画面 %.1f,%.1f %.1fx%.1f", e.locationInWindow.x, e.locationInWindow.y, p.x, p.y, gr.origin.x, gr.origin.y, gr.size.width, gr.size.height);
-            if (gr.size.width <= 0 || gr.size.height <= 0) return e;
-            float nx = (float)((p.x - gr.origin.x) / gr.size.width), ny = (float)(1.0 - (p.y - gr.origin.y) / gr.size.height);   // AppKit 视图原点在左下，触屏原点在左上 | The AppKit view origin is at bottom left, the touchscreen origin is at top left
-            if (e.type == NSEventTypeLeftMouseDown && (nx < 0 || nx > 1 || ny < 0 || ny > 1)) return nil;   // 按在黑边上：不算点 | Pressed on the black bars: not a click
-            if (g_full && g_live) {   // 真全屏：状态机吃界面矩形里的归一化坐标（同 iOS 的游戏视图）。两步： | true full screen: the state machine takes normalised coordinates inside the interface rectangle (like the iOS game view). Two steps:
-                // ① 先换到「实际显示的那块」：游戏当前分辨率（前端 16:9、局内整屏）按比例居中放进游戏画面，与上屏同一口径（nvn_mtl.m present_encode：比例差 1% 内铺满）；
-                // ② 再换到界面矩形（局内贴底）。局内界面矩形外是 3D 世界，带符号交下去（点世界换回整屏，touch_mac.c）；不在局内时显示块外是黑边，不算点
-                // (1) First map to "the block actually shown": the game's current resolution (16:9 in the front end, the whole screen in game) placed centred in the game picture by aspect ratio, the same measure as presentation (nvn_mtl.m present_encode: fill when the aspect ratios differ by less than 1%);
-                // (2) then map to the interface rectangle (along the bottom in game). In game, outside the interface rectangle is the 3D world, passed down with a sign (tapping the world maps back to the whole screen, touch_mac.c); outside the game the area beyond the shown block is the black bars, not counted as a tap
-                int rw = 0, rh = 0; double cx = 0, cy = 0, cw = 1, ch = 1;
-                if (dm_screen_real(&rw, &rh) && rw > 0 && rh > 0) { double ca = (double)rw / rh, ga = gr.size.width / gr.size.height;
-                    if (fabs(ga / ca - 1) >= 0.01) { if (ga > ca) { cw = ca / ga; cx = (1 - cw) / 2; } else { ch = ga / ca; cy = (1 - ch) / 2; } } }
-                float vx = (float)((nx - cx) / cw), vy = (float)((ny - cy) / ch);
-                double fy = 0, fh = 1; ui_rect_frac(&fy, &fh); float uy = fh > 0 ? (float)((vy - fy) / fh) : vy;
-                if (e.type == NSEventTypeLeftMouseDown && !dm_uiscreen_ingame() && (vx < 0 || vx > 1 || uy < 0 || uy > 1)) return nil;
-                dm_touch_host_live(hover ? 3 : e.type == NSEventTypeLeftMouseDown ? 0 : 1, vx, uy); return hover ? e : nil; }
-            if (hover) { dm_touch_host_live(3, nx, ny); return e; }
-            dm_touch t = {0, nx < 0 ? 0 : nx > 1 ? 1 : nx, ny < 0 ? 0 : ny > 1 ? 1 : ny};
-            if (g_live) { dm_touch_host_live(e.type == NSEventTypeLeftMouseDown ? 0 : 1, t.x, t.y); return nil; }
-            dm_touch_set(&t, 1); return nil;
+        // A single physical pointer feeds all three configurable mouse buttons.
+        // Plain movement still updates world/gear hover without a click.
+        [NSEvent addLocalMonitorForEventsMatchingMask:
+            NSEventMaskLeftMouseDown|NSEventMaskLeftMouseDragged|NSEventMaskLeftMouseUp|
+            NSEventMaskMouseMoved|NSEventMaskMouseExited handler:^NSEvent *(NSEvent *e) {
+            if(e.window!=win)return e;
+            if(mac_controls_hit(v,e) && !mac_mouse_down[0])return e;
+            if(e.type==NSEventTypeMouseMoved || e.type==NSEventTypeMouseExited) {
+                if(g_live) {
+                    int hint=dm_mouse_pointer_hint();
+                    [ (hint==2?NSCursor.closedHandCursor:hint==1?NSCursor.openHandCursor:NSCursor.arrowCursor) set];
+                    if(e.type==NSEventTypeMouseExited)dm_touch_host_live(3,-1,-1);
+                    else { dm_kbmap_external_owner(1);mac_primary_pointer(v,e,3); }
+                }
+                return e;
+            }
+            int phase=e.type==NSEventTypeLeftMouseDown?0:e.type==NSEventTypeLeftMouseUp?2:1;
+            mac_mouse_physical(v,e,0,phase);return nil;
         }];
-        // 右键 = 手柄 B（返回 / 关面板）；滚轮 = 右摇杆上下推 0.12 秒（滚列表）。只在 App 形态接（命令行宿主的测试不受影响）
-        // Right click = gamepad B (back / close panel); wheel = push the right stick up or down for 0.12 s (scroll lists). Only wired in App form (tests of the command-line host are unaffected)
-        if (g_live) {
-            [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskRightMouseDown | NSEventMaskRightMouseUp handler:^NSEvent *(NSEvent *e) {
-                if (e.window != win) return e;
-                if (e.type == NSEventTypeRightMouseDown) g_btn |= DM_BTN_B; else g_btn &= ~(uint64_t)DM_BTN_B;
-                push(); return nil;
+        if(g_live) {
+            [NSEvent addLocalMonitorForEventsMatchingMask:
+                NSEventMaskRightMouseDown|NSEventMaskRightMouseDragged|NSEventMaskRightMouseUp
+                handler:^NSEvent *(NSEvent *e) {
+                if(e.window!=win)return e;
+                if(mac_controls_hit(v,e) && !mac_mouse_down[1])return e;
+                int phase=e.type==NSEventTypeRightMouseDown?0:e.type==NSEventTypeRightMouseUp?2:1;
+                mac_mouse_physical(v,e,1,phase);return nil;
+            }];
+            [NSEvent addLocalMonitorForEventsMatchingMask:
+                NSEventMaskOtherMouseDown|NSEventMaskOtherMouseDragged|NSEventMaskOtherMouseUp
+                handler:^NSEvent *(NSEvent *e) {
+                if(e.window!=win||e.buttonNumber!=2)return e;
+                if(mac_controls_hit(v,e) && !mac_mouse_down[2])return e;
+                int phase=e.type==NSEventTypeOtherMouseDown?0:e.type==NSEventTypeOtherMouseUp?2:1;
+                mac_mouse_physical(v,e,2,phase);return nil;
             }];
             [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent *(NSEvent *e) {
                 if (e.window != win || e.scrollingDeltaY == 0) return e;
-                static int gen; int my = ++gen; g_wheel = e.scrollingDeltaY > 0 ? 1 : -1; push();
+                if (mac_controls_hit(v,e)) return e; // Native NSScrollView scrolls.
+                static int gen; int my = ++gen;
+                int dir=e.scrollingDeltaY>0?1:-1;
+                int source=(dm_kbmap_pc_mode() && dm_uiscreen_ingame())?dm_pc_profile_file_status():0;
+                g_wheel=source==1?dm_pc_input_wheel_or_default(dir):source==0?dir:0;
+                push();
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (my == gen) { g_wheel = 0; push(); } });
                 return nil;
             }];
@@ -403,7 +870,7 @@ void front_run(void (*guest)(void)) {
                   LOG("DM_TEST_COVER：盖上 %.1f 秒，游戏窗口%s是主窗口", dur, win.isKeyWindow ? "" : "不");
                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dur * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [c orderOut:nil]; LOG("DM_TEST_COVER：拿开"); });
               }); }
-        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_btn = 0; g_w = g_a = g_s = g_d = 0; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
+        [nc addObserverForName:NSWindowDidResignKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; if (!win.miniaturized) dm_focus_set(2); g_mouse_btn = 0; memset(g_mac_modifier_down,0,sizeof g_mac_modifier_down); dm_kbmap_reset(); memset(mac_mouse_down,0,sizeof mac_mouse_down); memset(mac_mouse_secondary,0,sizeof mac_mouse_secondary); mac_mouse_primary_owner=-1; push(); { void dm_gamepad_reset(void); dm_gamepad_reset(); } }];   // 失焦：键盘和手柄按着的键清掉（松开事件收不到） | Focus lost: clear the keys held on keyboard and gamepad (their release events will not arrive)
         [nc addObserverForName:NSWindowDidBecomeKeyNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(1); }];
         [nc addObserverForName:NSWindowDidMiniaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_focus_set(3); dm_audio_suspend(1); dm_gfx_suspend(1); }];
         [nc addObserverForName:NSWindowDidDeminiaturizeNotification object:win queue:nil usingBlock:^(NSNotification *n) { (void)n; dm_gfx_suspend(0); dm_audio_suspend(0); dm_focus_set(2); }];

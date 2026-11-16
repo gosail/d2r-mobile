@@ -315,6 +315,7 @@ void dm_tc_set_panel_state(int bits) { atomic_store(&g_bank_open, (bits & 1) != 
 
 static void pointer_drag_begin(dm_tc_state *s, dm_tc_finger *f) {
     f->pointer_dragged = 1;
+    s->mouse_pick_pending=0; // Continuous drag picks up immediately.
     if (s->pointer_lock) { f->locked_drag = 1; return; }   /* 单件槽占用时从别的物品上起拖：不拿起，这次拖动什么都不做 | Drag starting from another item while the single-item slot is occupied: do not pick up; this drag does nothing */
     if (s->pointer_shop || s->pointer_stack) { f->shop_drag = 1; s->pointer_x = 2; s->pointer_y = 2; update(s); return; }   /* 从货架上的货起拖：不拿起；光标挪到屏幕角上，让货上的说明框收掉（买的时候宿主再把光标放回这件货上） | Drag starting from goods on the shelf: do not pick up; move the cursor to a screen corner so the tooltip on the goods closes (at purchase time the host puts the cursor back on that item) */
     s->pointer_pickup_done = 0;
@@ -338,6 +339,7 @@ void dm_tc_cancel_all(dm_tc_state *s) {
     s->pointer_slot = DM_TC_NONE;
     s->pointer_valid = 0; s->pointer_x = s->pointer_y = 0;
     s->pointer_pickup_done = 0;
+    s->mouse_pick_pending=0; // Cancel pending pickup on layout/page reset.
     s->pointer_pulse_active = s->pointer_pulse_pending = 0;
     s->pointer_pending_x = s->pointer_pending_y = 0;
 }
@@ -505,7 +507,8 @@ void dm_tc_begin_at(dm_tc_state *s, int slot, float x, float y, double now_s) {
     }
     *f = (dm_tc_finger){.active=1, .target=enabled ? hit : DM_TC_NONE, .x=x, .y=y,
                            .aim_origin_x=x, .aim_origin_y=y,
-                           .start_time_s=now_s};
+                           .start_time_s=now_s,
+                           .mouse_item=!!(s->navigation_mode && s->mouse_item_mode)};
     /* 禁用圆仍阻止落入左摇杆区，防止隐藏回城触点变成移动。 | A disabled circle still blocks falling through into the left stick area, preventing a hidden town-portal touch point from turning into movement. */
     if (s->navigation_mode && hit == DM_TC_NONE && s->pointer_slot == DM_TC_NONE) {
         s->pointer_slot = slot;
@@ -603,7 +606,7 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
         double elapsed = now_s - done.start_time_s;
         /* 商人货架上的货长按 = 原版的「按住 Y 大量购买」（提示条原文；宿主读数：约 1.3 秒）：背包里有没满的卷轴书 / 同类叠时买满，没有就和买 1 份一样；买多少、钱够不够都由游戏定，这里只替玩家按键 | Long press on goods on the vendor shelf = the original game's 「按住 Y 大量购买」(Hold Y to buy in bulk) (button legend text; host reading: about 1.3 seconds): when the inventory has a non-full scroll tome / stack of the same kind it buys until full, otherwise it is the same as buying 1; how many to buy and whether there is enough gold are decided by the game, and here we only press the key for the player */
         if (done.pointer_long && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && s->pointer_shop) pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 1.3);
-        else if (done.pointer_long && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && !s->pointer_lock) ++s->long_press_seq;   /* 长按在松手时才算（按住没动）：按住到点就算的话，「按住停一下再拖」的药水会先被放进腰带（mini 药拖腰带脚本里多出 2 次） | Long press counts only at release (held without moving): if it counted as soon as the hold time was reached, a potion that is "held for a moment and then dragged" would first be put into the belt (2 extra occurrences in the potion-drag-to-belt script on the second Mac) */
+        else if (done.pointer_long && !done.mouse_item && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && !s->pointer_lock) ++s->long_press_seq;   /* 长按在松手时才算（按住没动）：按住到点就算的话，「按住停一下再拖」的药水会先被放进腰带（mini 药拖腰带脚本里多出 2 次） | Long press counts only at release (held without moving): if it counted as soon as the hold time was reached, a potion that is "held for a moment and then dragged" would first be put into the belt (2 extra occurrences in the potion-drag-to-belt script on the second Mac) */
         if (done.locked_drag) { }   /* 单件槽占用时拖别的物品：不发任何键 | Dragging another item while the single-item slot is occupied: send no key */
         else if (done.shop_drag) { ++s->shop_drop_seq; }   /* 买不买由前端按落点定；这里不发任何键 | Whether to buy is decided by the front end from the drop point; no key is sent here */
         else if (done.pointer_dragged) {
@@ -613,8 +616,8 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
             else if (s->pointer_release_item == 3) pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 0.15);          /* 手指在面板外 = 丢弃：指针回原处、到位后按 Y | Finger outside the panel = discard: pointer returns to the original spot and presses Y once in place */
             else if (s->pointer_release_item == 8) {   /* 松在单件任务槽上：按原版走法重做——先放回原格，再对它按住 Y（原版的「放进槽」）。只把物品拿在手上停在槽上方不算进槽：槽会显示它，但点确认不成交（本机 实测没有成交包） | Released on the single-item quest slot: redo it the original game's way -- first put it back in its original cell, then hold Y on it (the original game's "put into slot"). Merely holding the item and hovering over the slot does not count as entering the slot: the slot shows it, but tapping confirm does not complete the transaction (measured on the local machine: no transaction packet) */
                 pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2); pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 1.3); }
-            else pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);                                                          /* 面板里的空白处：放回原处 | Blank area inside the panel: put it back where it was */
-        } else if (!done.ui_drag && !done.pointer_long && elapsed < DM_TC_POINTER_TAP_S && distance <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {   /* 拖出去又拖回原处不算点按 | Dragging out and back to the original spot does not count as a tap */
+            else if (!done.mouse_item) pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);                    /* Touch invalid drop recovers original slot; physical mouse leaves item carried until an explicit destination is chosen. */
+        } else if (!done.ui_drag && (done.mouse_item || !done.pointer_long) && (done.mouse_item || elapsed < DM_TC_POINTER_TAP_S) && distance <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {   /* 拖出去又拖回原处不算点按 | Dragging out and back to the original spot does not count as a tap */
             /* 单件任务槽面板开着时，手上那件就是「槽里那件」：点背包格仍是放回去，点别处按没拿着处理——确认 / 关闭按钮要能点，点面板外 = 关面板（不是把槽里那件丢到地上） | While the single-item quest slot panel is open, the held item is "the one in the slot": tapping an inventory cell still puts it back, tapping elsewhere is handled as if nothing were held -- the confirm / close buttons must be tappable, and tapping outside the panel = close the panel (not drop the slot's item on the ground) */
             if (s->pointer_lock) { s->pointer_x = done.aim_origin_x; s->pointer_y = done.aim_origin_y; }   /* 单件槽占用时点别的物品：只移光标出说明，单击 / 双击都不动它 | Tapping another item while the single-item slot is occupied: only move the cursor to show the tooltip; neither single nor double tap moves it */
             else if (s->holding && s->pointer_item != 0 && !(atomic_load(&g_imbue_open) && s->pointer_item != 1)) { if (s->pointer_item == 1) pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);
@@ -622,6 +625,30 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
                               点按钮（类 0）不在这里吞掉、照常发鼠标点击：原先连合成钮也吞，手上有东西时点合成什么都不发；合成钮由宿主先收手上那件再按，见 dm_cursor.c
                               Still holding an item (the last drop did not succeed): tap the item area = put down; tap outside the panel / the black grid on either side = drop (Y); tapping tabs or elsewhere does nothing.
                                                             Tapping a button (class 0) is not swallowed here and sends a mouse click as usual: previously even the transmute button was swallowed, and tapping transmute with something in hand sent nothing; for the transmute button the host first stows the held item and then presses, see dm_cursor.c */
+            else if (done.mouse_item && s->pointer_item == 1 && !s->pointer_shop &&
+                     !s->pointer_stack && !s->pointer_lock &&
+                     !atomic_load(&g_imbue_open)) {
+                /* Delay only single-click pickup. A second click on the
+                   same item before the timeout uses or equips it through
+                   the game's existing native item-use pump instead.
+                   Fingers and continuous mouse dragging stay unchanged. */
+                float ox=done.aim_origin_x,oy=done.aim_origin_y;
+                int dbl=s->mouse_pick_pending &&
+                    now_s-s->mouse_pick_at_s<DM_TC_DOUBLE_TAP_S &&
+                    now_s>=s->mouse_pick_at_s &&
+                    hypotf(ox-s->mouse_pick_x,oy-s->mouse_pick_y) <=
+                        2*DM_TC_POINTER_MOVE_PT*scale_for(&s->layout);
+                if(dbl) {
+                    s->mouse_pick_pending=0;
+                    if(atomic_load(&g_hover_unid)) ++s->ident_seq;
+                    else ++s->use_seq;
+                } else {
+                    s->mouse_pick_pending=1;
+                    s->mouse_pick_at_s=now_s;
+                    s->mouse_pick_x=ox;s->mouse_pick_y=oy;
+                }
+                s->last_tap_s=-1e9;
+            }
             else if (s->pointer_item == 2) { ++s->tab_tap_seq; }
             else if (s->pointer_item == 6 || s->pointer_item == 11) { }   /* 压着被上层面板盖住的按钮：不点、不发键 | Pressing on a button covered by an upper panel: no click, no key */
             else if (s->pointer_item == 3) { if (!atomic_load(&g_dead_modal)) { s->close_left = 3; s->close_next_s = now_s; atomic_store(&g_close_stop, 0); } }   /* 面板外：不发鼠标点击（会落到游戏世界 = 点地走路），按 B 关面板——子菜单里一下 B 只退一级，所以按到面板关掉为止（至多 3 下，见 dm_tc_tick）；死亡弹窗开着时不动 | Outside the panel: do not send a mouse click (it would land in the game world = tap ground to walk); press B to close the panel -- in a submenu one B only goes back one level, so press until the panel is closed (at most 3 presses, see dm_tc_tick); do nothing while the death popup is open */
@@ -702,6 +729,17 @@ void dm_tc_pointer_press(dm_tc_state *s, float x, float y, uint64_t button) {
 }
 void dm_tc_tick(dm_tc_state *s, double now_s) {
     s->last_time_s = now_s;
+    // Do not pick an item up until a double-click is ruled out. Waiting
+    // while another mouse press is active prevents a stale pickup underneath
+    // the second click. The original drag path does not use this delay.
+    if(s->mouse_pick_pending && s->navigation_mode &&
+       now_s-s->mouse_pick_at_s >= DM_TC_DOUBLE_TAP_S &&
+       s->pointer_slot==DM_TC_NONE && !s->pulse_button &&
+       !s->pointer_pulse_pending) {
+        s->mouse_pick_pending=0;
+        pointer_pulse_start(s,s->mouse_pick_x,s->mouse_pick_y,1);
+        update(s);
+    }
     /* 补发不许盖掉在发的脉冲（腰带喝药等）：在发就等；那个脉冲收回时（dm_tc_pulse_end）把补发时刻推到 ZL 再领先满 DM_TC_ZL_LEAD_S 之后（原先到点直接覆盖，腰带那下没了） | The make-up send must not overwrite a pulse being sent (belt potion, etc.): wait while one is being sent; when that pulse is released (dm_tc_pulse_end), push the make-up time to after ZL has again led for a full DM_TC_ZL_LEAD_S (it used to overwrite directly when due, and the belt press was lost) */
     if (s->belt_gap_cell && now_s >= s->belt_gap_at && !s->pulse_button) { uint64_t btn = s->layout.target[DM_TC_BELT1 + (s->belt_gap_cell & 0xf)].button; s->belt_gap_cell = 0;
         if (btn && !s->navigation_mode) { s->pulse_rx = s->pulse_ry = 0; s->pulse_button = btn; ++s->pulse_epoch; } update(s); }
@@ -721,7 +759,7 @@ void dm_tc_tick(dm_tc_state *s, double now_s) {
     }
     if (s->pointer_slot < 0 || s->pointer_slot >= DM_TC_MAX_TOUCH) return;
     dm_tc_finger *f = &s->finger[s->pointer_slot];
-    if (!f->active || f->pointer_dragged || f->pointer_long) return;
+    if (!f->active || f->mouse_item || f->pointer_dragged || f->pointer_long) return;
     if (s->mouse_click_mode && s->pointer_item != 1) return;
     if (now_s - f->start_time_s >= DM_TC_POINTER_HOLD_S &&
         hypotf(f->x-f->aim_origin_x, f->y-f->aim_origin_y) <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {

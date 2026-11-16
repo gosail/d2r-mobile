@@ -55,6 +55,7 @@ def ensure(R, overlay_only=False):
     outs = [os.path.join(v4, 'base.png'), os.path.join(v4, 'hud.json'), os.path.join(v4, 'hud_v4_ui', 'ui.json')]
     full_outs = outs + [os.path.join(HERE, '..', 'Sources', 'TouchArt', 'dm_native_skill_0.png'),
                         os.path.join(HERE, '..', 'Sources', 'dm_touch_native_art.c'),
+                        os.path.join(HERE, '..', '..', 'host', 'dm_hover_names.h'),
                         os.path.join(v4, 'hud_v4_ui', 'sil_dm_native_skill_0.png')]
     if not overlay_only: outs = full_outs
     # 两种范围共享目录及锁，模式写进同一 stamp，不能把精简产物当成完整 iOS 产物。完整产物是精简产物的超集，所以精简请求也认新鲜的完整
@@ -89,6 +90,14 @@ def ensure(R, overlay_only=False):
 
 
 def run_steps(R, overlay_only=False):
+    if not overlay_only:
+        # iOS/Xcode sources need this generated header before compilation.
+        # The source tree ignores it; Android shell builds use their own stub path.
+        name = os.path.join(HERE, '..', '..', 'host', 'dm_hover_names.h')
+        r = subprocess.run(python_command(os.path.join(HERE, 'gen_hover_names.py'), R), capture_output=True, text=True)
+        if r.returncode: sys.exit('gen_hover_names: ' + r.stderr[-1500:])
+        with open(name + '.tmp', 'w', encoding='utf-8') as f: f.write(r.stdout)
+        os.replace(name + '.tmp', name)
     for name, cmd in STEPS:
         if overlay_only and cmd[0] == 'native_art/generate.py': continue
         argv = python_command(os.path.join(HERE, cmd[0]), *[c.replace('{R}', R) for c in cmd[1:]])

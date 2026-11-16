@@ -49,6 +49,14 @@ with tempfile.TemporaryDirectory() as t:
     # Full-touch scheme: controller button hints on the front end and generic popups are moved off screen (once the buttons themselves are tappable, the glyphs are misinformation); list and method in touch_layout.py
     sys.path.insert(0,HERE); import touch_layout
     tl,ntl=touch_layout.build(romfs,t); REPL.update(tl)
+    # Both input devices share the original KeyBindingMenuHD scroll list.
+    # The guest keeps the .ctl buttons; PC key buttons are sibling widgets
+    # inside each cloned native list row. This is not an OS-side settings UI.
+    import controls_layout
+    cp, original_controls = touch_layout.read_layout(romfs,controls_layout.LAYOUT)
+    pc_controls_file=os.path.join(t,'native_controls.json')
+    open(pc_controls_file,'w',encoding='utf-8').write(controls_layout.integrate(original_controls))
+    REPL[cp.lower()]=pc_controls_file
     REPL.update(touch_layout.build_pcfront(romfs,t))   # 选角页改用键鼠版界面（盖掉上面 build 对这几份的改动） | Character select page switched to the keyboard-and-mouse UI (overrides the changes the build above made to these files)
     tp,ntp=touch_layout.build_present(romfs,t); REPL.update(tp)   # 局内：页签条两端 L / R、人物页耐力行 | In-game: L / R at the two ends of the tab strip, stamina row on the character page
     ti,nti=touch_layout.build_ingame(romfs,t); REPL.update(ti)   # 局内：各面板右上角的关闭按钮（同一落点、各发各的消息）与手柄版删掉的功能按钮（修理 / 翻页 / 高级属性 / 选项页应用·默认·放弃）；要在 build_present 之后（同一文件以这份为准） | In-game: the close button at each panel's top-right corner (same position, each sending its own message) and the function buttons removed in the controller version (repair / page turn / advanced stats / options page apply·default·discard); must come after build_present (for the same file this copy wins)
@@ -118,6 +126,15 @@ with tempfile.TemporaryDirectory() as t:
     for rel,fn in (('controller/console/settingspanelhd.json',touch_layout.pad_settings),('controller/console/videooptionspanelhd.json',touch_layout.pad_custom_page)):   # 手柄版选项页：「视频」页签换成「自定义」页 | Controller options page: the "Video" tab is replaced by the "Custom" page
         lp,lt=touch_layout.read_layout(romfs,rel); o=os.path.join(tpad,'pad_'+rel.replace('/','_')); open(o,'w',encoding='utf-8').write(fn(lt)); PR[lp.lower()]=o
     PR.update(pouch_layout.build(romfs,tpad,PR)[0]); PR.update(wide_stash.build(romfs,tpad,PR)[0])   # 储藏箱 10 → 14 列（编年史仓库第 1 步）：表、底图、宽外框、布局；要在触摸布局之后（储藏箱 / 外框布局叠在那份上） | Stash 10 → 14 columns (chronicle vault step 1): table, base image, wide outer frame, layout; must come after the touch layout (the stash / outer frame layout stacks on that copy)
+
+    # The physical mouse chooses the controller layout. Add its native X
+    # buttons after *all* pad feature overlays have been composed, preserving
+    # inventory drag targets, extended stash slots and controller key binding.
+    # The touch layout already has these buttons; pause panels already gain X
+    # through pad_pause(), so neither is rebuilt here.
+    PR.update(touch_layout.build_ingame(
+        romfs, tpad, touch_layout.PAD_PC_CLOSE,
+        present=False, base_overrides=PR)[0])
     cb=Image.open(os.path.join(HERE,'..','NativeHUD','touch','close.png')).convert('RGBA')
     open(os.path.join(t,'close.sprite'),'wb').write(b'SpA1'+struct.pack('<HHIIIIII',31,cb.width,cb.width,cb.height,0,1,0,0)+struct.pack('<II',cb.width*cb.height*4,4)+cb.tobytes())
     # 选角页右侧面板底图：去掉「转换角色」的槽与十字花、只留居中一个槽（原图解出后改的，同尺寸）
@@ -184,7 +201,7 @@ with tempfile.TemporaryDirectory() as t:
     # 还没分开的存量：两份字号档（开机只读一次）
     # Meant to be shared by both modes all along (our own pages, one layout for controller / touch, placed by the host according to mode): the three Chronicle ones
     # Existing stock not yet split: the two font size profiles (read only once at boot)
-    SHARED_TODO=('chroniclebaselistpanelhd.json','chroniclepanelhd.json','controller/_profileconsolehd.json','controller/_profilehandheldhd.json','dropdownlistcontentshd.json')
+    SHARED_TODO=('keybindingmenuhd.json','chroniclebaselistpanelhd.json','chroniclepanelhd.json','controller/_profileconsolehd.json','controller/_profilehandheldhd.json','dropdownlistcontentshd.json')
     PADROOT=touch_layout.build_pad_root(romfs,tpad); PADROOT_KEYS={k[len(LAY):] for k in PADROOT}   # 三份选项页：原路径放手柄那份，触屏那份挪到触屏这边 | The three options pages: the controller copy goes at the original path, the touch copy moves to the touch side
     UNSHARE=('confirmationmodalhd.json','dismissablemodalhd.json','helpbuttonpanelhd.json','npcdialogpanelhd.json','youdiedmodalhd.json')   # 只该给触屏的：挪到触屏这边（见 emit） | Touch-only ones: moved to the touch side (see emit)
     PADLAY={k:v for k,v in PR.items() if touch_path(k)}   # 手柄版只取布局（数据表、图与触屏版同一份） | The controller version takes only layouts (data tables and images are the same copy as the touch version)
@@ -192,6 +209,7 @@ with tempfile.TemporaryDirectory() as t:
     # Controller-only list: these are the only layouts that are not original bytes in controller mode, not one more and not one fewer (once, when a line above was edited, the adjacent line was replaced whole, and the vendor page's refresh button dropped out of the package)
     PAD_PAGES=('controller/bankexpansionlayouthd.json','controller/console/charactercreatepanelhd.json','controller/console/characteroptionspanelhd.json','controller/console/mainmenubuttonribbonhd.json','controller/console/mainmenupanelhd.json','controller/console/settingspanelhd.json','controller/console/switch/playerinventoryexpansionlayouthd.json','controller/console/videooptionspanelhd.json',
                'controller/controlleroverlayhd.json','controller/hirelinginventorypanelhd.json','controller/hudmonsterhealthhd.json','controller/messagelogpanelhd.json','controller/notificationpanelhd.json','controller/pauselayoutgardenhd.json','controller/pauselayouthd.json','controller/vendorpanellayouthd.json')
+    PAD_PAGES=tuple(sorted(set(PAD_PAGES).union(touch_layout.PAD_PC_CLOSE_PAGES)))
     if sorted(k[len(LAY):] for k in PADLAY)!=sorted(PAD_PAGES): raise SystemExit('gen_romfs_overlay：手柄专用布局与清单 PAD_PAGES 不一致：多 %s，少 %s' % (sorted(set(k[len(LAY):] for k in PADLAY)-set(PAD_PAGES)), sorted(set(PAD_PAGES)-set(k[len(LAY):] for k in PADLAY))))
     def emit(repl, dst, tag, prebuilt=None):   # repl → 覆盖层（新 .build.config + 一个新数据档）写到 dst/data | repl → overlay (a new .build.config + one new data archive) written to dst/data
         repl=to_touch(repl); repl.update(PADLAY)

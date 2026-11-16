@@ -22,7 +22,5 @@ void dm_kbmap_native_pc_cancel(void);
 int dm_kbmap_native_pc_result(void);
 int dm_kbmap_controls_visible(void);
 void dm_kbmap_controls_event(const char *category,const char *action,const char *arg);
-int dm_kbmap_mouse_action(unsigned physical); // fixed PC mouse roles
-int dm_kbmap_bind_mouse(unsigned physical,unsigned action); // no private storage
 void dm_kbmap_select_character(const char *name);
 void dm_kbmap_pre_commit(const char *workdir); // preserve guest-native .key edits during Commit

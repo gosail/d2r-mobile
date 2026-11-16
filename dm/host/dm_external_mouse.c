@@ -10,6 +10,7 @@
 #include "dm_cursor.h"
 #include "dm_uiscreen.h"
 #include "dm_input.h"
+#include "dm_pc_input.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -34,6 +35,7 @@ static uint64_t mouse_last_walk;
 static mouse_event mouse_last_hover;
 static int mouse_hover_valid;
 static int mouse_right_item;
+static int mouse_right_down;
 
 int dm_external_mouse_active(void) { return atomic_load(&mouse_active); }
 void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int arg) {
@@ -68,7 +70,7 @@ static void mouse_clear(void) {
     atomic_store(&mouse_scroll, 0);
     atomic_store(&mouse_hud_button, 0);
     dm_world_hover_end();
-    mouse_hover_valid=0; mouse_right_item=0;
+    mouse_hover_valid=0; mouse_right_item=0; mouse_right_down=0;
 }
 static int mouse_world_ok(void) {
     return dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused();
@@ -107,9 +109,15 @@ void dm_external_mouse_step(void) {
             mouse_hover_valid=0; dm_world_hover_end(); continue;
         }
         if (e->op == DM_MOUSE_MIDDLE_DOWN) {
-            dm_world_mouse_map_toggle(); continue;
+            // Honor the character's native .key mouse-3 binding if present.
+            // With no binding, preserve the traditional middle-map action.
+            (void)dm_pc_input_middle_or_default(); continue;
         }
         if (e->op == DM_MOUSE_RIGHT_DOWN) {
+            // Some platforms report the same physical edge twice. A repeated
+            // right-down must never use an inventory item a second time.
+            if (mouse_right_down) continue;
+            mouse_right_down=1;
             atomic_store(&mouse_active,1); // Right-click alone must run the native use-item pump.
             mouse_right_item=0;
             if (dm_uiscreen_panel() && e->ux>=0 && e->ux<=1 &&
@@ -120,11 +128,18 @@ void dm_external_mouse_step(void) {
             }
             atomic_store(&mouse_right,1); atomic_store(&mouse_right_latch,1); continue;
         }
-        if (e->op == DM_MOUSE_RIGHT_UP) { mouse_right_item=0; atomic_store(&mouse_right,0); continue; }
+        if (e->op == DM_MOUSE_RIGHT_UP) {
+            if (!mouse_right_down) continue;
+            mouse_right_down=0;
+            mouse_right_item=0; atomic_store(&mouse_right,0); continue;
+        }
         if (e->op == DM_MOUSE_WHEEL) {
             if (e->arg) {
-                atomic_store(&mouse_scroll, e->arg > 0 ? 1 : -1);
-                atomic_store(&mouse_scroll_until, now_ns() + 120000000ull);
+                // Native .key may map the wheel to a different command; do
+                // not inject a fixed right-stick pulse on top of that action.
+                int direction=dm_pc_input_wheel_or_default(e->arg);
+                atomic_store(&mouse_scroll,direction);
+                if (direction) atomic_store(&mouse_scroll_until, now_ns() + 120000000ull);
             }
             continue;
         }

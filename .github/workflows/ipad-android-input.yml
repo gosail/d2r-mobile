@@ -33,6 +33,10 @@ jobs:
           /tmp/dm_key
           cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/tests/t_pc_profile.c -o /tmp/dm_profile
           /tmp/dm_profile
+      - name: Shared iPad/Android pointer gesture tests (including upstream hire long-press)
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -I dm/ios/Sources -I dm/host dm/ios/Sources/dm_touch_controls.c dm/ios/tests/t_touch_controls.c -lm -o /tmp/dm_touch_controls
+          /tmp/dm_touch_controls
       - name: Android HID key mapper compiles against SDK
         run: |
           jar=$(find "${ANDROID_HOME}/platforms" -name android.jar | sort -V | tail -1)
@@ -54,6 +58,9 @@ jobs:
       - name: Host mouse and key profile C syntax
         run: |
           xcrun clang -std=gnu11 -fsyntax-only -Werror=implicit-function-declaration -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/host/dm_kbmap.c dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_pages.c dm/host/dm_cursor.c dm/host/hle_fs.c
+      - name: iPadOS native external pointer bridge syntax
+        run: |
+          xcrun --sdk iphoneos clang -arch arm64 -std=gnu11 -fsyntax-only -Werror=implicit-function-declaration -miphoneos-version-min=16.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/host/dm_external_mouse.c
       - name: iPadOS UIKit keyboard and mouse syntax
         run: |
           xcrun --sdk iphoneos clang -arch arm64 -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -miphoneos-version-min=16.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/ios/Sources/front_ios.m

@@ -60,8 +60,6 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     static native void nativeTouch(int n, int[] ids, float[] xs, float[] ys);
     static native void nativeMouseEvent(int op, float xDp, float yDp, int arg);
     static native int nativeMousePointerHint();
-    static native String nativeMouseHover(float[] out);
-    static native void nativeMouseWorldRect(int widthPx, int heightPx, int[] out);
     static native void nativeFocus(int ev);
     static native void nativeTextResult(long id, boolean accepted, String text);
     // 越肩镜头的体感转向（CamSensor）：开哪种传感器（0 = 不开），每次转动的弧度
@@ -100,7 +98,6 @@ public class DmActivity extends Activity implements SurfaceHolder.Callback, Disp
     private TouchOverlay touchOverlay;
     private boolean started;
     private boolean primaryMouseDown, secondaryMouseDown, tertiaryMouseDown;
-    boolean isMouseGameReady() { return libraryLoaded && started && resumed; }
     private boolean importing, savesTransferred;
     private boolean libraryLoaded;
     private boolean resumed;

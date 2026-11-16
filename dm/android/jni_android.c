@@ -14,6 +14,7 @@
 //   <internal dir>/save, temp        saves and temporary files
 #include "../host/dm.h"
 #include "../host/dm_input.h"
+#include "../host/dm_kbmap.h"
 #include "../host/front.h"
 #include "../host/hle.h"
 #include <android/log.h>
@@ -459,6 +460,15 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JN
 // 实体手柄（Java PadInput.java）→ 宿主手柄状态。与触屏的虚拟手柄分开存，游戏取手柄时按键取或、摇杆触屏优先（hle_hid.c 的 fill）。
 // Physical controller (Java PadInput.java) -> host controller state. Kept apart from the touch on-screen stick; when the game reads the
 // controller the buttons are ORed and the touch stick wins (fill in hle_hid.c).
+// Android physical keyboard, in the same HID usage space as iPad UIKey.
+// Real gamepads remain on nativePad; key releases are paired on focus loss.
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardEvent(JNIEnv *env,jclass cls,jint usage,jboolean down) {
+    (void)env; (void)cls;
+    if(usage>=0 && usage<256)dm_kbmap_key_event((unsigned)usage,down!=0);
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardReset(JNIEnv *env,jclass cls) {
+    (void)env; (void)cls; dm_kbmap_reset();
+}
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePad(JNIEnv *env, jclass cls, jlong buttons, jint lx, jint ly, jint rx, jint ry) {
     (void)env; (void)cls;
     // 按下沿记一条（最多 30 条），用来确认手柄通着、键位对 | Log each press edge (at most 30) to show the controller works and the bits are right

@@ -363,6 +363,34 @@ int main(void) {
     dm_pc_input_reset(); // character change/focus loss removes queued UI work
     dm_pc_input_guest_step();assert(panel_events[1]==2);
     game_seed("Alice",0);
+    // A stale guest serialization may restore the value from before the
+    // host edit; Commit reapplies the requested host value in that case.
+    dir("StaleGuest");game_seed("StaleGuest",1);
+    assert(dm_pc_profile_select("StaleGuest")==DM_KEYFILE_OK);
+    assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_OK);
+    game_seed("StaleGuest",1); // guest rewrites its old B binding
+    dm_pc_profile_pre_commit_locked(work_dir);
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='K');
+
+    // A deliberate native edit to a THIRD binding must supersede the host
+    // setting and stay authoritative through later unrelated Commit calls.
+    dir("NativeWins");game_seed("NativeWins",1);
+    assert(dm_pc_profile_select("NativeWins")==DM_KEYFILE_OK);
+    assert(dm_pc_profile_bind(1,1,'K',NULL,NULL)==DM_KEYFILE_OK);
+    char native_path[1200];path("NativeWins",native_path);
+    dm_keyfile native_edit={0};
+    assert(dm_keyfile_read(&native_edit,native_path)==DM_KEYFILE_OK);
+    assert(dm_keyfile_set(&native_edit,1,1,'L')==DM_KEYFILE_OK);
+    size_t native_size=0;const uint8_t *native_bytes=dm_keyfile_data(&native_edit,&native_size);
+    { FILE *guest=fopen(native_path,"wb");assert(guest);
+      assert(fwrite(native_bytes,1,native_size,guest)==native_size);
+      assert(!fclose(guest)); }
+    dm_keyfile_free(&native_edit);
+    dm_pc_profile_pre_commit_locked(work_dir);
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='L');
+    dm_pc_profile_pre_commit_locked(work_dir);
+    assert(dm_pc_profile_get(1,1,&vk)==DM_KEYFILE_OK && vk=='L');
+    assert(dm_pc_profile_select("Alice")==DM_KEYFILE_OK);
     char backup[1220];snprintf(backup,sizeof backup,"%s.bak",alice);
     assert(access(backup,F_OK)==0);
     // Existing unknown format is read but never overwritten or converted.

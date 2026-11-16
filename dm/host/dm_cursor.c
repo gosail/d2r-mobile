@@ -2919,11 +2919,10 @@ int dm_ui_pc_skill_bind_request(uint32_t command_id) {
     (void)command_id; return 0;
 }
 int dm_ui_pc_skill_tree_active(void) {
-    module_t *m=main_module();uint64_t root=0;
-    if(!m || !dm_uiscreen_ingame())return 0;
-    memcpy(&root,m->base+0x2f05458,8);
-    uint64_t sp=root?ui_find(root,"SkillsTreePanel",0):0;
-    return sp && *(uint8_t *)(sp+0x50);
+    // Keydown may arrive on UIKit/Android UI threads. Never traverse
+    // guest widgets here; dm_pc_input_event also checks the atomic
+    // dm_uiscreen_panel() gate before emitting skill/cast buttons.
+    return 0;
 }
 void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线程）；每个出图帧做一次 | called where the game fetches the controller (hle_hid fill, main thread); done once per presented frame
     static uint64_t last_frame = UINT64_MAX; uint64_t fr = dm_guest_frame();

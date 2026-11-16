@@ -28,7 +28,10 @@ static _Atomic unsigned native_pc_capture;
 static _Atomic int native_pc_result;
 int dm_kbmap_native_pc_begin(unsigned command,unsigned slot) {
     uint16_t vk=0xffff;
-    if(command>=57 || slot>=2 ||
+    // Do not offer an editable shortcut for a guest action whose runtime
+    // dispatcher has no verified behavior. The original game may still own
+    // and persist such commands in its native .key untouched.
+    if(command>=57 || slot>=2 || !dm_pc_input_supported_action(command) ||
        dm_pc_profile_get(command,slot,&vk)!=DM_KEYFILE_OK)return 0;
     atomic_store(&native_pc_result,DM_KEYFILE_OK);
     atomic_store(&native_pc_capture,1u+command*2+slot);

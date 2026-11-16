@@ -16,7 +16,8 @@ int dm_thermal_now(void) { return g_dm_thermal; }   // 最近的温控档位（0
 #include <signal.h>
 #include "front.h"
 #include "dm_input.h"
-void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void);   // dm_gamepad.m
+void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void);
+void dm_gamepad_external_input(void); // physical keyboard/mouse owns native Switch layout   // dm_gamepad.m
 #include "hle.h"
 #import "DmTouchOverlay.h"
 #include "dm_touch_native_art.h"
@@ -27,6 +28,8 @@ void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void); 
 #include "../../host/dm_hud.h"
 #include "../../host/dm_world.h"
 #include "../../host/dm_external_mouse.h"
+#include "../../host/dm_kbmap.h"
+#include "../../host/dm_pc_profile.h"
 #include "../../host/dm_uiscreen.h"
 #include "../../host/dm_actions.h"
 #include "../../host/dm_i18n.h"
@@ -152,6 +155,41 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     int32_t _minLeft,_maxLeft; uint64_t _lastButtons; unsigned _touchAPresses,_touchShots; UITouch *_uiFinger; CGPoint _uiFeO; BOOL _uiFeDrag; BOOL _uiDragOn; UITouch *_mapTouch, *_bindTouch; UIView *_ghostDim; BOOL _ghostOn; uint64_t _bindKey; uint32_t _selId; double _statNext; double _tipUntil, _addAt; unsigned _mapWorldSeq; BOOL _mapWorldAsked; CGPoint _mapWorldPt; CGPoint _mapP0, _bindP0; double _mapT0; BOOL _pulseTicking; uint64_t _pulseEpoch,_pulseS0; double _pulseT0,_pulseSeen,_pulseFree; unsigned _itemSeq,_relSeq; BOOL _relAsked,_itemAsked; int _itemKind;
 }
 + (Class)layerClass { return CAMetalLayer.class; }
+// Hardware keyboard events are separate from touch gestures and from the
+// physical controller. The game's native character .key bindings take
+// priority; a built-in fallback is used only when that file is absent.
+- (BOOL)canBecomeFirstResponder { return YES; }
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if(self.window)[self becomeFirstResponder];
+}
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    BOOL handled=NO;
+    if(@available(iOS 13.4,*))for(UIPress *press in presses)if(press.key) {
+        unsigned usage=(unsigned)press.key.keyCode;
+        if(usage<256 && (dm_pc_vk_from_hid(usage)>=0 ||
+                         dm_kbmap_action(usage)!=DM_KB_UNBOUND)) {
+            dm_gamepad_external_input();
+            dm_kbmap_key_event(usage,1);handled=YES;
+        }
+    }
+    if(!handled)[super pressesBegan:presses withEvent:event];
+}
+- (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    BOOL handled=NO;
+    if(@available(iOS 13.4,*))for(UIPress *press in presses)if(press.key) {
+        unsigned usage=(unsigned)press.key.keyCode;
+        if(usage<256 && (dm_pc_vk_from_hid(usage)>=0 ||
+                         dm_kbmap_action(usage)!=DM_KB_UNBOUND)) {
+            dm_kbmap_key_event(usage,0);handled=YES;
+        }
+    }
+    if(!handled)[super pressesEnded:presses withEvent:event];
+}
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    dm_kbmap_reset();
+    [super pressesCancelled:presses withEvent:event];
+}
 - (instancetype)initWithFrame:(CGRect)f {
     if (!(self = [super initWithFrame:f])) return nil;
     self.multipleTouchEnabled = YES;
@@ -604,6 +642,7 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
 // original quality-coloured label and get a focus outline. Do not create a touch.
 // UIKit pointer events use separate world/UI coordinates; never create a fake finger.
 - (void)dmMouseEvent:(int)op point:(CGPoint)p arg:(int)arg {
+    if(op!=DM_MOUSE_LEAVE && op!=DM_MOUSE_HOVER_END)dm_gamepad_external_input();
     CGSize b=self.bounds.size; CGRect wr=world_rect(self);
     if (b.width<=0 || b.height<=0 || wr.size.width<=0 || wr.size.height<=0) return;
     dm_external_mouse_event(op,(float)(p.x/b.width),(float)(p.y/b.height),
@@ -1448,7 +1487,7 @@ void front_ios_focus_event(int ev) {
     static const char *k[] = {"sceneWillResignActive", "sceneDidEnterBackground", "sceneWillEnterForeground", "sceneDidBecomeActive"};
     { uint64_t guest_ns(void); LOG("前端：%s（客体时钟 %.3f s，声卡回调累计 %llu）", k[ev], guest_ns() / 1e9, (unsigned long long)dm_audio_render_calls()); }   // 两个读数：核对后台那段没算进游戏时间、回来后声卡回调继续涨 | Two readings: to check that the background period was not counted into game time and that audio device callbacks keep increasing after return
     switch (ev) {
-        case 0: [g_touch_view cancelControls]; { void dm_gamepad_reset(void); dm_gamepad_reset(); } dm_focus_set(2); resign_save(); break;   // 手柄的键和摇杆一并清零：按着键切走、在后台松开，回来不会补「松开」 | Controller buttons and sticks are zeroed as well: if a button is held while switching away and released in the background, no "release" is delivered on return
+        case 0: dm_kbmap_reset(); [g_touch_view cancelControls]; { void dm_gamepad_reset(void); dm_gamepad_reset(); } dm_focus_set(2); resign_save(); break;   // 手柄的键和摇杆一并清零：按着键切走、在后台松开，回来不会补「松开」 | Controller buttons and sticks are zeroed as well: if a button is held while switching away and released in the background, no "release" is delivered on return
         // 进后台：客体时钟一并冻结（等效 Switch 挂起）——否则游戏线程挡在提交处、墙钟照走，回来时游戏内时间一下跳过整段后台时长（补拍 / 动画 / 冷却全跟着跳）
         // Entering background: the guest clock is frozen as well (equivalent to Switch suspend) -- otherwise the game thread is blocked at submission while the wall clock keeps running, and on return in-game time jumps over the whole background duration at once (catch-up ticks / animations / cooldowns all jump with it)
         case 1: dm_focus_set(3); dm_ui_lifecycle(1); g_audio_bg = 1; audio_apply(); { void dm_cloud_flush(int); dm_cloud_flush(1); }   // iCloud：局内攒下的存档切后台时传掉（cloud_ios.m） | iCloud: saves accumulated in the run are uploaded when going to background (cloud_ios.m)

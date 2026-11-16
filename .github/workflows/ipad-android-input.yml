@@ -1,5 +1,6 @@
 name: iPad and Android keyboard/mouse checks
 on:
+  workflow_dispatch:
   push:
     branches:
       - feat/ipad-android-keyboard-mouse-upstream-20261116

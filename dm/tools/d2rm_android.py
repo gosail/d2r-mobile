@@ -154,6 +154,9 @@ def main():
     # 2. UI art, the skill icon index and a few data tables
     say('从游戏文件生成界面素材（输入没变会自己跳过）')
     run([PY, os.path.join(IOS, 'tools', 'gen_assets.py'), romfs], cwd=IOS, env={'DM_ROMFS_SRC': romfs}, log=os.path.join(stage, 'gen_assets.log'), what='生成界面素材')
+    # Include player-local NPC hover names in the imported Android assets, not the APK.
+    with open(os.path.join(stage,'out','hover_names.tsv'),'w',encoding='utf-8',newline='\n') as target:
+        subprocess.run([PY,os.path.join(IOS,'tools','gen_hover_names.py'),romfs,'--tsv'],stdout=target,check=True)
     gen = os.path.join(stage, 'gen'); os.makedirs(gen)
     run([PY, os.path.join(IOS, 'tools', 'native_art', 'generate.py'), romfs, '--output-dir', gen], what='生成技能图标')
     for name, gen_py in (('dm_vault_tab.h', 'gen_vault_table.py'), ('dm_hud_exp.h', 'gen_hud_exp.py')):

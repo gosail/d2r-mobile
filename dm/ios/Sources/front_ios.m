@@ -80,6 +80,7 @@ static BOOL touch_control_log_enabled(void) {
 - (void)refreshPortalBinding;
 - (void)dmMouseHover:(UIHoverGestureRecognizer *)recognizer;
 - (void)dmMouseScroll:(UIPanGestureRecognizer *)recognizer;
+- (void)dmMouseMiddleTap:(UITapGestureRecognizer *)recognizer;
 @end
 static __weak DmMetalView *g_touch_view;
 // 真全屏（屏幕比 16:9 窄，iPad 4:3）：3D 铺满整窗，游戏视图（界面、自绘控件、界面触点）是贴底的一块 16:9，见 front_ios_view。
@@ -144,6 +145,9 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
     // Real mouse clicks on visible touch controls or a UI panel reuse the
     // existing native touch gesture machine; 3D clicks use PC mouse routing.
     NSMutableSet<UITouch *> *_pointerAsTouch;
+    // Third-button presses are handled by a dedicated UIKit tap recognizer.
+    // Do not forward those UITouch edges as primary mouse down/up.
+    NSMutableSet<UITouch *> *_middleMouseTouches;
     UIPointerInteraction *_nativePointerInteraction;
     int _nativePointerHint;
       // 镜头实验：小地图 / 全屏地图上人物朝向的指针（mapHeadingSync） | camera experiment: the facing pointer on the minimap / fullscreen map (mapHeadingSync)
@@ -662,6 +666,10 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
     if (hoverLog++<6) { CGPoint p=[recognizer locationInView:self]; LOG("iPad mouse hover event %d: %.1f,%.1f",(int)state,p.x,p.y); }
     [self dmMouseEvent:DM_MOUSE_HOVER point:[recognizer locationInView:self] arg:0];
 }
+- (void)dmMouseMiddleTap:(UITapGestureRecognizer *)recognizer {
+    if (recognizer.state==UIGestureRecognizerStateRecognized)
+        [self dmMouseEvent:DM_MOUSE_MIDDLE_DOWN point:[recognizer locationInView:self] arg:0];
+}
 - (void)dmMouseScroll:(UIPanGestureRecognizer *)recognizer {
     if (recognizer.state!=UIGestureRecognizerStateChanged) return;
     CGPoint delta=[recognizer translationInView:self];
@@ -695,6 +703,18 @@ static BOOL touch_done(UITouch *t) { UITouchPhase ph=t.phase; return ph==UITouch
         if (@available(iOS 13.4, *)) {
             if (t.type==UITouchTypeIndirectPointer) {
                 CGPoint p=[t locationInView:self];
+                BOOL middle=(event.buttonMask & UIEventButtonMaskForButtonNumber(3))!=0;
+                BOOL wasMiddle=[_middleMouseTouches containsObject:t];
+                if(op==DM_MOUSE_DOWN && middle) {
+                    if(!_middleMouseTouches)_middleMouseTouches=[NSMutableSet set];
+                    [_middleMouseTouches addObject:t];
+                    continue;
+                }
+                if(wasMiddle) {
+                    if(op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE)
+                        [_middleMouseTouches removeObject:t];
+                    continue;
+                }
                 BOOL asTouch=[_pointerAsTouch containsObject:t];
                 BOOL secondary=(event.buttonMask & UIEventButtonMaskSecondary)!=0;
                 if (op==DM_MOUSE_DOWN && !secondary &&
@@ -1194,6 +1214,12 @@ static void dm_attach_mouse_hover(UIView *surface, DmMetalView *game) {
         scroll.allowedScrollTypesMask=UIScrollTypeMaskDiscrete;
         scroll.cancelsTouchesInView=NO;
         [surface addGestureRecognizer:scroll];
+        // UIKit exposes button 3 via an explicit button mask; unlike Mac
+        // AppKit it does not arrive through a separate otherMouseDown event.
+        UITapGestureRecognizer *middle=[[UITapGestureRecognizer alloc] initWithTarget:game action:@selector(dmMouseMiddleTap:)];
+        middle.buttonMaskRequired=UIEventButtonMaskForButtonNumber(3);
+        middle.cancelsTouchesInView=NO;
+        [surface addGestureRecognizer:middle];
     }
 }
 UIView *front_ios_view(CGRect frame) {

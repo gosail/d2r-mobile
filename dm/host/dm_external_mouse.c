@@ -47,7 +47,13 @@ void dm_external_mouse_event(int op, float ux, float uy, float wx, float wy, int
         mouse_queue[(mouse_tail - 1) % 128].op == op)
         mouse_queue[(mouse_tail - 1) % 128] = e;
     else if (mouse_tail - mouse_head == 128) {
-        mouse_overflow = 1; mouse_head = mouse_tail = 0;
+        // The consumer must cancel any ongoing gesture after overflow, but
+        // the incoming edge still has to be delivered. Dropping a release
+        // here can leave a pointer button logically pressed until focus loss.
+        mouse_overflow = 1;
+        mouse_head = 0;
+        mouse_tail = 1;
+        mouse_queue[0] = e;
     } else mouse_queue[mouse_tail++ % 128] = e;
     pthread_mutex_unlock(&mouse_mu);
 }

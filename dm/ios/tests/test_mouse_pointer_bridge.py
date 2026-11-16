@@ -25,6 +25,15 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("dm_external_mouse_event(DM_MOUSE_HOVER_END", front)
         self.assertIn("if (e->op == DM_MOUSE_LEAVE) { mouse_clear(); continue; }", backend)
 
+    def test_queue_overflow_retains_incoming_button_edge(self):
+        mouse = self.read("host/dm_external_mouse.c")
+        # Clearing queued state must not discard the event which overflowed it.
+        overflow = mouse.split("else if (mouse_tail - mouse_head == 128) {", 1)[1].split("} else mouse_queue", 1)[0]
+        self.assertIn("mouse_overflow = 1;", overflow)
+        self.assertIn("mouse_tail = 1;", overflow)
+        self.assertIn("mouse_queue[0] = e;", overflow)
+        self.assertIn("if (overflow) mouse_clear();", mouse)
+
     def test_native_target_info_replaces_custom_hover_layers(self):
         ios = self.read("ios/Sources/front_ios.m")
         mac = self.read("host/front_mac.m")

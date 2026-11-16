@@ -2885,11 +2885,52 @@ static int ui_touch_mode(void) { int dm_padmode_current(void), dm_padmode_busy(v
 #else
 #define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { } while (0)
 #endif
+// Physical keyboard native panel switching on the guest/game thread. Reuse
+// UISwitcher and its own tabs/close operation; no new settings UI or panel.
+static int pc_keyboard_panel_pending;
+static uint64_t pc_keyboard_panel_start;
+static void pc_keyboard_panel_pump(void) {
+    if(!pc_keyboard_panel_pending)return;
+    if(!dm_uiscreen_ingame()){pc_keyboard_panel_pending=0;return;}
+    module_t *m=main_module();uint64_t root=0;
+    if(!m)return;
+    memcpy(&root,m->base+0x2f05458,8);
+    uint64_t us=root?ui_find(root,"UISwitcher",0):0;
+    if(!us || !*(uint8_t *)(us+0x50)) {
+        if(dm_guest_frame()-pc_keyboard_panel_start>90)pc_keyboard_panel_pending=0;
+        return;
+    }
+    int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
+    if(n<=0 || n>16 || cur<0 || cur>=n)return;
+    int to=pc_keyboard_panel_pending-1;
+    pc_keyboard_panel_pending=0;
+    if(to>=n)return;
+    if(to==4) {
+        uint64_t tabs=ui_find(root,"UISwitcherTabs",0);
+        uint64_t merc=tabs?ui_find(tabs,"Image4",0):0;
+        if(!merc || !*(uint8_t *)(merc+0x50))return;
+    }
+    if(cur!=to)
+        ((void (*)(uint64_t,int,int))(m->base+0x405898))(us,to,to>cur);
+}
+int dm_ui_pc_skill_bind_request(uint32_t command_id) {
+    // Skill assignment is owned by the original controller binding UI.
+    // No unverified synthetic assignment or .ctl mutation in this input PR.
+    (void)command_id; return 0;
+}
+int dm_ui_pc_skill_tree_active(void) {
+    module_t *m=main_module();uint64_t root=0;
+    if(!m || !dm_uiscreen_ingame())return 0;
+    memcpy(&root,m->base+0x2f05458,8);
+    uint64_t sp=root?ui_find(root,"SkillsTreePanel",0):0;
+    return sp && *(uint8_t *)(sp+0x50);
+}
 void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线程）；每个出图帧做一次 | called where the game fetches the controller (hle_hid fill, main thread); done once per presented frame
     static uint64_t last_frame = UINT64_MAX; uint64_t fr = dm_guest_frame();
     if (fr == last_frame) return;
     (void)dm_ui_gen();   // 每帧核一次顶层面板（界面代号）：卸掉又在同一地址建出新面板的那种，隔帧才核会漏 | Check the top-level panels (UI generation) once per frame: a panel unloaded and rebuilt at the same address would be missed by checking every other frame
     ui_watch_pump();
+    pc_keyboard_panel_pump();
     { module_t *pm0 = main_module(); uint64_t pr = 0; if (pm0) memcpy(&pr, pm0->base + 0x2f05458, 8); if (pr) { ui_panel_heal(pr, fr); ui_panel_state_pump(pr); } }
     // 设置页盖在功能页上面：点顶部页签要先按返回键退出设置页，再切页签（否则底下的页在换、设置页一直盖着）。
     // 有未应用的改动时返回键会弹「是否应用」的确认框——0.6 秒后设置页还在，就不切了，留给玩家答确认框
@@ -3190,6 +3231,46 @@ static void fe_send(const char *cat, const char *act, const char *arg) {
     uint64_t vt = 0, fn = 0; memcpy(&vt, (void *)root, 8); memcpy(&fn, (void *)(vt + 0x28), 8);
     LOG("前端路径：发 %s:%s %s", cat, act, arg);
     ((void (*)(uint64_t, void *))fn)(root, msg);
+}
+// Keyboard shortcut commands map to the native Switch UISwitcher panels,
+// preserving the game’s close/open transaction rather than constructing
+// detached content pages.
+void dm_ui_pc_toggle_panel(unsigned command_id) {
+    if(!dm_uiscreen_ingame())return;
+    if(command_id==44) {
+        void dm_swapskill_manual_request(void);
+        dm_swapskill_manual_request(); return;
+    }
+    int target=-1;
+    switch(command_id) {
+    case 4: target=0; break; // quest
+    case 0: target=1; break; // character
+    case 1: target=2; break; // inventory
+    case 12:target=3; break; // skill tree
+    case 54:target=4; break; // hireling
+    default:return;
+    }
+    module_t *m=main_module();uint64_t root=0;
+    if(!m)return;
+    memcpy(&root,m->base+0x2f05458,8);
+    uint64_t us=root?ui_find(root,"UISwitcher",0):0;
+    if(us && *(uint8_t *)(us+0x50)) {
+        int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
+        if(n<=0 || n>16 || cur<0 || cur>=n || target>=n)return;
+        if(target==4) {
+            uint64_t tabs=ui_find(root,"UISwitcherTabs",0);
+            uint64_t merc=tabs?ui_find(tabs,"Image4",0):0;
+            if(!merc || !*(uint8_t *)(merc+0x50))return;
+        }
+        pc_keyboard_panel_pending=0;
+        if(cur==target) fe_send("PanelManager","ClosePanel","UISwitcher");
+        else ((void (*)(uint64_t,int,int))(m->base+0x405898))(us,target,target>cur);
+        return;
+    }
+    if(dm_uiscreen_panel() || pc_keyboard_panel_pending)return;
+    pc_keyboard_panel_pending=target+1;
+    pc_keyboard_panel_start=dm_guest_frame();
+    dm_ui_key_pulse(DM_BTN_PLUS,5);
 }
 // ---------- 一键重开（暂停菜单「一键重开」= 保存 + 登出 + 同难度登入；标准：不慢于正常进局，只出现开门读取画面，不露主菜单 / 选角页） ----------
 // 只走原版的路：替玩家发原版「保存并退出」(PausePanelMessage:ExitGame；退出时的存档提交都在 ToFrontEnd 之前完成) → 回到前端（ToFrontEnd）的下一帧

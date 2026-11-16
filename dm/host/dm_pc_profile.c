@@ -25,6 +25,10 @@ static dm_keyfile profile;
 enum { PROFILE_COMMANDS=57 };
 static unsigned char edited[PROFILE_COMMANDS][2];
 static uint16_t edited_vk[PROFILE_COMMANDS][2];
+// Value observed before the first host edit. A later *different* guest
+// binding wins; only a stale guest rewrite back to its old binding may be
+// rebased. This prevents the host from overwriting a newer native edit.
+static uint16_t edited_original_vk[PROFILE_COMMANDS][2];
 
 static int valid_name(const char *name) {
     if(!name || !name[0] || strlen(name)>48 ||
@@ -124,7 +128,8 @@ int dm_pc_profile_bind(uint32_t id,unsigned slot,uint16_t vk,
                     // transaction will roll back on its poisoned state.
                     if(rc==DM_KEYFILE_IO)dm_fs_save_poison(errno?errno:EIO);
                     (void)dm_keyfile_set(&profile,id,slot,old);
-                } else if(id<PROFILE_COMMANDS && slot<2) {
+                } else if(id<PROFILE_COMMANDS && slot<2 && old!=vk) {
+                    if(!edited[id][slot])edited_original_vk[id][slot]=old;
                     edited[id][slot]=1;
                     edited_vk[id][slot]=vk;
                 }
@@ -161,6 +166,13 @@ void dm_pc_profile_pre_commit_locked(const char *workdir) {
                     uint16_t was=0xffff;
                     rc=dm_keyfile_get(&latest,id,slot,&was);
                     if(rc==DM_KEYFILE_OK && was!=edited_vk[id][slot]) {
+                        if(was!=edited_original_vk[id][slot]) {
+                            // The guest has since chosen another value in
+                            // its native Controls editor. Its edit wins;
+                            // never repeatedly restore the older host value.
+                            edited[id][slot]=0;
+                            continue;
+                        }
                         rc=dm_keyfile_bind_checked(&latest,id,slot,
                             edited_vk[id][slot],NULL,NULL);
                         if(rc==DM_KEYFILE_OK)need_write=1;

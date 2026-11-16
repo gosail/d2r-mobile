@@ -448,26 +448,6 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMousePointerHint(
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv *env,jclass cls,jint op,jfloat x,jfloat y,jint arg) {
     (void)env; (void)cls; dm_android_mouse_event(op,x,y,arg);
 }
-JNIEXPORT jstring JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseHover(JNIEnv *env,jclass cls,jfloatArray out) {
-    (void)cls; dm_world_hover_view h={0}; dm_world_hover_read(&h);
-    if (out && (*env)->GetArrayLength(env,out)>=9) {
-        float v[9]={(float)h.kind,h.x,h.y,h.w,h.h,(float)h.hp,(float)h.hp_max,(float)h.tier,(float)h.immune_mask};
-        (*env)->SetFloatArrayRegion(env,out,0,9,v);
-    }
-    char label[sizeof(h.title)+sizeof(h.details)+4];
-    if(h.kind==3 && h.details[0]) snprintf(label,sizeof label,"%s\n%s",h.title,h.details);
-    else snprintf(label,sizeof label,"%s",h.title);
-    return (*env)->NewStringUTF(env,label);
-}
-JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseWorldRect(JNIEnv *env,jclass cls,jint w,jint h,jintArray out) {
-    (void)cls;
-    if (!out || (*env)->GetArrayLength(env,out)<4) return;
-    int rect[4]={0,0,w,h};
-    front_android_view_rect(w,h,rect);
-    if (front_android_full() && dm_uiscreen_ingame()) { rect[0]=0; rect[1]=0; rect[2]=w; rect[3]=h; }
-    (*env)->SetIntArrayRegion(env,out,0,4,rect);
-}
-
 // 实体手柄（Java PadInput.java）→ 宿主手柄状态。与触屏的虚拟手柄分开存，游戏取手柄时按键取或、摇杆触屏优先（hle_hid.c 的 fill）。
 // Physical controller (Java PadInput.java) -> host controller state. Kept apart from the touch on-screen stick; when the game reads the
 // controller the buttons are ORed and the touch stick wins (fill in hle_hid.c).

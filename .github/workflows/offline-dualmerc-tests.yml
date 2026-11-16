@@ -1,0 +1,27 @@
+name: Offline dual-merc safe policy tests
+
+on:
+  push:
+    branches:
+      - "feat/offline-dual-merc-probe-*"
+  pull_request:
+    paths:
+      - "dm/host/dm_dualmerc_policy.h"
+      - "dm/host/tests/test_dualmerc_policy.c"
+      - "dm/verify/hire_handler.py"
+      - "dm/verify/test_hire_handler.py"
+      - ".github/workflows/offline-dualmerc-tests.yml"
+
+jobs:
+  policy-and-readonly-analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify per-act roster policy
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic dm/host/tests/test_dualmerc_policy.c -o /tmp/dm_dualmerc_policy_test
+          /tmp/dm_dualmerc_policy_test
+      - name: Verify read-only NSO handler inspection
+        run: python3 -m unittest discover -s dm/verify -p 'test_hire_handler.py' -v

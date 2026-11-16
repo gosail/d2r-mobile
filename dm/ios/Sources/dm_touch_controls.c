@@ -505,7 +505,8 @@ void dm_tc_begin_at(dm_tc_state *s, int slot, float x, float y, double now_s) {
     }
     *f = (dm_tc_finger){.active=1, .target=enabled ? hit : DM_TC_NONE, .x=x, .y=y,
                            .aim_origin_x=x, .aim_origin_y=y,
-                           .start_time_s=now_s};
+                           .start_time_s=now_s,
+                           .mouse_item=!!(s->navigation_mode && s->mouse_item_mode)};
     /* 禁用圆仍阻止落入左摇杆区，防止隐藏回城触点变成移动。 | A disabled circle still blocks falling through into the left stick area, preventing a hidden town-portal touch point from turning into movement. */
     if (s->navigation_mode && hit == DM_TC_NONE && s->pointer_slot == DM_TC_NONE) {
         s->pointer_slot = slot;
@@ -603,7 +604,7 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
         double elapsed = now_s - done.start_time_s;
         /* 商人货架上的货长按 = 原版的「按住 Y 大量购买」（提示条原文；宿主读数：约 1.3 秒）：背包里有没满的卷轴书 / 同类叠时买满，没有就和买 1 份一样；买多少、钱够不够都由游戏定，这里只替玩家按键 | Long press on goods on the vendor shelf = the original game's 「按住 Y 大量购买」(Hold Y to buy in bulk) (button legend text; host reading: about 1.3 seconds): when the inventory has a non-full scroll tome / stack of the same kind it buys until full, otherwise it is the same as buying 1; how many to buy and whether there is enough gold are decided by the game, and here we only press the key for the player */
         if (done.pointer_long && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && s->pointer_shop) pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 1.3);
-        else if (done.pointer_long && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && !s->pointer_lock) ++s->long_press_seq;   /* 长按在松手时才算（按住没动）：按住到点就算的话，「按住停一下再拖」的药水会先被放进腰带（mini 药拖腰带脚本里多出 2 次） | Long press counts only at release (held without moving): if it counted as soon as the hold time was reached, a potion that is "held for a moment and then dragged" would first be put into the belt (2 extra occurrences in the potion-drag-to-belt script on the second Mac) */
+        else if (done.pointer_long && !done.mouse_item && !done.pointer_dragged && !done.shop_drag && s->pointer_item == 1 && !s->pointer_lock) ++s->long_press_seq;   /* 长按在松手时才算（按住没动）：按住到点就算的话，「按住停一下再拖」的药水会先被放进腰带（mini 药拖腰带脚本里多出 2 次） | Long press counts only at release (held without moving): if it counted as soon as the hold time was reached, a potion that is "held for a moment and then dragged" would first be put into the belt (2 extra occurrences in the potion-drag-to-belt script on the second Mac) */
         if (done.locked_drag) { }   /* 单件槽占用时拖别的物品：不发任何键 | Dragging another item while the single-item slot is occupied: send no key */
         else if (done.shop_drag) { ++s->shop_drop_seq; }   /* 买不买由前端按落点定；这里不发任何键 | Whether to buy is decided by the front end from the drop point; no key is sent here */
         else if (done.pointer_dragged) {
@@ -614,7 +615,7 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
             else if (s->pointer_release_item == 8) {   /* 松在单件任务槽上：按原版走法重做——先放回原格，再对它按住 Y（原版的「放进槽」）。只把物品拿在手上停在槽上方不算进槽：槽会显示它，但点确认不成交（本机 实测没有成交包） | Released on the single-item quest slot: redo it the original game's way -- first put it back in its original cell, then hold Y on it (the original game's "put into slot"). Merely holding the item and hovering over the slot does not count as entering the slot: the slot shows it, but tapping confirm does not complete the transaction (measured on the local machine: no transaction packet) */
                 pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2); pointer_pulse_btn(s, done.aim_origin_x, done.aim_origin_y, 2, DM_BTN_Y, 1.3); }
             else pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);                                                          /* 面板里的空白处：放回原处 | Blank area inside the panel: put it back where it was */
-        } else if (!done.ui_drag && !done.pointer_long && elapsed < DM_TC_POINTER_TAP_S && distance <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {   /* 拖出去又拖回原处不算点按 | Dragging out and back to the original spot does not count as a tap */
+        } else if (!done.ui_drag && (done.mouse_item || !done.pointer_long) && (done.mouse_item || elapsed < DM_TC_POINTER_TAP_S) && distance <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {   /* 拖出去又拖回原处不算点按 | Dragging out and back to the original spot does not count as a tap */
             /* 单件任务槽面板开着时，手上那件就是「槽里那件」：点背包格仍是放回去，点别处按没拿着处理——确认 / 关闭按钮要能点，点面板外 = 关面板（不是把槽里那件丢到地上） | While the single-item quest slot panel is open, the held item is "the one in the slot": tapping an inventory cell still puts it back, tapping elsewhere is handled as if nothing were held -- the confirm / close buttons must be tappable, and tapping outside the panel = close the panel (not drop the slot's item on the ground) */
             if (s->pointer_lock) { s->pointer_x = done.aim_origin_x; s->pointer_y = done.aim_origin_y; }   /* 单件槽占用时点别的物品：只移光标出说明，单击 / 双击都不动它 | Tapping another item while the single-item slot is occupied: only move the cursor to show the tooltip; neither single nor double tap moves it */
             else if (s->holding && s->pointer_item != 0 && !(atomic_load(&g_imbue_open) && s->pointer_item != 1)) { if (s->pointer_item == 1) pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 2);
@@ -622,6 +623,17 @@ void dm_tc_end_at(dm_tc_state *s, int slot, double now_s) {
                               点按钮（类 0）不在这里吞掉、照常发鼠标点击：原先连合成钮也吞，手上有东西时点合成什么都不发；合成钮由宿主先收手上那件再按，见 dm_cursor.c
                               Still holding an item (the last drop did not succeed): tap the item area = put down; tap outside the panel / the black grid on either side = drop (Y); tapping tabs or elsewhere does nothing.
                                                             Tapping a button (class 0) is not swallowed here and sends a mouse click as usual: previously even the transmute button was swallowed, and tapping transmute with something in hand sent nothing; for the transmute button the host first stows the held item and then presses, see dm_cursor.c */
+            else if (done.mouse_item && s->pointer_item == 1 && !s->pointer_shop &&
+                     !s->pointer_stack && !s->pointer_lock &&
+                     !atomic_load(&g_imbue_open)) {
+                /* Physical mouse: left click directly picks the item up via
+                   the game's A pick-up transaction. A finger's single tap
+                   still only displays the tooltip; its double tap behaviour
+                   is unchanged. The existing holding branch above handles
+                   left-click placement, and drag uses the same pulse path. */
+                pointer_pulse_start(s, done.aim_origin_x, done.aim_origin_y, 1);
+                s->last_tap_s = -1e9;
+            }
             else if (s->pointer_item == 2) { ++s->tab_tap_seq; }
             else if (s->pointer_item == 6 || s->pointer_item == 11) { }   /* 压着被上层面板盖住的按钮：不点、不发键 | Pressing on a button covered by an upper panel: no click, no key */
             else if (s->pointer_item == 3) { if (!atomic_load(&g_dead_modal)) { s->close_left = 3; s->close_next_s = now_s; atomic_store(&g_close_stop, 0); } }   /* 面板外：不发鼠标点击（会落到游戏世界 = 点地走路），按 B 关面板——子菜单里一下 B 只退一级，所以按到面板关掉为止（至多 3 下，见 dm_tc_tick）；死亡弹窗开着时不动 | Outside the panel: do not send a mouse click (it would land in the game world = tap ground to walk); press B to close the panel -- in a submenu one B only goes back one level, so press until the panel is closed (at most 3 presses, see dm_tc_tick); do nothing while the death popup is open */
@@ -721,7 +733,7 @@ void dm_tc_tick(dm_tc_state *s, double now_s) {
     }
     if (s->pointer_slot < 0 || s->pointer_slot >= DM_TC_MAX_TOUCH) return;
     dm_tc_finger *f = &s->finger[s->pointer_slot];
-    if (!f->active || f->pointer_dragged || f->pointer_long) return;
+    if (!f->active || f->mouse_item || f->pointer_dragged || f->pointer_long) return;
     if (s->mouse_click_mode && s->pointer_item != 1) return;
     if (now_s - f->start_time_s >= DM_TC_POINTER_HOLD_S &&
         hypotf(f->x-f->aim_origin_x, f->y-f->aim_origin_y) <= DM_TC_POINTER_MOVE_PT * scale_for(&s->layout)) {

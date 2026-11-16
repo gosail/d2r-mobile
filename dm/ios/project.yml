@@ -14,7 +14,7 @@ targets:
       - name: 从游戏文件生成资源
         basedOnDependencyAnalysis: false
         script: |
-          [ -f "$SRCROOT/Gen/assets/NativeHUD/v4/hud.json" ] && [ -f "$SRCROOT/Sources/dm_touch_native_art.c" ] || python3 "$SRCROOT/tools/gen_assets.py"
+          [ -f "$SRCROOT/Gen/assets/NativeHUD/v4/hud.json" ] && [ -f "$SRCROOT/Sources/dm_touch_native_art.c" ] && [ -f "$SRCROOT/../host/dm_hover_names.h" ] || python3 "$SRCROOT/tools/gen_assets.py"
     sources:
       - Sources
       - Assets.xcassets               # App 图标（1024²、不透明；TestFlight 上传必需） | App icon (1024², opaque; required for TestFlight upload)
@@ -66,6 +66,7 @@ targets:
           - UIInterfaceOrientationLandscapeRight
           - UIInterfaceOrientationLandscapeLeft
         UIRequiresFullScreen: true
+        UIApplicationSupportsIndirectInputEvents: true   # iPadOS pointer clicks must be typed IndirectPointer, not fingers
         UIStatusBarHidden: true
         UIViewControllerBasedStatusBarAppearance: false
         LSApplicationCategoryType: public.app-category.role-playing-games   # 声明为游戏：iOS 游戏模式（压后台活动、保持续性能）只对游戏类目的 App 自动开（此前没声明类目） | Declare as a game: iOS Game Mode (suppresses background activity, preserves sustained performance) turns on automatically only for Apps in a game category (no category was declared before)

@@ -12,16 +12,32 @@ from druid_summon_balance import (
 
 
 def fixture(bom=False):
-    sk_header = ["skill", "*Id", "petmax", "Param2", "Param3", *COLD_FIELDS, "sentinel"]
+    sk_header = [
+        "skill", "*Id", "petmax", "Param2", "Param3", *COLD_FIELDS,
+        "srvstfunc", "srvdofunc", "cltstfunc", "cltdofunc",
+        "calc1", "calc2", "calc5", "calc6", "calc7",
+        "aurafilter", "range", "anim", "seqtrans",
+        "ResultFlags", "HitShift", "SrcDam", "sentinel",
+    ]
     cold = ["2", "1", "3", "4", "5", "8", "6", "1", "3", "4", "5", "8"]
-    def skill(name, ident, petmax="", p2="", p3="", values=None, sentinel="unchanged"):
-        return [name, ident, petmax, p2, p3, *(values or [""] * 12), sentinel]
+    def skill(name, ident, **fields):
+        row = {key: "" for key in sk_header}
+        row.update({"skill": name, "*Id": ident, "sentinel": "unchanged"})
+        row.update(fields)
+        return [row[key] for key in sk_header]
     sk_rows = [
         sk_header,
-        skill("Raven", "221", '"min(lvl,par2)"', "5", sentinel="raven"),
-        skill("Summon Spirit Wolf", "227", '"min(lvl,par3)"', p3="5", values=cold),
-        skill("Summon Fenris", "237", '"min(lvl,par3)"', p3="3"),
-        skill("Summon Grizzly", "247", "1"),
+        skill("Raven", "221", petmax='"min(lvl,par2)"', Param2="5", sentinel="raven"),
+        skill("Summon Spirit Wolf", "227", petmax='"min(lvl,par3)"',
+              Param3="5", **dict(zip(COLD_FIELDS, cold))),
+        skill("Summon Fenris", "237", petmax='"min(lvl,par3)"', Param3="3"),
+        skill("Summon Grizzly", "247", petmax="1"),
+        skill("BearSmite", "326", srvstfunc="32", srvdofunc="2", calc1="ln34",
+              calc2='"max(250,ln12)"', range="h2h", anim="S1",
+              seqtrans="S1", ResultFlags="8", HitShift="8", SrcDam="128"),
+        skill("Goatman Cleave", "419", srvstfunc="68", srvdofunc="164",
+              calc5="11", calc6="30", aurafilter="41347",
+              cltstfunc="59", cltdofunc="103"),
         skill("Teleport", "54", sentinel="do-not-touch"),
     ]
     mo_header = ["Id", "AI", *AI_DELAY_FIELDS, "sentinel"]
@@ -61,8 +77,22 @@ class TestOfflineDruidTablePatch(unittest.TestCase):
                 self.assertEqual(pet[field], "10")
         self.assertEqual(get_row(result[SKILLS_PATH], "Teleport")["sentinel"], "do-not-touch")
         self.assertEqual(get_row(result[MONSTATS_PATH], "zombie1")["aidel"], "15")
-        self.assertEqual(report["bear_cleave"],
-                         "not_implemented_requires_verified_native_combat_hook")
+        bear = get_row(result[SKILLS_PATH], "BearSmite")
+        self.assertEqual(bear["srvstfunc"], "68")
+        self.assertEqual(bear["srvdofunc"], "164")
+        self.assertEqual(bear["calc5"], "10")
+        self.assertEqual(bear["calc6"], "30")
+        self.assertEqual(bear["calc2"], "0")
+        self.assertEqual(bear["anim"], "S1")  # Do not steal the goatman's animation
+        self.assertEqual(bear["seqtrans"], "S1")
+        self.assertEqual(bear["SrcDam"], "128")
+        donor = get_row(result[SKILLS_PATH], "Goatman Cleave")
+        self.assertEqual(donor["calc5"], "11")  # Donor untouched
+        self.assertEqual(donor["calc6"], "30")
+        self.assertEqual(report["bear_cleave"]["arc_degrees"], 120)
+        self.assertEqual(report["bear_cleave"]["arc_slices"] * 360 //
+                         report["bear_cleave"]["circle_slices"], 120)
+        self.assertIn("pending_in_game", report["bear_cleave"]["verified"])
         self.assertEqual(report["raven_attack_animation"], "unchanged_ai_delay_only")
         self.assertTrue(result[SKILLS_PATH].endswith(b"\r\n"))
         self.assertNotIn(b"\n", result[SKILLS_PATH].replace(b"\r\n", b""))
@@ -86,6 +116,17 @@ class TestOfflineDruidTablePatch(unittest.TestCase):
         with self.assertRaises(IncompatibleGameData):
             patch_tables(s.replace(b'Raven\t221\t"min(lvl,par2)"\t5',
                                    b'Raven\t221\t"max(lvl,par2)"\t5'), m)
+
+    def test_refuse_unrecognized_cleave_source(self):
+        s, m = fixture()
+        # If the owner has a different build where cleave handlers changed,
+        # refuse the overlay rather than silently change a random skill.
+        bad = s.replace(b"Goatman Cleave\t419", b"Goatman Cleave\t999")
+        with self.assertRaises(IncompatibleGameData):
+            patch_tables(bad, m)
+        bad = s.replace(b"\t68\t164\t59\t103\t", b"\t68\t1\t59\t103\t")
+        with self.assertRaises(IncompatibleGameData):
+            patch_tables(bad, m)
 
     def test_refuse_wrong_monster_ai(self):
         s, m = fixture()

@@ -6,7 +6,7 @@ on:
       - "feat/offline-dual-merc-probe-*"
   pull_request:
     paths:
-      - "dm/host/dm_dualmerc_policy.h"
+      - "dm/host/dm_dualmerc_policy.h"\n      - "dm/host/dm_merc_trace.h"\n      - "dm/host/tests/test_merc_trace.c"
       - "dm/host/tests/test_dualmerc_policy.c"
       - "dm/verify/hire_handler.py"\n      - "dm/verify/hire_handler_guest.py"\n      - "dm/verify/test_hire_handler_guest.py"
       - "dm/verify/test_hire_handler.py"
@@ -23,6 +23,8 @@ jobs:
         run: |
           cc -std=c11 -Wall -Wextra -Werror -pedantic dm/host/tests/test_dualmerc_policy.c -o /tmp/dm_dualmerc_policy_test
           /tmp/dm_dualmerc_policy_test
+          cc -std=c11 -Wall -Wextra -Werror -pedantic dm/host/tests/test_merc_trace.c -o /tmp/dm_merc_trace_test
+          /tmp/dm_merc_trace_test
       - name: Verify read-only NSO handler inspection
         run: |
           python3 -m unittest discover -s dm/verify -p 'test_hire_handler.py' -v

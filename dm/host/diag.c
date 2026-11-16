@@ -9,6 +9,7 @@
 #include "dm_elysium.h"
 #include "dm_bossrush.h"
 #include "dm_dualmerc_policy.h"
+#include "dm_merc_trace.h"
 #include <TargetConditionals.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -805,7 +806,10 @@ static uint32_t local_player_id(void) { uint32_t slot = 8, lid = 0xffffffffu; mo
  * 25-tick observation interval might otherwise miss. Read only. */
 static _Atomic uint64_t g_dm_merc_probe_event_G;
 static _Atomic uint32_t g_dm_merc_probe_event_tick;
-typedef struct { uint32_t id, cls, mode, flags; } dm_merc_probe_unit;
+typedef struct {
+    uint32_t id, cls, mode, flags;
+    dm_merc_trace_gear gear; /* server only, client inventory is not authoritative */
+} dm_merc_probe_unit;
 typedef struct {
     uint32_t server_n, client_n;
     dm_merc_probe_unit server[8], client[8];
@@ -817,6 +821,43 @@ static void dm_merc_probe_sort(dm_merc_probe_unit *a, unsigned n) {
         while (j && a[j-1].id > v.id) { a[j] = a[j-1]; j--; }
         a[j] = v;
     }
+}
+
+/* The common unit+0x90 inventory pointer and item chain have been verified
+ * on player units in this port. Mercenary inventory layout itself is a test
+ * hypothesis: a valid 0x01020304 signature is mandatory, and an absent or
+ * unreadable chain must NEVER be interpreted as "equipment destroyed".
+ * This function reads only and leaves the runtime inventory intact. */
+static void dm_merc_probe_inventory(uint64_t unit, dm_merc_trace_gear *gear) {
+    uint64_t inv = 0, it = 0;
+    uint32_t signature = 0;
+    if (!unit || !tk_rd(unit + 0x90, &inv, sizeof inv)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    if (!inv) {
+        gear->status = DM_MERC_GEAR_ABSENT;
+        return;
+    }
+    if (!tk_rd(inv, &signature, sizeof signature) || signature != 0x01020304 ||
+        !tk_rd(inv + 0x10, &it, sizeof it)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    gear->status = DM_MERC_GEAR_OK;
+    for (unsigned n = 0; it && n < 64; ++n) {
+        uint64_t data = 0, next = 0;
+        uint32_t item_id = 0;
+        if (!tk_rd(it + 8, &item_id, sizeof item_id) ||
+            !tk_rd(it + 0x10, &data, sizeof data) || !data ||
+            !tk_rd(data + 0xb0, &next, sizeof next)) {
+            gear->status = DM_MERC_GEAR_INVALID;
+            return;
+        }
+        dm_merc_trace_add(gear, item_id);
+        it = next;
+    }
+    if (it) gear->status = DM_MERC_GEAR_TRUNCATED;
 }
 
 static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint64_t client_base) {
@@ -833,6 +874,7 @@ static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint6
         if (uid == id) {
             tk_rd(u + 4, &r.cls, 4);
             tk_rd(u + 0xc, &r.mode, 4);
+            if (!client_base) dm_merc_probe_inventory(u, &r.gear);
             break;
         }
         if (!tk_rd(u + 0x158, &u, 8)) break;
@@ -891,7 +933,7 @@ static void dm_dual_merc_native_handler_probe(void) {
 static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     static int enabled = -1, have_last;
     static uint64_t last_game;
-    static uint32_t last_print;
+    static uint32_t last_owner, last_print;
     static dm_merc_probe_snapshot last;
     if (enabled < 0) {
         const char *e = getenv("DM_DUAL_MERC_PROBE");
@@ -908,7 +950,11 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     int watch = armed_G == G && (uint32_t)(tick - armed_tick) <= 100;
     if (!force && tick % 25 && !watch) return;
     if (!tk_rd(player + 8, &owner, 4)) return;
-    if (last_game != G) { last_game = G; have_last = 0; }
+    if (last_game != G || (have_last && tick < last_print) ||
+        (have_last && owner != last_owner)) {
+        last_game = G; have_last = 0;
+    }
+    last_owner = owner;
 
     dm_merc_probe_snapshot now = {0};
     // Server: [[player+0x10]+0x98] is the pet-list header, the first
@@ -959,11 +1005,13 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     dm_merc_probe_sort(now.client, nc);
 
     if (force || !have_last || memcmp(&now, &last, sizeof now) || tick - last_print >= 250) {
-        char srv[256] = "", cli[256] = "", part[64];
+        char srv[768] = "", cli[384] = "", part[160];
         for (unsigned i = 0; i < ns; i++) {
-            snprintf(part, sizeof part, "%s%u:%u:%u:a%u", i ? "," : "",
+            snprintf(part, sizeof part, "%s%u:%u:%u:a%u:inv%u/%u:h%08x", i ? "," : "",
                      now.server[i].id, now.server[i].cls, now.server[i].mode,
-                     dm_dualmerc_act_for_class(now.server[i].cls));
+                     dm_dualmerc_act_for_class(now.server[i].cls),
+                     now.server[i].gear.count, now.server[i].gear.status,
+                     now.server[i].gear.fingerprint);
             strlcat(srv, part, sizeof srv);
         }
         for (unsigned i = 0; i < nc; i++) {
@@ -984,6 +1032,22 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
             if (act && act == dm_dualmerc_act_for_class(now.server[j].cls))
                 LOG("DM_DUAL_MERC_PROBE：异常，同幕 %u 佣兵 id %u 与 id %u 同时存在", act,
                     now.server[j].id, now.server[i].id);
+        }
+        /* Losing a pet list entry is not proof that inventory items were lost;
+         * this line preserves the last verified inventory fingerprint so a
+         * human can correlate it with a safe throwaway-character test. */
+        if (have_last) {
+            unsigned old_n = last.server_n < 8 ? last.server_n : 8;
+            for (unsigned i = 0; i < old_n; ++i) {
+                int still_listed = 0;
+                for (unsigned j = 0; j < ns; ++j)
+                    if (last.server[i].id == now.server[j].id) still_listed = 1;
+                if (!still_listed)
+                    LOG("DM_DUAL_MERC_PROBE：拍 %u 服务端宠物表移除 id %u；先前装备快照 inv%u/%u:h%08x（不能据此判断装备已删除）",
+                        tick, last.server[i].id,
+                        last.server[i].gear.count, last.server[i].gear.status,
+                        last.server[i].gear.fingerprint);
+            }
         }
         last = now; have_last = 1; last_print = tick;
     }

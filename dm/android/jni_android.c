@@ -14,6 +14,7 @@
 //   <internal dir>/save, temp        saves and temporary files
 #include "../host/dm.h"
 #include "../host/dm_input.h"
+#include "../host/dm_kbmap.h"
 #include "../host/front.h"
 #include "../host/hle.h"
 #include <android/log.h>
@@ -24,6 +25,9 @@
 #include "vulkan_present.h"
 #include "touch_android.h"
 #include "front_android.h"
+#include "../host/dm_world.h"
+#include "../host/dm_cursor.h"
+#include "../host/dm_uiscreen.h"
 #include "lifecycle_dispatch.h"
 #include "overlay_validate.h"
 #include "dm_overlay_contract.h"
@@ -335,6 +339,9 @@ JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeStart(JNIEnv *env
     // times a frame, briefly, on locks its job workers hold.
     setenv("DM_HLE_SPIN_US", "30", 0);
     if (!getenv("DM_LANG") && *lg) setenv("DM_LANG", lg, 0);   // 首次安装的语言按系统首选（同 iOS CFLocaleCopyPreferredLanguages，见 dm_i18n.c） | first-install language follows the system preference (as iOS CFLocaleCopyPreferredLanguages, see dm_i18n.c)
+    // The user-generated NPC string-key table stays in the imported game bundle, not in the APK.
+    { char hover_path[1300]; snprintf(hover_path,sizeof hover_path,"%s/out/hover_names.tsv",g_runtime);
+      setenv("DM_HOVER_NAMES",hover_path,1); }
     if (chdir(g_files)) LOG("【红】chdir %s 失败 errno %d", g_files, errno);
     (*env)->ReleaseStringUTFChars(env, files, f); (*env)->ReleaseStringUTFChars(env, ext, x); (*env)->ReleaseStringUTFChars(env, src, s); (*env)->ReleaseStringUTFChars(env, lang, lg);
     if (n <= 0) return -2;
@@ -435,9 +442,24 @@ JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeTouch(JNIEnv *env
     dm_touch_set(t, n);
 }
 
+JNIEXPORT jint JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMousePointerHint(JNIEnv *env,jclass cls) {
+    (void)env; (void)cls; return dm_mouse_pointer_hint();
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeMouseEvent(JNIEnv *env,jclass cls,jint op,jfloat x,jfloat y,jint arg) {
+    (void)env; (void)cls; dm_android_mouse_event(op,x,y,arg);
+}
 // 实体手柄（Java PadInput.java）→ 宿主手柄状态。与触屏的虚拟手柄分开存，游戏取手柄时按键取或、摇杆触屏优先（hle_hid.c 的 fill）。
 // Physical controller (Java PadInput.java) -> host controller state. Kept apart from the touch on-screen stick; when the game reads the
 // controller the buttons are ORed and the touch stick wins (fill in hle_hid.c).
+// Android physical keyboard, in the same HID usage space as iPad UIKey.
+// Real gamepads remain on nativePad; key releases are paired on focus loss.
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardEvent(JNIEnv *env,jclass cls,jint usage,jboolean down) {
+    (void)env; (void)cls;
+    if(usage>=0 && usage<256)dm_kbmap_key_event((unsigned)usage,down!=0);
+}
+JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativeKeyboardReset(JNIEnv *env,jclass cls) {
+    (void)env; (void)cls; dm_kbmap_reset();
+}
 JNIEXPORT void JNICALL Java_com_xiaoboluo_d2r_DmActivity_nativePad(JNIEnv *env, jclass cls, jlong buttons, jint lx, jint ly, jint rx, jint ry) {
     (void)env; (void)cls;
     // 按下沿记一条（最多 30 条），用来确认手柄通着、键位对 | Log each press edge (at most 30) to show the controller works and the bits are right

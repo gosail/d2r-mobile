@@ -14,6 +14,7 @@
 #include <TargetConditionals.h>
 #include <mach/mach.h>
 #include <math.h>
+#include "dm_world.h"
 
 enum { UNIT_MONSTER = 1, TF_SUPERUNIQUE = 0x02, TF_CHAMPION = 0x04, TF_UNIQUE = 0x08 };
 // 档位加分须远大于原版分数的量级：真机读数见 DM_TARGET_LOG（分数是 0 附近的小浮点）
@@ -63,6 +64,15 @@ static void target_rank_obs(const uint64_t *regs) {
     int rank = regs[1] ? unit_rank(regs[1], &cls, &flags) : -1;
     float before = *s0;
     if (rank > 0 && isfinite(before)) *s0 = before + RANK_BONUS[rank];
+    // Prefer the real pointer's hovered hostile among *eligible* native
+    // controller candidates. The original range/LOS/team checks still run,
+    // and the game's own MonsterHealth/SetInfo draws name, health, affixes
+    // and resistances. We never fabricate a second floating overlay.
+    uint32_t hover=dm_world_hover_monster_id(), candidate_id=0;
+    if (hover && regs[1] && rank>=0 &&
+        read_live(regs[1]+8,&candidate_id,sizeof candidate_id) &&
+        candidate_id==hover && isfinite(*s0))
+        *s0 += 5000.f;
     if (g_log && g_nlog < 4096) {
         g_nlog++;
         fprintf(g_log, "{\"unit\":\"%#llx\",\"kind\":%u,\"class\":%u,\"flags\":%u,\"rank\":%d,\"score\":%.6g,\"adjusted\":%.6g}\n",

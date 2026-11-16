@@ -1,5 +1,6 @@
 #include "dm_elysium.h"
 #include "dm_cursor.h"
+#include "dm_external_mouse.h"
 #include "dm_custom.h"
 #include "dm.h"
 #include "dm_uiscreen.h"
@@ -173,19 +174,39 @@ static _Atomic uint64_t g_exact_xy = UINT64_MAX;   // 最近一次命中落在�
 static _Atomic int g_sn_new;   // 新一次按下（dm_ui_item_query 置）：上一次的吸附 / 停靠作废。只按「请求点没变」续用会跨触摸残留——同一落点再按，光标还在停靠点，长按判成空格去整理背包 | A new press (set by dm_ui_item_query): the previous snap / parking is invalidated. Reusing it only on 'the request point has not changed' would leave residue across touches -- pressing the same landing point again, the cursor is still at the parking point, and the long-press is classified as an empty cell and sorts the inventory
 static int sn_on; static _Atomic uint64_t g_snap;   // 就近吸附中；g_snap = 吸附记录（请求点 x | y<<16 | 落点 x<<32 | y<<48），长按据此分「贴着物品边」与「落在空格中间」 | Nearest snap in effect; g_snap = snap record (request point x | y<<16 | landing point x<<32 | y<<48); long-press uses it to tell 'next to an item's edge' from 'in the middle of an empty cell'
 static _Atomic int g_free_pub;
+static _Atomic int g_mouse_item_hover;
+// Device-native cursor hint: 0 ordinary, 1 hovered inventory item, 2 held item.
+int dm_mouse_pointer_hint(void) {
+    if (dm_hud_held()) return 2;
+    return atomic_load(&g_free_pub) ? atomic_load(&g_mouse_item_hover) : 0;
+}
 // 真鼠标悬停复用原版焦点重算；不能套触屏的「胖手指」吸附，否则空格旁也会冒出邻格说明。
 // Real mouse hover reuses the game's focus refresh, bypassing touch's fat-finger snap so empty cells do not show a neighbor's tooltip.
 int dm_ui_mouse_hover_now(float nx, float ny) {
     module_t *m = main_module();
     uint64_t waiting = atomic_load(&g_a_wait);
-    if (!m || dm_hud_held() || dm_cursor_pending() || (waiting && now_ns() - waiting < 300000000ull) || !free_cursor_page(m)) return 0;
+    if (!m || dm_cursor_pending() || (waiting && now_ns() - waiting < 300000000ull) || !free_cursor_page(m)) {
+        atomic_store(&g_mouse_item_hover,0);
+        return 0;
+    }
     int w = *(int32_t *)(m->base + 0x211da38), h = *(int32_t *)(m->base + 0x211da3c);
     if (w <= 0 || h <= 0) return 0;
     int x, y;
     if (!(nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1)) { x = w * 2 / 100; y = h / 2; }
     else { x = (int)(nx * w); y = (int)(ny * h); if (x >= w) x = w - 1; if (y >= h) y = h - 1; }
     { int dm_vault_ui_blocks(int, int); if ((dm_ui_panel_state() & DM_PS_VAULT) && dm_vault_ui_blocks(x, y)) return 0; }
+    if (dm_hud_held()) {
+        // The native cursor (and held item sprite) follows the mouse between
+        // clicks. Hover never issues a synthetic drop or a second A press.
+        atomic_store(&g_mouse_item_hover,0);
+        dm_ui_hover_now(x,y);
+        return 0;
+    }
     int ok = dm_ui_hover_now(x, y);
+    dm_cursor_item_info hover_item={0};
+    int item=ok && nx>=0 && nx<=1 && ny>=0 && ny<=1 &&
+             dm_cursor_item(&hover_item) && hover_item.container!=DM_ITEM_AT_SHOP;
+    atomic_store(&g_mouse_item_hover,item?1:0);
     if (getenv("DM_TEST_HOVER_LOG")) { dm_cursor_item_info ci = {0}; int found = dm_cursor_item(&ci); LOG("鼠标悬停刷新：(%d,%d) → %d 物品 %s id %u", x, y, ok, found ? ci.code : "-", ci.id); }
     return ok;
 }
@@ -289,13 +310,20 @@ static _Atomic uint64_t g_set_back_at;
 // touch mode is handled by the guard as usual.
 static _Atomic int g_hand_idle; static uint64_t g_pick_t; static int g_pick_id;
 void dm_ui_hand_idle(int idle) { atomic_store(&g_hand_idle, idle != 0); }
+static int physical_mouse_owns_item(void) {
+#if TARGET_OS_OSX
+    int dm_touch_host_is_live(void);
+    if (dm_touch_host_is_live()) return 1;
+#endif
+    return dm_external_mouse_active();
+}
 static void hand_guard(module_t *m) {
     dm_hud_info hi; dm_hud_get(&hi); int h = hi.valid ? hi.holding : 0; uint64_t now = now_ns();
     static int last, failed, off = -1; static uint64_t since; if (off < 0) { const char *e = getenv("DM_TEST_HAND_GUARD"); off = e && !strcmp(e, "0"); }   // 测试开关 DM_TEST_HAND_GUARD=0：关掉守门（单测合成钮兜底用） | Test switch DM_TEST_HAND_GUARD=0: turn the guard off (used by the unit test for the transmute button fallback)
     if (h && h != last) g_pick_id = now - g_pick_t < 1500000000ull ? h : 0;   // 手上换成这件：是不是刚空手按 A 拿起的 | The hand now holds this item: was it just picked up by pressing A with an empty hand
     last = h; if (!h) failed = 0;
     int dm_padmode_current(void);
-    if (off || !h || h == failed || !atomic_load(&g_hand_idle) || dm_padmode_current() || g_rt.active || g_naq || dm_held_pending() || dm_ui_targeting() || (dm_ui_panel_state() & DM_PS_IMBUE)) { since = 0; return; }
+    if (off || !h || h == failed || physical_mouse_owns_item() || !atomic_load(&g_hand_idle) || dm_padmode_current() || g_rt.active || g_naq || dm_held_pending() || dm_ui_targeting() || (dm_ui_panel_state() & DM_PS_IMBUE)) { since = 0; return; }
     if (!since) { since = now; return; }
     if (now - since < 600000000ull) return;
     since = 0; failed = h;   // 这一轮收完还在手上（换了别的物品会重新算）就不再收同一件 | If it is still in hand after this round of wrap-up (a change to another item recomputes), do not wrap up the same item again
@@ -1535,7 +1563,13 @@ static void ui_target_pump(module_t *m, uint64_t fr) {   // 主线程，每帧 |
     else { dm_item_target_cancel(); LOG("界面鉴定：点在空格上，退出鉴定态"); }
 }
 static _Atomic int g_use_req;
+static _Atomic uint64_t g_mouse_right_use_xy;
 void dm_ui_use_item(void) { atomic_store(&g_use_req, 1); }
+void dm_ui_mouse_right_use(float nx, float ny) {
+    if (!(nx>=0 && nx<=1 && ny>=0 && ny<=1)) return;
+    uint64_t x=(uint32_t)(nx*65535.f+.5f),y=(uint32_t)(ny*65535.f+.5f);
+    atomic_store(&g_mouse_right_use_xy,(1ull<<63)|(x<<16)|y);
+}
 // 手指下有没有物品（长按 / 双击共用）：光标位置的物品，减去「手指粗」吸附拉过去的（往吸附方向只探四分之一格还够不着的算空格）
 // Whether there is an item under the finger (shared by long press / double tap): the item at the cursor position, minus those pulled in by the "finger thickness" snap (if probing just a quarter cell in the snap direction does not reach it, it counts as an empty cell)
 static int finger_item(dm_cursor_item_info *ci, const char *who) {
@@ -1551,8 +1585,18 @@ static int finger_item(dm_cursor_item_info *ci, const char *who) {
 }
 static int belt_widget(uint64_t w) { return w && g_iw_base && *(uint64_t *)(*(uint64_t *)w + 0x28) == g_iw_base + 0x3911d8; }   // 物品栏里的原版腰带控件（消息处理 main+0x3911d8） | The original game's belt widget in the inventory panel (message handler main+0x3911d8)
 static void ui_use_pump(void) {   // 主线程 | Main thread
-    if (!atomic_exchange(&g_use_req, 0)) return;
+    uint64_t right=atomic_exchange(&g_mouse_right_use_xy,0);
+    int requested=atomic_exchange(&g_use_req,0);
+    if (!requested && !right) return;
     dm_cursor_item_info ci;
+    if (right) {
+        float nx=((right>>16)&0xffff)/65535.f, ny=(right&0xffff)/65535.f;
+        int kind=dm_ui_item_at_now(nx,ny);
+        // Never buy from the vendor, discard an item or act on a stale focus
+        // just because an adjacent clickable widget owns the right-button hit.
+        if (kind!=1 || !dm_ui_mouse_hover_now(nx,ny) ||
+            !dm_cursor_item(&ci) || ci.container==DM_ITEM_AT_SHOP) return;
+    }
     // 物品栏里腰带的空格上双击 = 一键补满（原先是长按，改成双击）；有药的格照旧走下面
     // Double tap on an empty belt cell in the inventory panel = one-tap refill (used to be long press, changed to double tap); cells holding a potion go through the code below as before
     if (belt_widget(dm_wref_get(&g_slot)) && !finger_item(&ci, "双击")) { dm_belt_fill(); LOG("界面双击：腰带空格 → 一键补满"); return; }
@@ -2908,14 +2952,56 @@ static int ui_touch_mode(void) { int dm_padmode_current(void), dm_padmode_busy(v
 // Only the four execution pumps of the item gestures (long press / double-click use / buy / drag and drop) are additionally run in real-mouse mode; the pumps that change the touch layout - binding box, skill tab swap, mercenary page - are not run. With no request these four do nothing, so gamepad players are unaffected
 #if TARGET_OS_OSX
 #define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { int dm_touch_host_is_live(void), dm_padmode_busy(void); if (!tm && dm_touch_host_is_live() && !dm_padmode_busy()) { ui_long_pump(); ui_use_pump(); ui_buy_pump(pw, phh); ui_drag_pump(pm, proot, pw, phh); } } while (0)
+#elif TARGET_OS_IOS || defined(__ANDROID__)
+#define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { int dm_padmode_busy(void); if (!tm && dm_external_mouse_active() && !dm_padmode_busy()) { ui_long_pump(); ui_use_pump(); ui_buy_pump(pw, phh); ui_drag_pump(pm, proot, pw, phh); } } while (0)
 #else
 #define UI_MOUSE_ITEM_PUMPS(pm, proot, pw, phh) do { } while (0)
 #endif
+// Physical keyboard native panel switching on the guest/game thread. Reuse
+// UISwitcher and its own tabs/close operation; no new settings UI or panel.
+static int pc_keyboard_panel_pending;
+static uint64_t pc_keyboard_panel_start;
+static void pc_keyboard_panel_pump(void) {
+    if(!pc_keyboard_panel_pending)return;
+    if(!dm_uiscreen_ingame()){pc_keyboard_panel_pending=0;return;}
+    module_t *m=main_module();uint64_t root=0;
+    if(!m)return;
+    memcpy(&root,m->base+0x2f05458,8);
+    uint64_t us=root?ui_find(root,"UISwitcher",0):0;
+    if(!us || !*(uint8_t *)(us+0x50)) {
+        if(dm_guest_frame()-pc_keyboard_panel_start>90)pc_keyboard_panel_pending=0;
+        return;
+    }
+    int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
+    if(n<=0 || n>16 || cur<0 || cur>=n)return;
+    int to=pc_keyboard_panel_pending-1;
+    pc_keyboard_panel_pending=0;
+    if(to>=n)return;
+    if(to==4) {
+        uint64_t tabs=ui_find(root,"UISwitcherTabs",0);
+        uint64_t merc=tabs?ui_find(tabs,"Image4",0):0;
+        if(!merc || !*(uint8_t *)(merc+0x50))return;
+    }
+    if(cur!=to)
+        ((void (*)(uint64_t,int,int))(m->base+0x405898))(us,to,to>cur);
+}
+int dm_ui_pc_skill_bind_request(uint32_t command_id) {
+    // Skill assignment is owned by the original controller binding UI.
+    // No unverified synthetic assignment or .ctl mutation in this input PR.
+    (void)command_id; return 0;
+}
+int dm_ui_pc_skill_tree_active(void) {
+    // Keydown may arrive on UIKit/Android UI threads. Never traverse
+    // guest widgets here; dm_pc_input_event also checks the atomic
+    // dm_uiscreen_panel() gate before emitting skill/cast buttons.
+    return 0;
+}
 void dm_ui_mouse_pump(void) {   // 游戏取手柄处调（hle_hid fill，主线程）；每个出图帧做一次 | called where the game fetches the controller (hle_hid fill, main thread); done once per presented frame
     static uint64_t last_frame = UINT64_MAX; uint64_t fr = dm_guest_frame();
     if (fr == last_frame) return;
     (void)dm_ui_gen();   // 每帧核一次顶层面板（界面代号）：卸掉又在同一地址建出新面板的那种，隔帧才核会漏 | Check the top-level panels (UI generation) once per frame: a panel unloaded and rebuilt at the same address would be missed by checking every other frame
     ui_watch_pump();
+    pc_keyboard_panel_pump();
     { module_t *pm0 = main_module(); uint64_t pr = 0; if (pm0) memcpy(&pr, pm0->base + 0x2f05458, 8); if (pr) { ui_panel_heal(pr, fr); ui_panel_state_pump(pr); } }
     // 设置页盖在功能页上面：点顶部页签要先按返回键退出设置页，再切页签（否则底下的页在换、设置页一直盖着）。
     // 有未应用的改动时返回键会弹「是否应用」的确认框——0.6 秒后设置页还在，就不切了，留给玩家答确认框
@@ -3217,6 +3303,46 @@ static void fe_send(const char *cat, const char *act, const char *arg) {
     uint64_t vt = 0, fn = 0; memcpy(&vt, (void *)root, 8); memcpy(&fn, (void *)(vt + 0x28), 8);
     LOG("前端路径：发 %s:%s %s", cat, act, arg);
     ((void (*)(uint64_t, void *))fn)(root, msg);
+}
+// Keyboard shortcut commands map to the native Switch UISwitcher panels,
+// preserving the game’s close/open transaction rather than constructing
+// detached content pages.
+void dm_ui_pc_toggle_panel(unsigned command_id) {
+    if(!dm_uiscreen_ingame())return;
+    if(command_id==44) {
+        void dm_swapskill_manual_request(void);
+        dm_swapskill_manual_request(); return;
+    }
+    int target=-1;
+    switch(command_id) {
+    case 4: target=0; break; // quest
+    case 0: target=1; break; // character
+    case 1: target=2; break; // inventory
+    case 12:target=3; break; // skill tree
+    case 54:target=4; break; // hireling
+    default:return;
+    }
+    module_t *m=main_module();uint64_t root=0;
+    if(!m)return;
+    memcpy(&root,m->base+0x2f05458,8);
+    uint64_t us=root?ui_find(root,"UISwitcher",0):0;
+    if(us && *(uint8_t *)(us+0x50)) {
+        int n=*(int32_t *)(us+0x188),cur=*(int32_t *)(us+0x1b8);
+        if(n<=0 || n>16 || cur<0 || cur>=n || target>=n)return;
+        if(target==4) {
+            uint64_t tabs=ui_find(root,"UISwitcherTabs",0);
+            uint64_t merc=tabs?ui_find(tabs,"Image4",0):0;
+            if(!merc || !*(uint8_t *)(merc+0x50))return;
+        }
+        pc_keyboard_panel_pending=0;
+        if(cur==target) fe_send("PanelManager","ClosePanel","UISwitcher");
+        else ((void (*)(uint64_t,int,int))(m->base+0x405898))(us,target,target>cur);
+        return;
+    }
+    if(dm_uiscreen_panel() || pc_keyboard_panel_pending)return;
+    pc_keyboard_panel_pending=target+1;
+    pc_keyboard_panel_start=dm_guest_frame();
+    dm_ui_key_pulse(DM_BTN_PLUS,5);
 }
 // ---------- 一键重开（暂停菜单「一键重开」= 保存 + 登出 + 同难度登入；标准：不慢于正常进局，只出现开门读取画面，不露主菜单 / 选角页） ----------
 // 只走原版的路：替玩家发原版「保存并退出」(PausePanelMessage:ExitGame；退出时的存档提交都在 ToFrontEnd 之前完成) → 回到前端（ToFrontEnd）的下一帧

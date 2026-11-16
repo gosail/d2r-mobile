@@ -189,7 +189,7 @@ public final class TouchOverlay extends View {
         if (!inputEnabled) return false;
         int action=e.getActionMasked(), index=e.getActionIndex();
         if (action==MotionEvent.ACTION_DOWN || action==MotionEvent.ACTION_POINTER_DOWN) {
-            for (int s=0;s<16;++s) if (pointerIds[s]<0) {
+            for (int s=0;s<15;++s) if (pointerIds[s]<0) { // slot 15 reserved for a physical mouse UI gesture
                 pointerIds[s]=e.getPointerId(index); event(e,index,0,s); break;
             }
         } else if (action==MotionEvent.ACTION_MOVE) {

@@ -9,6 +9,8 @@ on:
       - "dm/host/dm_dualmerc_policy.h"\n      - "dm/host/dm_merc_trace.h"\n      - "dm/host/tests/test_merc_trace.c"
       - "dm/host/tests/test_dualmerc_policy.c"
       - "dm/verify/hire_handler.py"\n      - "dm/verify/hire_handler_guest.py"\n      - "dm/verify/test_hire_handler_guest.py"
+      - "dm/verify/merc_probe_report.py"
+      - "dm/verify/test_merc_probe_report.py"
       - "dm/verify/test_hire_handler.py"
       - ".github/workflows/offline-dualmerc-tests.yml"
 
@@ -29,3 +31,4 @@ jobs:
         run: |
           python3 -m unittest discover -s dm/verify -p 'test_hire_handler.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_hire_handler_guest.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_merc_probe_report.py' -v

@@ -46,6 +46,13 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("dm_pc_input_middle_or_default()", mouse)
         self.assertIn("dm_pc_input_wheel_or_default(e->arg)", mouse)
 
+    def test_android_pointer_cancel_releases_both_gesture_owners(self):
+        android = self.read("android/touch_android.c")
+        branch = android.split("} else if(mouse_touch_on && (op==DM_MOUSE_DRAG || op==DM_MOUSE_UP || op==DM_MOUSE_LEAVE)) {", 1)[1].split("} else dm_external_mouse_event", 1)[0]
+        self.assertIn("if(phase>=2) mouse_touch_on=0;", branch)
+        self.assertIn("if(op==DM_MOUSE_LEAVE)", branch)
+        self.assertIn("dm_external_mouse_event(DM_MOUSE_LEAVE", branch)
+
     def test_native_target_info_replaces_custom_hover_layers(self):
         ios = self.read("ios/Sources/front_ios.m")
         mac = self.read("host/front_mac.m")

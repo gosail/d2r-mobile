@@ -2,8 +2,9 @@
 """Offline-only Druid summon table patch for the owner's D2R Switch 3.3 resources.
 
 Source material is read from the user's ROMFS at build time; no game data is
-checked into this repository. This module intentionally does not modify AI
-functions, collision handling, or the native combat hit-list.
+checked into this repository. This module reuses the game's existing native Cleave skill handlers for a
+120-degree Bear Smite, rather than introducing foreign damage routines.
+It does not change pathfinding, entity collision, or the combat hit-list.
 """
 import argparse
 import json
@@ -19,6 +20,8 @@ SKILL_IDS = {
     "Summon Spirit Wolf": "227",
     "Summon Fenris": "237",
     "Summon Grizzly": "247",
+    "BearSmite": "326",
+    "Goatman Cleave": "419",
 }
 PET_AI = {
     "druidhawk": "Raven",
@@ -118,7 +121,11 @@ def patch_tables(skills_bytes, monstats_bytes):
     """Return patched bytes and exact field-level audit report, without mutation."""
     skills = Tsv(skills_bytes, SKILLS_PATH)
     monsters = Tsv(monstats_bytes, MONSTATS_PATH)
-    skills.require("skill", "*Id", "petmax", "Param2", "Param3", *COLD_FIELDS)
+    skills.require("skill", "*Id", "petmax", "Param2", "Param3",
+                   "srvstfunc", "srvdofunc", "cltstfunc", "cltdofunc",
+                   "calc1", "calc2", "calc5", "calc6", "calc7",
+                   "aurafilter", "range", "anim", "seqtrans",
+                   "ResultFlags", "HitShift", "SrcDam", *COLD_FIELDS)
     monsters.require("Id", "AI", *AI_DELAY_FIELDS)
     changes = []
 
@@ -144,6 +151,27 @@ def patch_tables(skills_bytes, monstats_bytes):
     for field in COLD_FIELDS:
         _pct_130(sr["Summon Spirit Wolf"][skills.index[field]])
 
+    # A 3.3 Reign-of-the-Warlock build already has server-side Cleave:
+    # Goatman Cleave uses 164 with (calc5, calc6) = (11, 30) slices.
+    # We reuse exactly that original engine handler on BearSmite, retaining
+    # the bear's own skill ID (326), physical damage, pet animation and skill.
+    # 10 of 30 slices of the full 360-degree circle = 120 degrees.
+    bear, donor = sr["BearSmite"], sr["Goatman Cleave"]
+    for column, value in {
+        "srvstfunc": "32", "srvdofunc": "2", "calc1": "ln34",
+        "calc2": '"max(250,ln12)"', "calc5": "", "calc6": "",
+        "aurafilter": "", "range": "h2h", "anim": "S1",
+        "seqtrans": "S1", "ResultFlags": "8", "HitShift": "8",
+        "SrcDam": "128",
+    }.items():
+        skills.expect(bear, column, value)
+    for column, value in {
+        "srvstfunc": "68", "srvdofunc": "164", "calc5": "11",
+        "calc6": "30", "aurafilter": "41347",
+        "cltstfunc": "59", "cltdofunc": "103",
+    }.items():
+        skills.expect(donor, column, value)
+
     # 5 -> 8 ravens and 3 -> 5 dire wolves, keeping the original scaling
     # formula (so no extra ravens/wolves at skill levels below the cap).
     skills.set(sr["Raven"], "Param2", "8", changes)
@@ -154,6 +182,21 @@ def patch_tables(skills_bytes, monstats_bytes):
     for field in COLD_FIELDS:
         current = sr["Summon Spirit Wolf"][skills.index[field]]
         skills.set(sr["Summon Spirit Wolf"], field, _pct_130(current), changes)
+
+    # Bear Smite remains the bear's native assigned skill / sequence;
+    # the server start/do handlers are borrowed from the game's own
+    # monster-compatible Goatman Cleave. Keep its original hit flags and
+    # summon damage progression. Cleave uses calc2 for flat damage, not
+    # Bear Smite's stun length, so explicitly zero it to avoid accidental
+    # +250 flat damage. Preserve bear's unchanged S1 animation, which
+    # still requires an in-game visual and multi-hit verification.
+    for column, value in (
+        ("srvstfunc", "68"), ("srvdofunc", "164"),
+        ("cltstfunc", "59"), ("cltdofunc", "103"),
+        ("aurafilter", "41347"), ("calc2", "0"),
+        ("calc5", "10"), ("calc6", "30"), ("calc7", "0"),
+    ):
+        skills.set(bear, column, value, changes)
 
     # Shorten the idle AI decision delay of the existing summons. This is
     # *not* an engine-level attack-animation or pathfinding change.
@@ -168,7 +211,20 @@ def patch_tables(skills_bytes, monstats_bytes):
         "spirit_wolf_cold_percent": 130,
         "pet_ai_delay_before": 15,
         "pet_ai_delay_after": 10,
-        "bear_cleave": "not_implemented_requires_verified_native_combat_hook",
+        "bear_cleave": {
+            "implementation": "native_monster_cleave_skill_handlers",
+            "source": "Goatman Cleave (419)",
+            "skill": "BearSmite (326)",
+            "srvstfunc": 68,
+            "srvdofunc": 164,
+            "arc_degrees": 120,
+            "arc_slices": 10,
+            "circle_slices": 30,
+            "verified": "table_and_formula_only_pending_in_game_multi_target_test",
+            "limitations": ["secondary_damage_is_native_cleave_default",
+                            "bear_smite_stun_formula_replaced_by_cleave_flat_damage_zero",
+                            "pet_AI_pathfinding_unchanged"],
+        },
         "pet_pathfinding": "not_implemented_requires_verified_native_ai_hook",
         "raven_attack_animation": "unchanged_ai_delay_only",
         "field_changes": changes,

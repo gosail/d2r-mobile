@@ -1,0 +1,58 @@
+name: iPad and Android keyboard/mouse checks
+on:
+  push:
+    branches:
+      - feat/ipad-android-keyboard-mouse-upstream-20261116
+  pull_request:
+    paths:
+      - 'dm/android/**'
+      - 'dm/ios/**'
+      - 'dm/host/**'
+      - '.github/workflows/ipad-android-input.yml'
+permissions:
+  contents: read
+jobs:
+  input-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Mouse parity and generated NPC name contracts
+        run: |
+          python -m unittest discover -v -s dm/ios/tests -p test_hover_names.py
+          python -m unittest discover -v -s dm/ios/tests -p test_mouse_pc_parity.py
+          python -m unittest discover -v -s dm/ios/tests -p test_mouse_pointer_bridge.py
+      - name: Native keyboard fallback and per-character .key compatibility
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_kbmap.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_keyfile.c dm/host/tests/t_kbmap.c -o /tmp/dm_kb
+          /tmp/dm_kb
+          cc -std=gnu11 -Wall -Wextra -Werror -I dm/host dm/host/dm_keyfile.c dm/host/tests/t_keyfile.c -o /tmp/dm_key
+          /tmp/dm_key
+          cc -std=gnu11 -Wall -Wextra -Werror -pthread -I dm/host dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/tests/t_pc_profile.c -o /tmp/dm_profile
+          /tmp/dm_profile
+      - name: Android HID key mapper compiles against SDK
+        run: |
+          jar=$(find "${ANDROID_HOME}/platforms" -name android.jar | sort -V | tail -1)
+          test -n "$jar"
+          mkdir -p /tmp/dmkb/com/xiaoboluo/d2r /tmp/dmkb-classes
+          cat > /tmp/dmkb/com/xiaoboluo/d2r/DmActivity.java <<'STUB'
+          package com.xiaoboluo.d2r;
+          class DmActivity { static native void nativeKeyboardEvent(int usage, boolean down); }
+          STUB
+          cat > /tmp/dmkb/com/xiaoboluo/d2r/PadInput.java <<'STUB'
+          package com.xiaoboluo.d2r;
+          class PadInput { static void externalInput() {} }
+          STUB
+          javac -cp "$jar" -d /tmp/dmkb-classes /tmp/dmkb/com/xiaoboluo/d2r/*.java dm/android/app/src/main/java/com/xiaoboluo/d2r/KeyboardInput.java
+  apple-syntax:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host mouse and key profile C syntax
+        run: |
+          xcrun clang -std=gnu11 -fsyntax-only -Werror=implicit-function-declaration -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/host/dm_kbmap.c dm/host/dm_keyfile.c dm/host/dm_pc_profile.c dm/host/dm_pc_input.c dm/host/dm_pages.c dm/host/dm_cursor.c dm/host/hle_fs.c
+      - name: iPadOS UIKit keyboard and mouse syntax
+        run: |
+          xcrun --sdk iphoneos clang -arch arm64 -fobjc-arc -fsyntax-only -Werror=implicit-function-declaration -miphoneos-version-min=16.0 -I dm/host -I dm/ios/Sources -I dm/gfx/nvn/include dm/ios/Sources/front_ios.m

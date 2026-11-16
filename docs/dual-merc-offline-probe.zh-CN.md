@@ -84,3 +84,11 @@ CI 增加纯标准库的 NSO 指针表/重定位/范围防错单测与 Linux C �
 ### 运行时原生函数指针检查（只读，新增）
 
 在带 `dual_merc_probe.enabled` 标志的 iPad 实验包里，进入游戏后会从已经由游戏装载器执行重定位的 `main+0x20a4190` 命令表读取 `0x36`、`0x38`、`0x62` 三个候选包的处理函数指针，要求函数位于已映射可执行正文且四字节对齐，并仅扫描其起始 128 字节内的 ARM64 `BL` 直接调用。日志只打印模块 RVA 和候选调用目标，不打印指针绝对地址、NSO 程序字节或游戏资源，**不会写入客体内存**。这些目标可能跨函数边界或只是旧协议对应的其他函数，不能直接用作有副作用的剪口。需要与前后佣兵单位状态日志核实真实替换发生处，才有条件实施原生双佣兵改写。
+
+### 直接从 Prepared iOS 包解析游戏雇佣命令表（不需要实机启动）
+
+新增 `dm/verify/hire_handler_guest.py`：读取经原游戏程序改写并签名封装的 `source-payload.zip` 中 `Guest.framework/Guest` Mach-O 节（`__dmmainx0` 和 `__DMmainW,__img`），按同包 `main.fixups.tsv` 与 `main.cuts.tsv` 验证平台、游戏构建号及长度，重建只读地址空间前缀；复用 `nsoimg.relocs` 和 `hire_handler.inspect` 抽取服务端候选包 `0x36/0x38/0x62` 的 RVA 和直接调用目标。完整游戏程序的字节不会进入日志或输出 JSON，也不执行/修改代码。
+
+    python3 dm/verify/hire_handler_guest.py /path/to/source-payload.zip --out /tmp/dualmerc-handlers.json
+
+该分析可在私有构建工作流缓存的 Prepared 包上执行；若入口只是一层转发函数，还需进一步检查调用链及真正的佣兵删除和创建函数，禁止直接按候选 RVA 打补丁。

@@ -34,6 +34,18 @@ class PhysicalMouseWiring(unittest.TestCase):
         self.assertIn("mouse_queue[0] = e;", overflow)
         self.assertIn("if (overflow) mouse_clear();", mouse)
 
+    def test_iPad_third_button_and_android_edge_deduplication(self):
+        ios = self.read("ios/Sources/front_ios.m")
+        android = self.read("android/app/src/main/java/com/xiaoboluo/d2r/DmActivity.java")
+        mouse = self.read("host/dm_external_mouse.c")
+        self.assertIn("middle.buttonMaskRequired=UIEventButtonMaskForButtonNumber(3);", ios)
+        self.assertIn("[self dmMouseEvent:DM_MOUSE_MIDDLE_DOWN", ios)
+        self.assertIn("if(secondaryMouseDown)return true;", android)
+        self.assertIn("if(tertiaryMouseDown)return true;", android)
+        self.assertIn("if (mouse_right_down) continue;", mouse)
+        self.assertIn("dm_pc_input_middle_or_default()", mouse)
+        self.assertIn("dm_pc_input_wheel_or_default(e->arg)", mouse)
+
     def test_native_target_info_replaces_custom_hover_layers(self):
         ios = self.read("ios/Sources/front_ios.m")
         mac = self.read("host/front_mac.m")

@@ -289,13 +289,6 @@ void dm_kbmap_controls_event(const char *cat,const char *action,const char *arg)
 }
 
 
-int dm_kbmap_mouse_action(unsigned physical) {
-    return physical<3?(int)physical:-1; // PC left/right/middle semantics
-}
-int dm_kbmap_bind_mouse(unsigned physical,unsigned action) {
-    // Unverified left/right remapping is not exposed without a native slot.
-    (void)physical;(void)action;return 0;
-}
 void dm_kbmap_pre_commit(const char *workdir) {
     dm_pc_profile_pre_commit_locked(workdir);
 }

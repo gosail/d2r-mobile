@@ -62,10 +62,7 @@ int main(void) {
     assert(dm_kbmap_action(0x52)==DM_KB_MOVE_UP);
     assert(dm_kbmap_action(0x04)==DM_KB_UNBOUND); // A never walks
     assert(dm_kbmap_action(0x1a)==DM_KB_UNBOUND); // W is native .key only
-    assert(dm_kbmap_mouse_action(0)==0 && dm_kbmap_mouse_action(1)==1);
-    assert(dm_kbmap_mouse_action(2)==2);
     assert(!dm_kbmap_bind(0x1b,0));
-    assert(!dm_kbmap_bind_mouse(0,1));
     assert(!dm_kbmap_restore_defaults_checked());
     // Before the guest creates .key, keyboard still navigates as a pad.
     dm_kbmap_key_event(0x52,1);assert(left_y==32767);

@@ -1370,6 +1370,20 @@ static void c2s_obs(const uint64_t *regs) {
     tk_rd(regs[0] + 0x170, &tick, 4);
     if (regs[1] && tk_rd(regs[1] + 8, &uid, 4)) hu = 1;
     uint8_t b[512]; uint32_t n = len < 512 ? len : 512; if (!tk_rd(regs[2], b, n)) n = 0;
+    // Offline dual-hireling experiment: capture only the historically used
+    // hire request opcode, without assuming Switch 3.3 shares its semantics.
+    // Observe the server's *incoming* request before native replacement.
+    // The experimental RomFS marker enables this automatically on the iPad.
+    { static int merc_probe = -1;
+      if (merc_probe < 0) { const char *e = getenv("DM_DUAL_MERC_PROBE"); merc_probe = e && !strcmp(e, "1"); }
+      if (merc_probe && n && b[0] == 0x36) {
+          char hex[33]; unsigned cap = n < 16 ? n : 16;
+          for (unsigned i = 0; i < cap; ++i) snprintf(hex + 2 * i, sizeof hex - 2 * i, "%02x", b[i]);
+          hex[cap * 2] = 0;
+          LOG("DM_DUAL_MERC_PROBE：拍 %u 玩家 %s%u 收到候选雇佣包 0x36 len=%u 前%u字节=%s（Switch 3.3 语义待核实，只读）",
+              tick, hu ? "" : "未知/", uid, len, cap, hex);
+      }
+    }
     if (n >= 1 && b[0] == 0x20) cube_diag_req(regs[0], regs[1], b, n);   // 合成读数 | Transmute readout
     dm_bossrush_c2s(regs[0], regs[1], b, n);
     cam_c2s(regs[0], regs[1], b, n);

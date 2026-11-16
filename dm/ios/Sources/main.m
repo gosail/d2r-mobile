@@ -704,6 +704,13 @@ static void boot_prepare(void) {
         for (NSString *v in vs) if ([[NSSet setWithArray:[v componentsSeparatedByString:@"+"]] isEqualToSet:on]) { bundledOverlay = [vdir stringByAppendingPathComponent:v]; break; }
         if (on.count && [bundledOverlay.lastPathComponent isEqualToString:@"romfs_overlay"]) plog("boot: 🔴 开关组合 %s 没有对应的覆盖层，按全关启动", [on.allObjects componentsJoinedByString:@"+"].UTF8String);
     }
+    // Experimental offline dual-merc build: only the verified RomFS overlay
+    // marker enables passive hireling observations on a signed iPad build.
+    // Normal distribution has no marker, so the probe remains disabled.
+    if ([fm fileExistsAtPath:[bundledOverlay stringByAppendingPathComponent:@"dual_merc_probe.enabled"]]) {
+        setenv("DM_DUAL_MERC_PROBE", "1", 1);
+        plog("boot: experimental dual-hireling PET cap / read-only probe enabled (not proven to support two mercenaries)");
+    }
     if (g_astc_dir) bundledOverlay = [NSString stringWithFormat:@"%@:%@", bundledOverlay, g_astc_dir];   // 第二层：补充包（data/<档名>，覆盖层索引指向它） | Second layer: the Legacy Device Pack (data/<archive name>, which the overlay index points to)
     if (g_astc_dir || [fm fileExistsAtPath:bundledOverlay]) { setenv("DM_ROMFS_OVERLAY", bundledOverlay.fileSystemRepresentation, 1); plog("boot: RomFS 覆盖层 %s", bundledOverlay.fileSystemRepresentation); }
     else plog("boot: 🔴 App 内缺 romfs_overlay（底部 UI v4），按原版 HUD 启动");

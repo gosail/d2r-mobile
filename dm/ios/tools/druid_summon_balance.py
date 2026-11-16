@@ -7,8 +7,11 @@ checked into this repository. This module reuses the game's existing native Clea
 It does not change pathfinding, entity collision, or the combat hit-list.
 """
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 
 SKILLS_PATH = "data/global/excel/skills.txt"
 MONSTATS_PATH = "data/global/excel/monstats.txt"
@@ -232,12 +235,119 @@ def patch_tables(skills_bytes, monstats_bytes):
     return {SKILLS_PATH: skills.encode(), MONSTATS_PATH: monsters.encode()}, report
 
 
+
+BINTOOL_SHA = "fe6078123d6f011f46af9ea0802739ba672b0547"
+BIN_NAMES = ("skills.bin", "monstats.bin", "skillscode.bin")
+
+
+def _manifest_paths(romfs):
+    # Only copy source tables from the owner's sparse original game resources.
+    # A full excel set and localization keys are necessary for formula/index
+    # compilation; compiling two changed TXT files alone is incorrect.
+    manifest = Path(romfs, "data", "build_manifest.psv").read_text(encoding="utf-8")
+    paths = set()
+    for line in manifest.splitlines():
+        if line.startswith("#"):
+            continue
+        fields = line.split("|")
+        if len(fields) < 11:
+            continue
+        name = fields[9].lower().split(":", 1)[-1].replace("\\", "/")
+        if not name.startswith("data/") or ".." in name.split("/"):
+            continue
+        excel = name.startswith("data/global/excel/") and name.endswith(".txt")
+        strings = (name.startswith("data/local/lng/strings/") and
+                   name.endswith(".json") and
+                   name.count("/") == 4)
+        if excel or strings:
+            paths.add(name)
+    if (SKILLS_PATH not in paths or MONSTATS_PATH not in paths or
+            len([x for x in paths if x.endswith(".txt")]) < 80 or
+            len([x for x in paths if "/lng/strings/" in x]) < 15):
+        raise IncompatibleGameData("The purchased 3.3 RomFS does not have a complete Excel source corpus")
+    return sorted(paths)
+
+
+def compile_binary_overlays(romfs, outdir, patched, report):
+    """Build and byte-verify native game tables, then return BIN overlays.
+
+    D2R normally loads compiled .bin skill tables, so merely changing .txt
+    cannot prove that an enhanced summon actually uses the new values.
+    The 3.3 compiler is an external build-time tool; no executable or
+    original resource file is committed to this repository.
+    """
+    import romfs_art
+    tool = os.environ.get("DM_D2R_BINTOOL", "")
+    if not tool or not Path(tool).is_file() or not os.access(tool, os.X_OK):
+        raise IncompatibleGameData("DM_D2R_BINTOOL (pinned 3.3 datatable compiler) is required")
+    root = Path(outdir) / "offline_druid_bintables"
+    excel = root / "data" / "global" / "excel"
+    baseline_dir = root / "baseline-bin"
+    compiled_dir = root / "patched-bin"
+    for logical in _manifest_paths(romfs):
+        dst = root / logical
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(romfs_art.read(romfs, logical))
+    if not (root / "data/local/lng/strings").is_dir():
+        raise IncompatibleGameData("Missing localization keys needed to compile native skill tables")
+
+    def compile_to(destination):
+        run = subprocess.run([tool, "compile", str(excel), str(destination)],
+                             capture_output=True, text=True, timeout=180)
+        if run.returncode:
+            raise IncompatibleGameData(
+                "3.3 datatable compilation failed: " + (run.stderr or run.stdout)[-1300:])
+        if "failed=0" not in run.stdout:
+            raise IncompatibleGameData("3.3 datatable compiler did not confirm success")
+        return run.stdout
+
+    # First prove that the compiler generates exact shipped 3.3 bytes. This
+    # detects a silently incompatible PC table layout or a mismatched Switch
+    # build, before any gameplay data is replaced.
+    compile_to(baseline_dir)
+    baseline_sha = {}
+    for name in BIN_NAMES:
+        logical = "data/global/excel/" + name
+        original_bin = romfs_art.read(romfs, logical)
+        generated = (baseline_dir / name).read_bytes()
+        baseline_sha[name] = hashlib.sha256(original_bin).hexdigest()
+        if generated != original_bin:
+            raise IncompatibleGameData(
+                f"{name}: 3.3 compiler output differs from shipped Switch bytes; "
+                "refusing an unverified binary table patch")
+
+    # Change only the two Druid table files and recompile the whole source set
+    # so formula offsets in skillscode.bin stay consistent with skills.bin.
+    for logical, data in patched.items():
+        (root / logical).write_bytes(data)
+    compile_to(compiled_dir)
+    changes = {}
+    for name in BIN_NAMES:
+        output = compiled_dir / name
+        original = baseline_dir / name
+        if not output.is_file() or not original.is_file():
+            raise IncompatibleGameData("Missing generated binary datatable " + name)
+        if name != "skillscode.bin" and output.read_bytes() == original.read_bytes():
+            raise IncompatibleGameData(name + ": compiled bytes unchanged despite source patch")
+        changes["data/global/excel/" + name] = str(output)
+    report["native_bin"] = {
+        "compiler_sha": BINTOOL_SHA,
+        "baseline_byte_exact": True,
+        "files": list(BIN_NAMES),
+        "baseline_sha256": baseline_sha,
+        "warning": "Data and native arc verified; actual multi-target bear combat still requires device test",
+    }
+    return changes
+
+
 def build(romfs, outdir):
     """Add to gen_romfs_overlay.REPL only when explicitly opted in at build time."""
     import romfs_art
     originals = {path: romfs_art.read(romfs, path) for path in TABLE_PATHS}
     patched, report = patch_tables(originals[SKILLS_PATH], originals[MONSTATS_PATH])
-    generated = {}
+    # Compile matching BIN files and verify every unmodified native baseline
+    # byte-for-byte before emitting any overlay. Fail closed on mismatch.
+    generated = compile_binary_overlays(romfs, outdir, patched, report)
     for path, data in patched.items():
         target = Path(outdir) / ("offline_druid_" + Path(path).name)
         target.write_bytes(data)

@@ -81,6 +81,13 @@ int main(void) {
     // stop before dispatching the native action.
     dm_kbmap_key_event(0x52,1);assert(left_y==32767);
     game_seed("Alice");
+    // Native file may contain more commands than the host has verified.
+    // Unimplemented actions must never appear editable in our key capture.
+    assert(!dm_pc_input_supported_action(2));
+    assert(!dm_kbmap_native_pc_begin(2,0));
+    assert(dm_pc_input_supported_action(18));
+    assert(dm_kbmap_native_pc_begin(18,0));
+    dm_kbmap_native_pc_cancel();
     dm_kbmap_key_event(0x04,1);
     assert(left_x==0 && left_y==0);
     dm_pc_input_guest_step();assert(pc_native_panels==1);

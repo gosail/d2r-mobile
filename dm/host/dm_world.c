@@ -9,6 +9,9 @@
 #include "touch_mac.h"
 #include "dm_uiscreen.h"
 #include "dm_world.h"
+#include "dm_pc_input.h"
+#include "dm_cursor.h"
+#include "dm_input.h"
 #include "dm_external_mouse.h"
 #include "hle.h"
 #include "dm.h"
@@ -675,6 +678,9 @@ static void w_walk_step(uint8_t *b) {
     }
     { float d0 = 0; int lab0 = 0; g_hit_mon = 1; uint64_t mu = w_hit(b, ((t >> 16) & 0xffff) / 65535.0f * W, (t & 0xffff) / 65535.0f * H, H * 0.10f, &d0, &lab0, 0); g_hit_mon = 0;
       if (mu && w_hostile(b, mu)) { if (w_now_ns() - g_gnd_stick_at >= 300000000ull && w_now_ns() - g_mouse_attack_at >= 200000000ull) w_attack(mu, "按住"); return; } }   // 按住时光标下是敌对怪：再打一下（摇杆 / W A S D 刚动过就让给它） | while held with a hostile monster under the pointer: hit once more (yielding to the stick / W A S D if they have just moved)
+    // While stand-still is held, mouse-on-ground cannot issue a new route.
+    // Monster attacks above still go through the existing native action.
+    if (dm_pc_input_stand_still()) return;
     if (g_go.on && g_go.type != W_GROUND) return;   // 正走向某个目标去交互：不打断 | walking towards some target to interact: do not interrupt
     if (w_now_ns() - g_gnd_stick_at < 300000000ull) return;   // 摇杆 / W A S D 0.3 秒内动过：让给它 | the stick / W A S D moved within 0.3 s: yield to it
     float sx = ((t >> 16) & 0xffff) / 65535.0f * W, sy = (t & 0xffff) / 65535.0f * H, k = H * 0.00206f, a = (sx - f[0]) / k / 16, c = (sy - f[1]) / k / 8;
@@ -1082,10 +1088,11 @@ void dm_world_pump(void) {   // 取手柄处每帧调 | Called every frame at th
     // Process external mouse before resolving its queued world click.
     dm_external_mouse_step();
 #endif
+    { void dm_pc_input_guest_step(void); dm_pc_input_guest_step(); }
     w_tap_step(b);
     // Middle click acts on the game thread only. Ignore in modal panels.
     if (atomic_exchange(&g_mouse_map_toggle,0)&1u) {
-        int dm_ui_map_is_full(void), dm_ui_map_full(int), dm_game_paused(void);
+        int dm_ui_map_is_full(void), dm_game_paused(void); // dm_ui_map_full is void in dm_cursor.h
         if (dm_uiscreen_ingame() && !dm_uiscreen_panel() && !dm_game_paused())
             dm_ui_map_full(!dm_ui_map_is_full());
     }

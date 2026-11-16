@@ -23,13 +23,21 @@
 #import <GameController/GameController.h>
 #include "dm_input.h"
 #include "dm_padmap.h"
+#include "dm_kbmap.h"
 #include "hle.h"
 
 static void (*g_on_mode)(int pad);
-static int g_pad_mode, g_need_center;
+static int g_pad_mode, g_need_center, g_external_preferred;
 void dm_padmode_request(int pad);   // 宿主 dm_padmode.c：布局换成原版手柄版 / 触屏版 | Host dm_padmode.c: switch the layouts to the original controller version / the touch version
 static void set_mode(int pad) { if (g_pad_mode == pad) return; g_pad_mode = pad; dm_padmode_request(pad); LOG("手柄：%s", pad ? "手柄有输入 → 手柄模式" : "碰了屏幕 / 手柄断开 → 触屏模式"); if (g_on_mode) g_on_mode(pad); }
 int dm_gamepad_mode(void) { return g_pad_mode; }
+// Keyboard and mouse use the original Switch layout, but do not impersonate
+// a physical GCController or change the character's native .ctl.
+void dm_gamepad_external_input(void) {
+    g_external_preferred=1;
+    dm_padmode_request_glyph(DM_GLYPH_PAD);
+    set_mode(1);
+}
 
 // 各手柄各存各的（槽 0、1 留给触点脚本的两个虚拟手柄，其余给实体手柄）
 // Each controller is stored separately (slots 0 and 1 are reserved for the touch script's two virtual controllers, the rest are for physical controllers)
@@ -76,9 +84,17 @@ static void put(const void *who, uint64_t b, int32_t lx, int32_t ly, int32_t rx,
 static void drop(const void *who) {   // 这个手柄没了：只拿掉它那一份；一个手柄都不剩才回触屏模式 | This controller is gone: remove only its share; return to touch mode only when no controller is left
     int i = slot_of(who, 0); if (i < 0) return; memset(&g_s[i], 0, sizeof g_s[i]); apply();
     for (int k = 0; k < NSLOT; k++) if (g_s[k].who) return;
-    set_mode(0);
+    if(!g_external_preferred)set_mode(0);
 }
-void dm_gamepad_touched(void) { if (g_pad_mode) { g_need_center = 1; set_mode(0); apply(); } }   // 前端：碰了屏幕。摇杆此刻偏着的话要先回中才重新接管 | Front end: the screen was touched. If a stick is deflected right now it must return to center before taking over again
+void dm_gamepad_touched(void) {
+    // A real finger becomes the active input owner. Release any latched
+    // keyboard stick/button bits so an arrow held before this touch does
+    // not keep the character moving behind the touch UI.
+    int was_external=g_external_preferred;
+    g_external_preferred=0;
+    if(was_external)dm_kbmap_reset();
+    if (g_pad_mode) { g_need_center = 1; set_mode(0); apply(); }
+}   // 前端：碰了屏幕。摇杆此刻偏着的话要先回中才重新接管 | Front end: the screen was touched. If a stick is deflected right now it must return to center before taking over again
 void dm_gamepad_reset(void) {   // 前端：失活 / 进后台 / 来电 | Front end: resign active / enter background / incoming call
     int any = 0; for (int i = 0; i < NSLOT; i++) if (g_s[i].who) { any |= g_s[i].b != 0 || g_s[i].ax[0] || g_s[i].ax[1] || g_s[i].ax[2] || g_s[i].ax[3]; g_s[i].b = 0; memset(g_s[i].ax, 0, sizeof g_s[i].ax); }
     if (any) { LOG("手柄：失活，手柄的键和摇杆清零"); apply(); }

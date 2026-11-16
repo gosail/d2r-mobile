@@ -38,6 +38,9 @@ static struct { _Atomic uint64_t buttons; _Atomic int32_t lx, ly, rx, ry; } g_in
 #include "dm_external_mouse.h"
 #endif
 static _Atomic int64_t g_sampling;
+// Only successful GetNpadState reads count toward a multi-sample skill
+// modifier lead. Unsupported controller styles must not advance it.
+static _Atomic uint64_t g_valid_sampling;
 static _Atomic uint64_t g_sampled_right;
 void dm_input_sampled_right(int32_t *rx,int32_t *ry) {
     uint64_t v=atomic_load_explicit(&g_sampled_right,memory_order_acquire);
@@ -60,8 +63,36 @@ static _Atomic uint64_t g_press_latch;
 // Controller (dm_input.h dm_pad_set): buttons and the four axes are packed into two atomics, and press edges are likewise latched until the game's next
 // read (short controller presses are not lost)
 static _Atomic uint64_t g_pad_btn, g_pad_axes, g_pad_latch;
+// Separate keyboard channel: touch and physical gamepad must not overwrite it.
+static _Atomic uint64_t g_kb_btn,g_kb_axes,g_kb_latch;
+void dm_kb_set(uint64_t buttons,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
+    uint64_t old=atomic_exchange(&g_kb_btn,buttons);
+    atomic_fetch_or(&g_kb_latch,buttons & ~old);
+    atomic_store(&g_kb_axes,(uint64_t)(uint16_t)lx | (uint64_t)(uint16_t)ly<<16 | (uint64_t)(uint16_t)rx<<32 | (uint64_t)(uint16_t)ry<<48);
+}
+void dm_kb_clear(void) {
+    // Keyboard focus was lost: pending press edges must not play after return.
+    atomic_store(&g_kb_btn,0);
+    atomic_store(&g_kb_axes,0);
+    atomic_store(&g_kb_latch,0);
+}
 void dm_pad_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
     uint64_t old = atomic_exchange(&g_pad_btn, buttons); atomic_fetch_or(&g_pad_latch, buttons & ~old);
+    // Only an explicit *new* pad input can reclaim visual ownership from
+    // keyboard/mouse. A button already held before the keyboard takeover
+    // is not a new event, nor is a steady, deflected analog stick.
+    static _Atomic int pad_stick_out;
+    int deflected=(lx>8192 || lx< -8192 || ly>8192 || ly< -8192 ||
+                   rx>8192 || rx< -8192 || ry>8192 || ry< -8192);
+    int centred=(lx<4915 && lx> -4915 && ly<4915 && ly> -4915 &&
+                 rx<4915 && rx> -4915 && ry<4915 && ry> -4915);
+    int prev_stick=atomic_load(&pad_stick_out);
+    if(centred)atomic_store(&pad_stick_out,0);
+    else if(deflected)atomic_store(&pad_stick_out,1);
+    extern void dm_kbmap_external_owner(int) __attribute__((weak));
+    if(dm_kbmap_external_owner && ((buttons & ~old) ||
+                                  (deflected && !prev_stick)))
+        dm_kbmap_external_owner(0);
     atomic_store(&g_pad_axes, (uint64_t)(uint16_t)lx | (uint64_t)(uint16_t)ly << 16 | (uint64_t)(uint16_t)rx << 32 | (uint64_t)(uint16_t)ry << 48);
 }
 void dm_input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
@@ -110,7 +141,7 @@ static void ui_taps_step(void) {
 }
 static _Atomic uint64_t g_stick_ns;
 uint64_t dm_stick_last_ns(void) { return atomic_load(&g_stick_ns); }   // 「点地移动包只许来自摇杆」的判据（diag.c c2s_deliver） | criterion for "click-to-move packets may only come from the stick" (diag.c c2s_deliver)
-uint64_t dm_input_samples(void) { return (uint64_t)atomic_load(&g_sampling); }   // 游戏已取手柄的累计次数（前端据此判断一下按键是否已被游戏看到） | cumulative number of times the game has read the controller (the front end uses it to judge whether a key press has been seen by the game)
+uint64_t dm_input_samples(void) { return atomic_load(&g_valid_sampling); }   // 游戏已取手柄的累计次数（前端据此判断一下按键是否已被游戏看到） | cumulative number of times the game has read the controller (the front end uses it to judge whether a key press has been seen by the game)
 
 static uint32_t connected_id(void) { return dm_opmode() == 0 ? NPAD_HANDHELD : 0; }   // 跟运行模式走（hle_oe.c 唯一来源） | follows the operation mode (hle_oe.c is the single source)
 static uint32_t style_of(uint32_t id) {
@@ -391,6 +422,7 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
     memset(s, 0, sizeof *s);
     s->sampling = ++g_sampling;
     if (!(style_of(id) & style)) { receipt(s, id, style, 0, read_start_ns); return; } // 没接这个样式：全0返回也收样 | this style is not connected: an all-zero return is sampled as well
+    atomic_fetch_add(&g_valid_sampling,1);
     uint64_t km = keys_now();
     // 各通道的键先合起来（触屏 / 按键脚本 / 宿主替按 + 手柄；手柄没连时全 0），再裁决「独占的一下」——替玩家按的那一下要看的是游戏这一次实际会收到什么，
     // 不是某一个通道（先前只看了触屏通道，手柄玩家进局头 1.5 秒按 ＋ 开背包仍会把独占的 L 撞成换页签）
@@ -401,15 +433,19 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
     { uint64_t dm_ui_alone_take(uint64_t);
       uint64_t tb = ((g_in.buttons | atomic_load(&g_press_latch)) & ~dm_ui_auto_release()) | (km & ~(uint64_t)PK_MASK) | dm_ui_auto_buttons(), pb = atomic_load(&g_pad_btn) | atomic_load(&g_pad_latch);
       static int t_old = -1; if (t_old < 0) t_old = getenv("DM_TEST_ALONE_NOPAD") != NULL;   // 测试对照：复刻改前的做法（裁决不看手柄键、独占时手柄键照样并进去） | Test control: reproduces the pre-change behavior (the arbitration ignores controller buttons, and controller buttons are still merged in during an exclusive press)
-      uint64_t alone = dm_ui_alone_take(t_old ? tb : tb | pb);
-      if (alone) s->buttons = t_old ? alone | atomic_load(&g_pad_btn) | atomic_exchange(&g_pad_latch, 0) : alone;   // 独占的一下（dm_cursor.c）：别的键这几帧不交，两条按下沿锁存都不清，之后照常给出 | The exclusive press (dm_cursor.c): other buttons are withheld for these few frames, neither press-edge latch is cleared, and they are delivered as usual afterwards
-      else s->buttons = ((g_in.buttons | atomic_exchange(&g_press_latch, 0)) & ~dm_ui_auto_release()) | (km & ~(uint64_t)PK_MASK) | dm_ui_auto_buttons() | atomic_load(&g_pad_btn) | atomic_exchange(&g_pad_latch, 0); }
+      uint64_t kb=atomic_load(&g_kb_btn) | atomic_load(&g_kb_latch);
+      uint64_t alone = dm_ui_alone_take(t_old ? tb : tb | pb | kb);
+      if (alone) s->buttons = t_old ? alone | atomic_load(&g_pad_btn) | atomic_exchange(&g_pad_latch, 0) | atomic_load(&g_kb_btn) | atomic_exchange(&g_kb_latch, 0) : alone;   // 独占的一下（dm_cursor.c）：别的键这几帧不交，两条按下沿锁存都不清，之后照常给出 | The exclusive press (dm_cursor.c): other buttons are withheld for these few frames, neither press-edge latch is cleared, and they are delivered as usual afterwards
+      else s->buttons = ((g_in.buttons | atomic_exchange(&g_press_latch, 0)) & ~dm_ui_auto_release()) | (km & ~(uint64_t)PK_MASK) | dm_ui_auto_buttons() | atomic_load(&g_pad_btn) | atomic_exchange(&g_pad_latch, 0) | atomic_load(&g_kb_btn) | atomic_exchange(&g_kb_latch, 0); }
     s->lx = g_in.lx; s->ly = g_in.ly; s->rx = g_in.rx; s->ry = g_in.ry;
     // 摇杆：触屏摇杆有值就用触屏的，否则用手柄的。手柄那边只在手柄模式、且摇杆确实推出来了才给非零值（dm_gamepad.m），放在一边有点漂移的手柄到不了这里
     // Sticks: if the touch stick has a value use it, otherwise use the controller's. The controller side only gives a non-zero value in controller mode and when the
     // stick has actually been pushed out (dm_gamepad.m), so a slightly drifting controller left lying aside never reaches here
     { uint64_t ax = atomic_load(&g_pad_axes); int16_t plx = (int16_t)ax, ply = (int16_t)(ax >> 16), prx = (int16_t)(ax >> 32), pry = (int16_t)(ax >> 48);
-      if (!(s->lx || s->ly) && (plx || ply)) { s->lx = plx; s->ly = ply; } if (!(s->rx || s->ry) && (prx || pry)) { s->rx = prx; s->ry = pry; } }
+      if (!(s->lx || s->ly) && (plx || ply)) { s->lx = plx; s->ly = ply; } if (!(s->rx || s->ry) && (prx || pry)) { s->rx = prx; s->ry = pry; }
+      uint64_t ka=atomic_load(&g_kb_axes); int16_t klx=(int16_t)ka,kly=(int16_t)(ka>>16),krx=(int16_t)(ka>>32),kry=(int16_t)(ka>>48);
+      if(!(s->lx || s->ly) && (klx || kly)) { s->lx=klx; s->ly=kly; }
+      if(!(s->rx || s->ry) && (krx || kry)) { s->rx=krx; s->ry=kry; } }
     { int dm_padmode_input_gate(uint64_t *); if (dm_padmode_input_gate(&s->buttons)) s->lx = s->ly = s->rx = s->ry = 0; }   // 手柄 / 触屏切换事务进行中：键和摇杆都不交给游戏；触发切换时按着的键松开前也不交（dm_padmode.c） | Controller / touch switch transaction in progress: neither keys nor sticks are handed to the game; keys held when the switch was triggered are not handed over either until released (dm_padmode.c)
     if (dm_pad_hook) dm_pad_hook(guest_ns(), &s->buttons, &s->lx, &s->ly, &s->rx, &s->ry);
     // 镜头实验：摇杆 / 瞄准按透视画面方向换成原版方向（dm_cam.c；镜头关着原样不动）。放在 dm_pad_hook 之后：安卓的触屏摇杆是在那里才填进来的

@@ -354,6 +354,10 @@ static void auto_pot_pump(uint8_t *b, uint64_t pl) {
 // Charge count = the item's own "charged skill" stat 204 (layer = skill id << 6 | level, value = max << 8 | remaining), read from the game's stat table, not tracked by us.
 enum { SS_IDLE, SS_REQ, SS_SWAPPING, SS_READY, SS_RELEASED, SS_BACK, SS_REBIND };
 static _Atomic int g_ss_phase, g_ss_srv_wset = -1, g_ss_kind[12], g_ss_charges[12], g_ss_alt[12];
+static _Atomic int g_pc_manual_weapon_swap;
+void dm_swapskill_manual_request(void) {
+    atomic_store(&g_pc_manual_weapon_swap,1);
+}
 static _Atomic uint64_t g_ss_bit;          // 这一次压住 / 放行的那个键位 | The button bit held back / let through this time
 static _Atomic int g_ss_slot = -1, g_ss_early, g_ss_dead_town, g_ss_cast, g_ss_zl;   // g_ss_cast：放行后看见施法了（次数减了 / 进了动作）；g_ss_zl：按下那一刻 ZL 按着（第二套技能），补按时一并带上   // 死了 / 在城里：按下不换武器（城里原版本来就放不了技能，切过去只会白换两次）   // 玩家在切好之前就松手了 | g_ss_cast: a cast was seen after letting through (count went down / entered an action); g_ss_zl: ZL was held at the moment of the press (second skill set), carried along in supplementary presses   // dead / in town: a press does not swap weapons (in town the original game cannot cast skills anyway, switching over would only swap twice for nothing)   // the player released before the swap was done
 static _Atomic uint64_t g_ss_map[6];       // 6 个面：手柄位 | 普通格 << 32 | 替代格（按住 ZL）<< 40 | 6 face buttons: controller bit | normal cell << 32 | alternate cell (hold ZL) << 40
@@ -435,6 +439,11 @@ static void swapskill_pump(uint8_t *b, uint64_t pl) {
     int ph = atomic_load(&g_ss_phase), w = atomic_load(&g_ss_srv_wset);
     uint64_t sl = *(uint64_t *)(pl + 0x100); int busy = sl && *(uint64_t *)(sl + 0x18);
     void (*swap0)(int) = (void (*)(int))(b + 0x41db90);
+    if(atomic_exchange(&g_pc_manual_weapon_swap,0) && ph==SS_IDLE &&
+       w>=0 && !busy && !dead && dm_uiscreen_ingame()) {
+        // Same original guest weapon-swap path as the native inventory tabs.
+        swap0(w);
+    }
     // 测试开关 DM_TEST_SS_REJECT=<次数>：连招里前这么多次「换过去」不发（模拟服务端拒绝 / 包丢了），验重试
     // Test switch DM_TEST_SS_REJECT=<count>: in the combo, the first this-many "swap over" attempts are not sent (simulating server rejection / packet loss), to verify the retry
     static int rej_left = -1; if (rej_left < 0) { const char *e = getenv("DM_TEST_SS_REJECT"); rej_left = e ? atoi(e) : 0; }

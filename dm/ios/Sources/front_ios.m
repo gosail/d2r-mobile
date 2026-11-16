@@ -323,6 +323,8 @@ static void restart_cover_hook(int on) { dispatch_async(dispatch_get_main_queue(
 }
 - (void)cancelControlsFrom:(const char *)source {
     _pendEnd=nil; _finalAsked=NO;
+    [_middleMouseTouches removeAllObjects];
+    [_pointerAsTouch removeAllObjects];
     for(int i_=0;i_<16;i_++) _slot[i_]=nil; dm_tc_cancel_all(&_controls); [self pushFrom:source phase:"none"];
     if(_uiDragOn) { _uiDragOn=NO; dm_ui_drag_end(); }
     _mapTouch=_bindTouch=nil;

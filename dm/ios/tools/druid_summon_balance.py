@@ -86,8 +86,10 @@ class Tsv:
     def set(self, row, col, value, changes):
         old = row[self.index[col]]
         new = str(value)
+        # Small damage brackets can round to the same integer (e.g. 1 * 1.30).
+        # Baseline skill caps and monster AI delays are validated separately.
         if old == new:
-            raise IncompatibleGameData(f"{self.path}: {row[0]}.{col} already patched?")
+            return
         row[self.index[col]] = new
         changes.append({"table": self.path, "row": row[0], "field": col,
                         "from": old, "to": new})

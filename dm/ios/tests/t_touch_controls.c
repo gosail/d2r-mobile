@@ -322,6 +322,32 @@ static void pointer_merc_hold(void) {
     dm_tc_begin_at(&s,0,400,120,20.0); dm_tc_pointer_item(&s,12); dm_tc_tick(&s,20.6); CHECK(s.buttons==DM_BTN_X);
     dm_tc_set_navigation_mode(&s,0); CHECK((s.buttons&DM_BTN_X)==0);
 }
+/* The upstream mercenary hold must not turn a physical mouse item press
+   into a touch long-press. Check both gesture owners sequentially. */
+static void physical_mouse_item_vs_hire_hold(void) {
+    dm_tc_state s; dm_tc_init(&s, 667, 375);
+    dm_tc_set_navigation_mode(&s, 1); s.mouse_click_mode = 1;
+    s.mouse_item_mode = 1;
+    dm_tc_begin_at(&s, 0, 300, 180, 30.0);
+    dm_tc_pointer_item(&s, 1);
+    CHECK(s.finger[0].mouse_item);
+    dm_tc_tick(&s, 30.8);
+    CHECK(!s.finger[0].pointer_long);
+    CHECK((s.buttons & DM_BTN_X) == 0);
+    dm_tc_end_at(&s, 0, 30.9);
+    CHECK(s.pulse_button == DM_BTN_A);
+    CHECK(s.long_press_seq == 0);
+    CHECK(dm_tc_pulse_end(&s, s.pulse_epoch));
+    s.mouse_item_mode = 0;
+    dm_tc_begin_at(&s, 0, 400, 120, 32.0);
+    dm_tc_pointer_item(&s, 12);
+    dm_tc_tick(&s, 32.6);
+    CHECK(s.pointer_merc && !s.finger[0].mouse_item);
+    CHECK((s.buttons & DM_BTN_X) != 0);
+    dm_tc_end_at(&s, 0, 32.7);
+    CHECK((s.buttons & DM_BTN_X) == 0);
+    CHECK(s.pointer_merc == 0);
+}
 static void pointer_item_tap(void) {
     dm_tc_scene scene={0}; dm_tc_navigation(&scene,"PanelManager","UnloadAll","");
     dm_tc_state s; dm_tc_init(&s,667,375); dm_tc_set_navigation_mode(&s,1);
@@ -667,7 +693,7 @@ int main(void) {
     RUN(hit_edges); RUN(key_hold_and_ownership); RUN(two_fingers_same_key); RUN(joystick_deadzone); RUN(joystick_clamp_956);
     RUN(joystick_axes); RUN(joystick_plus_skills); RUN(no_auto_handoff); RUN(background_no_key);
     RUN(circles_before_joystick); RUN(cancel_and_resize); RUN(deferred_skill_vs_belt); RUN(held_skill2_vs_belt); RUN(belt_single_double); RUN(no_ui_drag_outside_modal); RUN(invalid_slots_and_repeated_begin); RUN(all_slots_hold); RUN(enabled_targets); RUN(ui_scene_messages);
-    RUN(pointer_tap); RUN(world_tap); RUN(pointer_outside_close); RUN(scene_dialog_only); RUN(pointer_item_tap); RUN(pointer_stack_tap); RUN(pointer_merc_hold); RUN(pointer_over_disabled_target); RUN(ui_drag_typing); RUN(pointer_drag_out); RUN(pointer_drag); RUN(pointer_long); RUN(pointer_long_then_drag); RUN(pointer_long_seq); RUN(pointer_shop_drag); RUN(pointer_control_hit); RUN(pointer_game_mode); RUN(pointer_pulse_queue); RUN(safe_insets); RUN(swap_key); RUN(skill_cluster_clearance);
+    RUN(pointer_tap); RUN(world_tap); RUN(pointer_outside_close); RUN(scene_dialog_only); RUN(pointer_item_tap); RUN(pointer_stack_tap); RUN(pointer_merc_hold); RUN(physical_mouse_item_vs_hire_hold); RUN(pointer_over_disabled_target); RUN(ui_drag_typing); RUN(pointer_drag_out); RUN(pointer_drag); RUN(pointer_long); RUN(pointer_long_then_drag); RUN(pointer_long_seq); RUN(pointer_shop_drag); RUN(pointer_control_hit); RUN(pointer_game_mode); RUN(pointer_pulse_queue); RUN(safe_insets); RUN(swap_key); RUN(skill_cluster_clearance);
     RUN(belt_expand);
     printf("PASS %d/%d cases; %d/%d checks\n",cases,cases,checks,checks); return 0;
 }

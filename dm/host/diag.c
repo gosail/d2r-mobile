@@ -847,11 +847,11 @@ static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint6
  * A 128-byte direct-BL scan may cross function boundaries: treat every
  * printed target as a candidate, not a proven native replacement hook. */
 static void dm_dual_merc_native_handler_probe(void) {
-    static int shown;
-    if (shown) return;
+    static _Atomic int shown;
+    if (atomic_load(&shown)) return;
     module_t *m = main_mod();
     if (!m || !m->base || !m->text_end) return;
-    shown = 1;
+    if (atomic_exchange(&shown, 1)) return;
     const uint64_t base = (uint64_t)(uintptr_t)m->base;
     const uint64_t table = 0x20a4190;
     const unsigned opcodes[] = {0x36, 0x38, 0x62};

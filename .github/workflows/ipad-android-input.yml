@@ -67,8 +67,8 @@ jobs:
           # Packaging-only fallback skips generated, user-owned native game
           # headers. This verifies all Android app Java, not the native link.
           mkdir -p /tmp/dm-ci-prebuilt/arm64-v8a
-          gradle -p dm/android :app:compileDebugJavaWithJavac \\
-            -PdmPrebuiltJni=/tmp/dm-ci-prebuilt -PdmPython=python3 \\
+          gradle -p dm/android :app:compileDebugJavaWithJavac \
+            -PdmPrebuiltJni=/tmp/dm-ci-prebuilt -PdmPython=python3 \
             --no-daemon --stacktrace
   apple-syntax:
     runs-on: macos-15

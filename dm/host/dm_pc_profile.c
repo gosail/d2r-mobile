@@ -176,6 +176,14 @@ void dm_pc_profile_pre_commit_locked(const char *workdir) {
                         rc=dm_keyfile_bind_checked(&latest,id,slot,
                             edited_vk[id][slot],NULL,NULL);
                         if(rc==DM_KEYFILE_OK)need_write=1;
+                        else if(rc==DM_KEYFILE_CONFLICT || rc==DM_KEYFILE_NOT_FOUND) {
+                            // Another guest binding now owns that key, or
+                            // this command no longer exists in the file.
+                            // Preserve the guest's data and continue with
+                            // other independent host edits.
+                            edited[id][slot]=0;
+                            rc=DM_KEYFILE_OK;
+                        }
                     }
                 }
         // Avoid rewriting, fsyncing and backing up a native .key on every

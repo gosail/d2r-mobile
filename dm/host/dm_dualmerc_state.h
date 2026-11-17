@@ -14,7 +14,7 @@
 #define DM_DUALMERC_GEAR_MAX 10
 #define DM_DUALMERC_ITEM_BYTES_MAX 1024
 #define DM_DUALMERC_STATE_BYTES_MAX (2u * DM_DUALMERC_GEAR_MAX * (DM_DUALMERC_ITEM_BYTES_MAX + 16u) + 256u)
-#define DM_DUALMERC_STATE_VERSION 1
+#define DM_DUALMERC_STATE_VERSION 2
 
 typedef struct {
     uint8_t body_slot;
@@ -32,6 +32,7 @@ typedef struct {
 
 typedef struct {
     uint64_t generation;
+    uint8_t native_slot; /* Which of the two is serialized by original .d2s */
     dm_dualmerc_saved_slot slot[DM_DUALMERC_SLOTS];
 } dm_dualmerc_saved_state;
 
@@ -79,6 +80,7 @@ static inline uint32_t dm_dualmerc_crc32(const uint8_t *d, size_t n) {
 static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
     if (!s) return 0;
     dm_dualmerc_roster roster = {0};
+    unsigned occupied = 0;
     for (unsigned a = 0; a < DM_DUALMERC_SLOTS; ++a) {
         const dm_dualmerc_saved_slot *m = &s->slot[a];
         if (!m->occupied) {
@@ -90,6 +92,7 @@ static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
             m->difficulty > 2 || m->dead > 1 || !m->level ||
             m->gear_count > DM_DUALMERC_GEAR_MAX ||
             dm_dualmerc_act_for_class(m->monster_class) != m->act) return 0;
+        ++occupied;
         roster.slot[a].occupied = m->occupied;
         roster.slot[a].act = m->act;
         roster.slot[a].difficulty = m->difficulty;
@@ -109,7 +112,11 @@ static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
                 if (m->gear[k].persistent_item_id == it->persistent_item_id) return 0;
         }
     }
-    return dm_dualmerc_roster_valid(&roster);
+    /* Exactly one occupied slot is backed by vanilla .d2s; the other
+     * is sidecar-only. Without this tag, reload may duplicate an item. */
+    return dm_dualmerc_roster_valid(&roster) &&
+           (occupied ? s->native_slot < DM_DUALMERC_SLOTS &&
+                       s->slot[s->native_slot].occupied : s->native_slot == 0);
 }
 
 static inline dm_dualmerc_roster dm_dualmerc_state_roster(const dm_dualmerc_saved_state *s) {
@@ -146,7 +153,8 @@ static inline int dm_dualmerc_state_apply_verified(
     return 1;
 }
 
-/* Canonical format: magic SWM2, v1, two slots, generation, total size,
+/* Canonical format: magic SWM2, v2, two slots, generation, total size,
+ * native-slot pointer (which slot is present in original .d2s),
  * one 32-byte slot record per slot followed by 0-10 item bitstreams,
  * CRC32. Write inside the existing transactional save work directory. */
 static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
@@ -158,12 +166,12 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
     if (cap > DM_DUALMERC_STATE_BYTES_MAX) cap = DM_DUALMERC_STATE_BYTES_MAX;
     /* Preflight the *entire* serialization size. On insufficient capacity,
      * do not modify even one byte of caller's buffer. */
-    size_t required = 20 + 4 + 32 * DM_DUALMERC_SLOTS;
+    size_t required = 24 + 4 + 32 * DM_DUALMERC_SLOTS;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k)
         for (unsigned i = 0; i < s->slot[k].gear_count; ++i)
             required += 12 + s->slot[k].gear[i].size;
     if (required > cap) return DM_DUALMERC_CODEC_CAPACITY;
-    size_t len = 20;
+    size_t len = 24;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k) {
         const dm_dualmerc_saved_slot *m = &s->slot[k];
         if (len + 32 + 4 > cap) return DM_DUALMERC_CODEC_CAPACITY;
@@ -198,6 +206,8 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
     dm_dualmerc_store_u16(dst + 6, DM_DUALMERC_SLOTS);
     dm_dualmerc_store_u64(dst + 8, s->generation);
     dm_dualmerc_store_u32(dst + 16, (uint32_t)(len + 4));
+    dst[20] = s->native_slot;
+    memset(dst + 21, 0, 3);
     dm_dualmerc_store_u32(dst + len, dm_dualmerc_crc32(dst, len));
     *written = len + 4;
     return DM_DUALMERC_CODEC_OK;
@@ -208,17 +218,19 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
 static inline dm_dualmerc_codec_result dm_dualmerc_state_decode(
     const uint8_t *src, size_t n, dm_dualmerc_saved_state *dst)
 {
-    if (!src || !dst || n < 20 + 2 * 32 + 4 ||
+    if (!src || !dst || n < 24 + 2 * 32 + 4 ||
         n > DM_DUALMERC_STATE_BYTES_MAX || memcmp(src, "SWM2", 4) ||
         dm_dualmerc_load_u16(src + 4) != DM_DUALMERC_STATE_VERSION ||
         dm_dualmerc_load_u16(src + 6) != DM_DUALMERC_SLOTS ||
-        dm_dualmerc_load_u32(src + 16) != n)
+        dm_dualmerc_load_u32(src + 16) != n ||
+        src[21] || src[22] || src[23])
         return DM_DUALMERC_CODEC_INVALID;
     if (dm_dualmerc_crc32(src, n - 4) != dm_dualmerc_load_u32(src + n - 4))
         return DM_DUALMERC_CODEC_INTEGRITY;
     dm_dualmerc_saved_state tmp = {0};
     tmp.generation = dm_dualmerc_load_u64(src + 8);
-    size_t at = 20;
+    tmp.native_slot = src[20];
+    size_t at = 24;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k) {
         if (at + 32 > n - 4) return DM_DUALMERC_CODEC_INVALID;
         dm_dualmerc_saved_slot *m = &tmp.slot[k];

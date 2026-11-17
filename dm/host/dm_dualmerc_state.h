@@ -156,6 +156,13 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
     if (!s || !dst || !written || !dm_dualmerc_state_valid(s))
         return DM_DUALMERC_CODEC_INVALID;
     if (cap > DM_DUALMERC_STATE_BYTES_MAX) cap = DM_DUALMERC_STATE_BYTES_MAX;
+    /* Preflight the *entire* serialization size. On insufficient capacity,
+     * do not modify even one byte of caller's buffer. */
+    size_t required = 20 + 4 + 32 * DM_DUALMERC_SLOTS;
+    for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k)
+        for (unsigned i = 0; i < s->slot[k].gear_count; ++i)
+            required += 12 + s->slot[k].gear[i].size;
+    if (required > cap) return DM_DUALMERC_CODEC_CAPACITY;
     size_t len = 20;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k) {
         const dm_dualmerc_saved_slot *m = &s->slot[k];

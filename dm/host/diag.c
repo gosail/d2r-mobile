@@ -1057,12 +1057,17 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
 
 static _Atomic int g_dm_trial_full_notice;
 
-/* A disposable-save trial only: default OFF, no secondary save loader yet. */
+/* This code is present ONLY in a deliberately marked offline experimental
+ * IPA carrying SVC #0x94. Ordinary builds never contain that native gate.
+ * Trial is on for that IPA so iPad users can test without launch arguments.
+ * DM_DUAL_MERC_KEEP_FIRST=0 disables it for debugging. This does not persist
+ * the second mercenary: use a throwaway, unequipped character only. */
 static int dm_dualmerc_trial_enabled(void) {
     static int enabled = -1;
     if (enabled < 0) {
         const char *p = getenv("DM_DUAL_MERC_KEEP_FIRST");
-        enabled = gate_svc_present(SVC_HOST_DUALMERC_QUERY) && p && !strcmp(p, "1");
+        enabled = gate_svc_present(SVC_HOST_DUALMERC_QUERY) &&
+                  (!p || strcmp(p, "0"));
         if (enabled) LOG("DM_DUAL_MERC_TRIAL：仅测试空装备双佣兵；退出/重进不保留第二佣兵");
     }
     return enabled;
@@ -1228,10 +1233,14 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         }
     }
     dm_dual_merc_probe_tick(G, player, 0);
-    if (player && atomic_exchange(&g_dm_trial_full_notice, 0)) {
-        module_t *mm = main_mod();
-        if (mm) dm_game_notice((uint8_t *)mm->base,
-            "已有两名佣兵：选择替换目标功能尚未实现，已阻止本次雇佣");
+    if (player) {
+        int reason = atomic_exchange(&g_dm_trial_full_notice, 0);
+        if (reason) {
+            module_t *mm = main_mod();
+            if (mm) dm_game_notice((uint8_t *)mm->base, reason == 1
+                ? "已有两名佣兵：选择替换目标尚未完成，本次未扣金币"
+                : "请先卸下旧佣兵装备再测试双佣兵；本次未雇佣");
+        }
     }
     uint32_t sig = 0;
     if (player && tk_rd(player + 0x90, &inv, 8) && tk_rd(inv, &sig, 4) && sig == 0x01020304) {
@@ -1862,11 +1871,31 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
         regs[0] && regs[1] >= 5) {
         uint8_t op = 0;
         if (tk_rd(regs[0] + 4, &op, 1) && op == 0x36) {
-            int count = dm_dualmerc_trial_pet_nodes(g_player_unit, NULL);
-            if (count >= 0 && dm_dualmerc_trial_block_full((unsigned)count)) {
-                LOG("DM_DUAL_MERC_TRIAL：两佣兵已满，阻止原版自动替换；待 UI 指定旧佣兵后才能继续");
+            uint64_t first = 0;
+            int count = dm_dualmerc_trial_pet_nodes(g_player_unit, &first);
+            if (count < 0) {
+                LOG("DM_DUAL_MERC_TRIAL：佣兵列表读取异常，拒绝未经确认的实验性雇佣");
                 atomic_store(&g_dm_trial_full_notice, 1);
                 return;
+            }
+            if (dm_dualmerc_trial_block_full((unsigned)count)) {
+                LOG("DM_DUAL_MERC_TRIAL：已有两佣兵，阻止原版自动替换");
+                atomic_store(&g_dm_trial_full_notice, 1);
+                return;
+            }
+            if (count == 1) {
+                uint32_t id = UINT32_MAX;
+                if (!first || !tk_rd(first + 4, &id, 4)) {
+                    atomic_store(&g_dm_trial_full_notice, 2);
+                    return;
+                }
+                dm_merc_probe_unit old = dm_merc_probe_unit_read(g_lastG, id, 0);
+                if (dm_dualmerc_trial_block_equipped(1,
+                       old.gear.status == DM_MERC_GEAR_OK, old.gear.count)) {
+                    LOG("DM_DUAL_MERC_TRIAL：旧佣兵装备非空或未能确认；阻止雇佣以避免丢失装备");
+                    atomic_store(&g_dm_trial_full_notice, 2);
+                    return;
+                }
             }
         }
     }

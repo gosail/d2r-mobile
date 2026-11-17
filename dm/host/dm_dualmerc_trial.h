@@ -39,6 +39,10 @@ static inline int dm_dualmerc_trial_keep_one(const dm_dualmerc_trial_conditions 
  * hires rather than silently replacing the wrong hireling or losing gear.
  * The original game does not support selecting which of two gets replaced.
  */
+static inline int dm_dualmerc_trial_block_equipped(
+    unsigned count, unsigned inventory_verified, unsigned equipped_items) {
+    return count == 1 && (!inventory_verified || equipped_items > 0);
+}
 static inline int dm_dualmerc_trial_block_full(unsigned count) {
     return count >= DM_DUALMERC_SLOTS;
 }

@@ -36,6 +36,10 @@ int main(void) {
     c.guest_classes_valid = 0;
     assert(!dm_dualmerc_trial_keep_one(&c));
     assert(!dm_dualmerc_trial_keep_one(NULL));
+    assert(!dm_dualmerc_trial_block_equipped(0, 0, 12));
+    assert(dm_dualmerc_trial_block_equipped(1, 0, 0));
+    assert(dm_dualmerc_trial_block_equipped(1, 1, 1));
+    assert(!dm_dualmerc_trial_block_equipped(1, 1, 0));
     assert(!dm_dualmerc_trial_block_full(0));
     assert(!dm_dualmerc_trial_block_full(1));
     assert(dm_dualmerc_trial_block_full(2));

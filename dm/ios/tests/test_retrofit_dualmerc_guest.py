@@ -26,10 +26,10 @@ def segment(name, sections):
     return blob
 
 
-FIXUPS = ("# TARGET 0x0\n# TEXT_END 0x4000\n# PATCH_OFF 0x9000\n"
+FIXUPS = ("# TARGET 0x0\n# TEXT_END 0x4000\n# PATCH_OFF 0xc000\n"
           "# KEY_PAGE_OFF 0x5000\n# KEY_KGATE_IDX 3\n")
 CUTS = "# BUILD_ID " + BUILD_ID + "\n"
-GATES = "0x9004 svc 129 0x10\n"
+GATES = "0xc004 svc 129 0x10\n"
 SITES = tuple((site, struct.pack("<I", branch_word(site, dest)).hex(),
                struct.pack("<I", svc_word(svc)).hex(), "synthetic " + str(i), "仅宿主")
               for i, (site, dest, svc) in enumerate(
@@ -40,7 +40,7 @@ SITES = tuple((site, struct.pack("<I", branch_word(site, dest)).hex(),
 def fixture():
     x0_size = 0x4000
     x1_size = 0x4000
-    writable_size = 0x5000
+    writable_size = 0x8000
     off0 = 0x400
     off1 = off0 + x0_size
     offw = off1 + x1_size
@@ -69,7 +69,7 @@ class RetrofitGuestTests(unittest.TestCase):
         self.assertEqual(macho_sections(changed), macho_sections(raw))
         self.assertEqual(changed[off1:off1 + 32], raw[off1:off1 + 32])
         for i, (site, old, svc, _, _) in enumerate(SITES):
-            start = 0x9000 + 32 + i * STUB_BYTES
+            start = 0xc000 + 32 + i * STUB_BYTES
             self.assertEqual(changed[off0 + site:off0 + site + 4],
                              struct.pack("<I", b_branch(site, start)))
             expected = gate_stub(start, site + 4, 0x5000, 3)

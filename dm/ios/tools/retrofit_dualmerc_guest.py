@@ -187,12 +187,10 @@ def retrofit_bytes(guest, fixups, cuts, gates, sites=None):
         # The site jumps to the hosted gate, whose return path resumes at BL+4.
         original[x0 + site:x0 + site + 4] = struct.pack("<I", b_branch(site, stub_rva))
         new_cuts.append(f"{site:#x}\t{old}\t{original[x0+site:x0+site+4].hex()}\t{scope}\t{desc}")
-        svc_num = next((v for s, _, v, _, _ in entries if s == site), None)
-        if svc_num is None:
-            raise ValueError("No matching host SVC cut")
-        # The second instruction is a host gate callback, not an actual svc in the guest.
-        # The host register table uses the SVC number extracted from cut bytes.
-        svc_insn = int(svc, 16)
+        # The original site is a B to the new trampoline; the host gate
+        # registration encodes the SVC that would have appeared in patch_nso.
+        # The cut's four-byte hex string is little-endian ARM64 instruction data.
+        svc_insn, = struct.unpack("<I", bytes.fromhex(svc))
         if (svc_insn & 0xffe0001f) != 0xd4000001:
             raise ValueError("Invalid host SVC instruction encoding")
         num = (svc_insn >> 5) & 0xffff

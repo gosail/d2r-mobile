@@ -1078,9 +1078,12 @@ static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
     uint64_t pd = 0, plist = 0, arr = 0, node = 0, next = 0;
     if (first) *first = 0;
     if (!player || !tk_rd(player + 0x10, &pd, 8) || !pd ||
-        !tk_rd(pd + 0x98, &plist, 8) || !plist ||
-        !tk_rd(plist, &arr, 8) || !arr ||
-        !tk_rd(arr + 7 * 0x20, &node, 8)) return -1;
+        !tk_rd(pd + 0x98, &plist, 8)) return -1;
+    /* Before the FIRST mercenary the native pet roster may not exist yet. */
+    if (!plist) return 0;
+    if (!tk_rd(plist, &arr, 8)) return -1;
+    if (!arr) return 0;
+    if (!tk_rd(arr + 7 * 0x20, &node, 8)) return -1;
     if (first) *first = node;
     for (int n = 0; n <= DM_DUALMERC_SLOTS; ++n) {
         if (!node) return n;

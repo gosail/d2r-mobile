@@ -1,6 +1,7 @@
 /*
  * Strictly disposable-save-only server hire experiment. Pure logic.
- * This is intentionally disabled by default. No persistence, no UI chooser.
+ * Only the special offline trial Guest (SVC 0x94) may enable this code.
+ * No persistence and no replacement-choice UI exist yet.
  * In the game's native 0x687648 get-existing-pet call, a valid "keep" result
  * substitutes a NULL *only to that one caller*, preserving the original pet.
  * Game creation of a second pet still requires live engine validation.

@@ -34,7 +34,7 @@ static void empty_and_corruption(void) {
     memset(&s, 0, sizeof s);
     assert(dm_dualmerc_state_valid(&s));
     size_t n = encode();
-    assert(n == 88);
+    assert(n == 92);
     assert(dm_dualmerc_state_decode(wire, n, &decoded) == DM_DUALMERC_CODEC_OK);
     assert(!memcmp(&s, &decoded, sizeof s));
     assert(dm_dualmerc_state_decode(wire, n - 1, &decoded) == DM_DUALMERC_CODEC_INVALID);
@@ -86,6 +86,16 @@ static void roundtrip_and_limits(void) {
     assert(!dm_dualmerc_state_valid(&s)); /* same Act II, different difficulty */
     s.slot[0] = original;
 
+    assert(dm_dualmerc_state_valid(&s));
+    s.native_slot = 1;
+    assert(dm_dualmerc_state_valid(&s)); /* either equipped merc may be native */
+    n = encode();
+    assert(dm_dualmerc_state_decode(wire, n, &decoded) == DM_DUALMERC_CODEC_OK);
+    assert(decoded.native_slot == 1);
+    s.native_slot = 0;
+    s.slot[0] = (dm_dualmerc_saved_slot){0};
+    assert(!dm_dualmerc_state_valid(&s)); /* native slot must be occupied */
+    s.slot[0] = original;
     assert(dm_dualmerc_state_valid(&s));
     n = encode();
     size_t not_written = 99;

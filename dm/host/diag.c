@@ -9,6 +9,8 @@
 #include "dm_elysium.h"
 #include "dm_bossrush.h"
 #include "dm_dualmerc_policy.h"
+#include "dm_dualmerc_trial.h"
+#include "hle.h"
 #include "dm_merc_trace.h"
 #include <TargetConditionals.h>
 #include <fcntl.h>
@@ -1053,9 +1055,86 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     }
 }
 
-/* Exact verified 3.3 native hire call-site gates. All three calls are
- * ALWAYS forwarded unchanged; this instrumentation neither allows nor
- * prevents two hirelings, and makes no item or save changes.
+/* A disposable-save trial only: default OFF, no secondary save loader yet. */
+static int dm_dualmerc_trial_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *p = getenv("DM_DUAL_MERC_KEEP_FIRST");
+        enabled = gate_svc_present(SVC_HOST_DUALMERC_QUERY) && p && !strcmp(p, "1");
+        if (enabled) LOG("DM_DUAL_MERC_TRIAL：仅测试空装备双佣兵；退出/重进不保留第二佣兵");
+    }
+    return enabled;
+}
+
+/* Verifies the exact owner's server-side type-7 list; -1 = unreadable. */
+static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
+    uint64_t pd = 0, plist = 0, arr = 0, node = 0, next = 0;
+    if (first) *first = 0;
+    if (!player || !tk_rd(player + 0x10, &pd, 8) || !pd ||
+        !tk_rd(pd + 0x98, &plist, 8) || !plist ||
+        !tk_rd(plist, &arr, 8) || !arr ||
+        !tk_rd(arr + 7 * 0x20, &node, 8)) return -1;
+    if (first) *first = node;
+    for (int n = 0; n <= DM_DUALMERC_SLOTS; ++n) {
+        if (!node) return n;
+        uint32_t id = 0;
+        if (!tk_rd(node + 4, &id, 4) || id == UINT32_MAX ||
+            !tk_rd(node + 0x18, &next, 8) || next == node) return -1;
+        node = next;
+    }
+    return DM_DUALMERC_SLOTS + 1;
+}
+
+/* 0x687648: forward native getpet(G, player, 7, 1).
+ * A NULL is returned only for one existing alive different-Act merc with a
+ * fully validated empty inventory AND an un-equipped new candidate. The
+ * original 0x68764c CBZ skips old merc dismissal. Never mutate pet pointers.
+ */
+static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
+    typedef uint64_t (*fn)(uint64_t, uint64_t, uint32_t, uint32_t);
+    uint64_t G = regs[0], player = regs[1];
+    uint64_t node = ((fn)(mm->base + 0x6c3130))(G, player,
+        (uint32_t)regs[2], (uint32_t)regs[3]);
+    regs[0] = node;
+    if (!dm_dualmerc_trial_enabled() || !node || !G || !player ||
+        G != regs[21] || player != regs[20] || !regs[19] ||
+        (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1) return;
+    uint64_t first = 0;
+    int count = dm_dualmerc_trial_pet_nodes(player, &first);
+    if (count != 1 || first != node) return;
+    uint32_t old_id = UINT32_MAX, new_type = UINT32_MAX, new_cls = 0;
+    if (!tk_rd(node + 4, &old_id, 4) ||
+        !tk_rd(regs[19], &new_type, 4) || new_type != 1 ||
+        !tk_rd(regs[19] + 4, &new_cls, 4)) return;
+    dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
+    dm_merc_trace_gear fresh = {0};
+    dm_merc_probe_inventory(regs[19], &fresh);
+    dm_dualmerc_trial_conditions c = {
+        .server_hirelings = (unsigned)count,
+        .old_act = dm_dualmerc_act_for_class(old.cls),
+        .new_act = dm_dualmerc_act_for_class(new_cls),
+        .old_gear_status = old.gear.status,
+        .old_gear_count = old.gear.count,
+        .new_gear_status = fresh.status,
+        .new_gear_count = fresh.count,
+        .old_alive = old.mode != UINT32_MAX && old.mode > 0,
+        .native_result_matches_roster = first == node,
+        .guest_classes_valid = old.cls && new_cls
+    };
+    if (!dm_dualmerc_trial_keep_one(&c)) {
+        LOG("DM_DUAL_MERC_TRIAL：拒绝保留，幕%u/%u，装备旧%u/%u 新%u/%u 模式%u",
+            c.old_act, c.new_act, c.old_gear_count, c.old_gear_status,
+            c.new_gear_count, c.new_gear_status, old.mode);
+        return;
+    }
+    regs[0] = 0;
+    LOG("DM_DUAL_MERC_TRIAL：已保留第一名幕%u佣兵 id%u，将登记幕%u第二名（只限当前游戏进程）",
+        c.old_act, old_id, c.new_act);
+    dm_dual_merc_probe_tick(G, player, 1);
+}
+
+/* Exact verified 3.3 native hire call-site gates. The original calls are
+ * forwarded unchanged except optional 0x94 lookup result override.
  *
  * regs[19]: new hireling candidate in 0x6875a0
  * regs[20]: player, regs[21]: game; regs[25]: old pet at the old-unit site
@@ -1074,6 +1153,10 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
     /* getenv is checked only at the actual hire call sites, not each tick. */
     const char *env = getenv("DM_DUAL_MERC_PROBE");
     int on = env && !strcmp(env, "1");
+    if (num == SVC_HOST_DUALMERC_QUERY) {
+        dm_dualmerc_native_lookup(regs, mm);
+        return;
+    }
     const char *phase = num == 0x91 ? "unlink" : num == 0x92 ? "old-unit" : "link";
     if (num != 0x91 && num != 0x92 && num != 0x93)
         die("DM_DUAL_MERC_NATIVE：非法门号 0x%x", num);

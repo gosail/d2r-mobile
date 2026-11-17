@@ -1,5 +1,4 @@
-name: Offline dual-merc safe policy tests
-
+name: Offline dual-merc safe policy and persistence tests
 on:
   push:
     branches:
@@ -7,17 +6,24 @@ on:
   pull_request:
     paths:
       - "dm/host/dm_dualmerc_policy.h"
-      - "dm/tools/dualmerc_native_cuts.py"
-      - "dm/verify/test_dualmerc_native_cuts.py"\n      - "dm/host/dm_merc_trace.h"\n      - "dm/host/tests/test_merc_trace.c"
+      - "dm/host/dm_dualmerc_state.h"
+      - "dm/host/dm_merc_trace.h"
       - "dm/host/tests/test_dualmerc_policy.c"
-      - "dm/verify/hire_handler.py"\n      - "dm/verify/hire_handler_guest.py"\n      - "dm/verify/test_hire_handler_guest.py"
+      - "dm/host/tests/test_dualmerc_state.c"
+      - "dm/host/tests/test_merc_trace.c"
+      - "dm/tools/dualmerc_native_cuts.py"
+      - "dm/ios/tools/retrofit_dualmerc_guest.py"
+      - "dm/ios/tests/test_retrofit_dualmerc_guest.py"
+      - "dm/verify/hire_handler.py"
+      - "dm/verify/hire_handler_guest.py"
       - "dm/verify/hire_chain_contract.py"
-      - "dm/verify/test_hire_chain_contract.py"
       - "dm/verify/merc_probe_report.py"
       - "dm/verify/test_merc_probe_report.py"
       - "dm/verify/test_hire_handler.py"
+      - "dm/verify/test_hire_handler_guest.py"
+      - "dm/verify/test_hire_chain_contract.py"
+      - "dm/verify/test_dualmerc_native_cuts.py"
       - ".github/workflows/offline-dualmerc-tests.yml"
-
 jobs:
   policy-and-readonly-analysis:
     runs-on: ubuntu-latest
@@ -25,16 +31,20 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Verify per-act roster policy
+      - name: Verify two-slot roster, item isolation and persistence
         run: |
-          cc -std=c11 -Wall -Wextra -Werror -pedantic dm/host/tests/test_dualmerc_policy.c -o /tmp/dm_dualmerc_policy_test
-          /tmp/dm_dualmerc_policy_test
-          cc -std=c11 -Wall -Wextra -Werror -pedantic dm/host/tests/test_merc_trace.c -o /tmp/dm_merc_trace_test
-          /tmp/dm_merc_trace_test
-      - name: Verify read-only NSO handler inspection
+          set -eu
+          for name in test_dualmerc_policy test_dualmerc_state test_merc_trace; do
+            cc -std=c11 -Wall -Wextra -Werror -pedantic \
+              "dm/host/tests/$name.c" -o "/tmp/$name"
+            "/tmp/$name"
+          done
+      - name: Verify game-native call-sites and unsigned Guest rewrite
         run: |
+          set -eu
           python3 -m unittest discover -s dm/verify -p 'test_hire_handler.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_hire_handler_guest.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_merc_probe_report.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_hire_chain_contract.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_dualmerc_native_cuts.py' -v
+          python3 -m unittest discover -s dm/ios/tests -p 'test_retrofit_dualmerc_guest.py' -v

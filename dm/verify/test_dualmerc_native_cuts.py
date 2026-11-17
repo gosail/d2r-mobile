@@ -11,13 +11,13 @@ from dualmerc_native_cuts import (BUILD_ID, SITES, branch_word, svc_word,
 class NativeMercCallsiteTests(unittest.TestCase):
     def test_verified_original_calls_are_expected(self):
         cuts = host_audit_cuts(BUILD_ID)
-        self.assertEqual(len(cuts), 3)
+        self.assertEqual(len(cuts), 4)
         self.assertEqual([c[1] for c in cuts],
-                         ["10e50094", "990f0594", "70e80094"])
+                         ["baee0094", "10e50094", "990f0594", "70e80094"])
         self.assertEqual([c[2] for c in cuts],
-                         ["211200d4", "411200d4", "611200d4"])
+                         ["811200d4", "211200d4", "411200d4", "611200d4"])
         self.assertTrue(all(c[4] == "仅宿主" for c in cuts))
-        self.assertEqual([c[0] for c in cuts], [0x6877f0, 0x68786c, 0x687940])
+        self.assertEqual([c[0] for c in cuts], [0x687648, 0x6877f0, 0x68786c, 0x687940])
 
     def test_call_targets_do_not_drift(self):
         for site, target, _, _ in SITES:

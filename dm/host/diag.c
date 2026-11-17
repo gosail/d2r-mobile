@@ -1053,6 +1053,73 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     }
 }
 
+/* Exact verified 3.3 native hire call-site gates. All three calls are
+ * ALWAYS forwarded unchanged; this instrumentation neither allows nor
+ * prevents two hirelings, and makes no item or save changes.
+ *
+ * regs[19]: new hireling candidate in 0x6875a0
+ * regs[20]: player, regs[21]: game; regs[25]: old pet at the old-unit site
+ * x0...x5: original native function arguments.
+ *
+ * Original call sites:
+ * 0x6877f0 -> 0x6c0c30  (G, player, old_pet_id, 0)
+ * 0x68786c -> 0x7cb6d0  (G, old_pet)
+ * 0x687940 -> 0x6c1b00  (G, player, candidate, 7, 1, placement)
+ * Their business semantics still require test observations.
+ */
+void dm_dualmerc_native_call(uint64_t *regs, int num) {
+    module_t *mm = main_mod();
+    if (!mm || !mm->base) die("DM_DUAL_MERC_NATIVE：main 模块未装载");
+    uint64_t G = regs[21], player = regs[20];
+    /* getenv is checked only at the actual hire call sites, not each tick. */
+    const char *env = getenv("DM_DUAL_MERC_PROBE");
+    int on = env && !strcmp(env, "1");
+    const char *phase = num == 0x91 ? "unlink" : num == 0x92 ? "old-unit" : "link";
+    if (num != 0x91 && num != 0x92 && num != 0x93)
+        die("DM_DUAL_MERC_NATIVE：非法门号 0x%x", num);
+    if (on) {
+        uint32_t tick = 0, uid = 0xffffffffu, old_id = 0xffffffffu;
+        uint32_t new_id = 0xffffffffu, old_class = 0, new_class = 0;
+        tk_rd(G + 0x170, &tick, 4);
+        if (player) tk_rd(player + 8, &uid, 4);
+        if (num == 0x91) old_id = (uint32_t)regs[2];
+        else if (num == 0x92 && regs[1]) tk_rd(regs[1] + 8, &old_id, 4);
+        else if (regs[25]) tk_rd(regs[25] + 8, &old_id, 4);
+        if (regs[19]) { tk_rd(regs[19] + 8, &new_id, 4); tk_rd(regs[19] + 4, &new_class, 4); }
+        if (num == 0x92 && regs[1]) tk_rd(regs[1] + 4, &old_class, 4);
+        else if (old_id != 0xffffffffu) {
+            dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
+            old_class = old.cls;
+        }
+        LOG("DM_DUAL_MERC_NATIVE：拍%u player%u %s 前 old%u:cls%u:a%u new%u:cls%u:a%u（原函数仍将执行）",
+            tick, uid, phase, old_id, old_class,
+            dm_dualmerc_act_for_class(old_class), new_id, new_class,
+            dm_dualmerc_act_for_class(new_class));
+        dm_dual_merc_probe_tick(G, player, 1);
+    }
+    switch (num) {
+    case 0x91: {
+        typedef uint64_t (*fn)(uint64_t, uint64_t, uint64_t, uint64_t);
+        regs[0] = ((fn)(mm->base + 0x6c0c30))(regs[0], regs[1], regs[2], regs[3]);
+        break;
+    }
+    case 0x92: {
+        typedef uint64_t (*fn)(uint64_t, uint64_t);
+        regs[0] = ((fn)(mm->base + 0x7cb6d0))(regs[0], regs[1]);
+        break;
+    }
+    case 0x93: {
+        typedef uint64_t (*fn)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+        regs[0] = ((fn)(mm->base + 0x6c1b00))(regs[0], regs[1], regs[2], regs[3], regs[4], regs[5]);
+        break;
+    }
+    }
+    if (on) {
+        LOG("DM_DUAL_MERC_NATIVE：%s 后，重读服务端/客户端宠物表（不读取可能已经释放的旧单位指针）", phase);
+        dm_dual_merc_probe_tick(G, player, 1);
+    }
+}
+
 static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本级经验‰ / 腰带四列件数 / 回城次数 + 当前人数档 → g_hud（前端 dm_hud_get） | Every tick: controlled player's level / current-level experience ‰ / item counts of the four belt columns / town portal count + current /players setting → g_hud (front end dm_hud_get)
     dm_hud_info h = {0};
     uint64_t player = 0, inv = 0, u = 0, next = 0;

@@ -1236,6 +1236,25 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         }
     }
     dm_dual_merc_probe_tick(G, player, 0);
+    /* A factual, once-per-run notice only after BOTH pet nodes really exist.
+     * Do not claim persistence or the independent gear UI already works. */
+    if (player && dm_dualmerc_trial_enabled()) {
+        static uint64_t last_notice_game;
+        static int shown_two;
+        if (last_notice_game != G) {
+            last_notice_game = G;
+            shown_two = 0;
+        }
+        if (!shown_two && dm_dualmerc_trial_pet_nodes(player, NULL) == 2) {
+            module_t *mm = main_mod();
+            if (mm) {
+                shown_two = 1;
+                dm_game_notice((uint8_t *)mm->base,
+                    "检测到两名佣兵已加入当前游戏；装备分开管理和重新读档尚未完成");
+                LOG("DM_DUAL_MERC_TRIAL：服务端宠物表同时有 2 名，已显示实测提示");
+            }
+        }
+    }
     if (player) {
         int reason = atomic_exchange(&g_dm_trial_full_notice, 0);
         if (reason) {

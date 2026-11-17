@@ -27,7 +27,7 @@ def segment(name, sections):
 
 
 FIXUPS = ("# TARGET 0x0\n# TEXT_END 0x4000\n# PATCH_OFF 0xc000\n"
-          "# KEY_PAGE_OFF 0x5000\n# KEY_KGATE_IDX 3\n")
+          "# KEY_PAGE_OFF 0x8000\n# KEY_KGATE_IDX 3\n")
 CUTS = "# BUILD_ID " + BUILD_ID + "\n"
 GATES = "0xc004 svc 129 0x10\n"
 SITES = tuple((site, struct.pack("<I", branch_word(site, dest)).hex(),
@@ -72,7 +72,7 @@ class RetrofitGuestTests(unittest.TestCase):
             start = 0xc000 + 32 + i * STUB_BYTES
             self.assertEqual(changed[off0 + site:off0 + site + 4],
                              struct.pack("<I", b_branch(site, start)))
-            expected = gate_stub(start, site + 4, 0x5000, 3)
+            expected = gate_stub(start, site + 4, 0x8000, 3)
             self.assertEqual(changed[off1 + 32 + i * STUB_BYTES:
                                      off1 + 32 + (i + 1) * STUB_BYTES], expected)
             self.assertIn(f"{start+32:#x}\tsvc\t{0x91+i}", gate)
@@ -110,8 +110,8 @@ class RetrofitGuestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "out of range"):
             b_branch(0, 1 << 27)
         with self.assertRaisesRegex(ValueError, "out of range"):
-            gate_stub(0x9000, 1 << 29, 0x5000, 3)
-        self.assertEqual(gate_stub(0x9020, 0x104, 0x5000, 3)[:4],
+            gate_stub(0x9000, 1 << 29, 0x8000, 3)
+        self.assertEqual(gate_stub(0x9020, 0x104, 0x8000, 3)[:4],
                          bytes.fromhex("fd7bbfa9"))
 
 

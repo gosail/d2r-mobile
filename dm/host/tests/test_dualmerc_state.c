@@ -47,28 +47,29 @@ static void empty_and_corruption(void) {
 
 static void recruit_and_replace(void) {
     candidate = make(1, 0, 271, 0x10001);
-    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0));
-    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 0, 1));
-    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1));
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 0));
+    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1, 1));
 
     candidate = make(2, 2, 338, 0x10002);
-    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1));
+    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1, 1));
+    assert(s.native_slot == 1); /* new hire is now backed by vanilla .d2s */
     assert(s.slot[0].gear[0].persistent_item_id == 0x10001);
     assert(s.slot[1].gear[0].persistent_item_id == 0x10002);
 
     uint64_t gen = s.generation;
     candidate = make(2, 0, 338, 0x20002);
-    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 1));
-    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1));
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
+    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1, 1));
     assert(s.slot[0].gear[0].persistent_item_id == 0x10001);
     assert(s.slot[1].gear[0].persistent_item_id == 0x20002);
     assert(s.generation == gen + 1);
 
     candidate = make(5, 0, 560, 0x50005);
-    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 0, 1));
+    assert(dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
     assert(s.slot[1].gear[0].persistent_item_id == 0x20002);
     candidate = make(3, 0, 359, 0x20002); /* gear already belongs to Act II */
-    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 1));
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
     assert(s.slot[0].act == 5);
     assert(s.slot[0].gear[0].persistent_item_id == 0x50005);
     assert(dm_dualmerc_state_valid(&s));

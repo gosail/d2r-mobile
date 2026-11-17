@@ -132,21 +132,25 @@ static inline dm_dualmerc_roster dm_dualmerc_state_roster(const dm_dualmerc_save
     return r;
 }
 
-/* Caller MUST first verify the native hire transaction, item custody and
- * the selected target. No state change occurs on failed validation. */
+/* Caller MUST first verify the native hire transaction, item custody,
+ * selected target and which slot the original .d2s now serializes. No state change occurs on failed validation. */
 static inline int dm_dualmerc_state_apply_verified(
     dm_dualmerc_saved_state *s, const dm_dualmerc_saved_slot *next,
-    unsigned chosen_slot, int engine_confirmed)
+    unsigned chosen_slot, unsigned native_after, int engine_confirmed)
 {
     if (!engine_confirmed || !s || !next || !next->occupied ||
+        native_after >= DM_DUALMERC_SLOTS ||
         !dm_dualmerc_state_valid(s) || s->generation == UINT64_MAX) return 0;
     dm_dualmerc_roster r = dm_dualmerc_state_roster(s);
     dm_dualmerc_decision d = dm_dualmerc_plan(&r, next->act, next->difficulty);
     if (!dm_dualmerc_choice_allowed(&d, chosen_slot)) return 0;
     dm_dualmerc_saved_slot old = s->slot[chosen_slot];
+    uint8_t previous_native = s->native_slot;
     s->slot[chosen_slot] = *next;
+    s->native_slot = (uint8_t)native_after;
     if (!dm_dualmerc_state_valid(s)) {
         s->slot[chosen_slot] = old;
+        s->native_slot = previous_native;
         return 0;
     }
     ++s->generation;

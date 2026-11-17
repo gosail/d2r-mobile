@@ -1055,6 +1055,8 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
     }
 }
 
+static _Atomic int g_dm_trial_full_notice;
+
 /* A disposable-save trial only: default OFF, no secondary save loader yet. */
 static int dm_dualmerc_trial_enabled(void) {
     static int enabled = -1;
@@ -1226,6 +1228,11 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         }
     }
     dm_dual_merc_probe_tick(G, player, 0);
+    if (player && atomic_exchange(&g_dm_trial_full_notice, 0)) {
+        module_t *mm = main_mod();
+        if (mm) dm_game_notice((uint8_t *)mm->base,
+            "已有两名佣兵：选择替换目标功能尚未实现，已阻止本次雇佣");
+    }
     uint32_t sig = 0;
     if (player && tk_rd(player + 0x90, &inv, 8) && tk_rd(inv, &sig, 4) && sig == 0x01020304) {
         { static int hp1 = -1; if (hp1 < 0) { const char *e = getenv("DM_TEST_HP1"); hp1 = e != NULL; if (e && e[0] == '0') g_hp1_to = 0; } if (hp1 && cur_tick() > 200) test_hp1(player); }
@@ -1848,6 +1855,21 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
     // (the only possible source is a UI mouse click landing on the click receiver). Walking to a target (0x02 / 0x04 etc., which carry a unit) is not blocked -- walking over after tapping an NPC / item is the original game's behavior.
     { uint64_t dm_stick_last_ns(void); uint8_t op = 0xff; if (regs[0] && regs[1] >= 1 && tk_rd(regs[0] + 4, &op, 1) && (op == 0x01 || op == 0x03) && now_ns() - dm_stick_last_ns() > 700000000ull && !dm_move_allowed()) {
         static int dropped; if (dropped++ < 10) LOG("产品规则：丢弃非摇杆来源的点地移动包 0x%02x（第 %d 条）", op, dropped); return; } }
+    /* Never run vanilla replacement after the experimental second merc
+     * exists: its original UI cannot name which slot to remove.
+     * Reject the incoming hire C2S before native gold/item mutation. */
+    if (dm_dualmerc_trial_enabled() && g_lastG && g_player_unit &&
+        regs[0] && regs[1] >= 5) {
+        uint8_t op = 0;
+        if (tk_rd(regs[0] + 4, &op, 1) && op == 0x36) {
+            int count = dm_dualmerc_trial_pet_nodes(g_player_unit, NULL);
+            if (count >= 0 && dm_dualmerc_trial_block_full((unsigned)count)) {
+                LOG("DM_DUAL_MERC_TRIAL：两佣兵已满，阻止原版自动替换；待 UI 指定旧佣兵后才能继续");
+                atomic_store(&g_dm_trial_full_notice, 1);
+                return;
+            }
+        }
+    }
     static void (*recv)(uint64_t, uint64_t, uint64_t, uint64_t);
     if (!recv) { module_t *m = NULL; for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
                  recv = (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))(m->base + 0x632510); }

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Rebuild three *pass-through* host call gates in an owner-prepared iOS Guest.
+"""Rebuild four host call gates (one conditional candidate) in an owner-prepared iOS Guest.
 
 Only for DM_OFFLINE_DUAL_MERC_TEST=1, before IPA signing. No source code,
 game NSO, decrypted game data, or modified Guest are committed to GitHub.
 
-The original BL calls are relocated through gates which ALWAYS dispatch to
-the original native functions in dm/host/diag.c. This does NOT enable two
+The original BL calls are relocated through gates which normally dispatch to
+the original native functions in dm/host/diag.c; lookup may be conditionally hidden
+under an explicit throwaway-save experiment switch. This does NOT enable two
 mercenaries; it permits before/after lifecycle observation on the real game.
 """
 import argparse
@@ -195,7 +196,7 @@ def retrofit_bytes(guest, fixups, cuts, gates, sites=None):
             raise ValueError("Invalid host SVC instruction encoding")
         num = (svc_insn >> 5) & 0xffff
         new_gates.append(f"{ret_rva:#x}\tsvc\t{num}\t{site:#x}")
-    # No bytes outside the exact 3 code sites and 120-byte scratch area changed.
+    # No bytes outside the exact 4 code sites and 160-byte scratch area changed.
     endings = lambda body: body + ("\n" if body and not body.endswith("\n") else "")
     return (bytes(original), endings(cuts) + "\n".join(new_cuts) + "\n",
             endings(gates) + "\n".join(new_gates) + "\n",

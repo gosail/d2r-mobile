@@ -34,7 +34,7 @@ SITES = tuple((site, struct.pack("<I", branch_word(site, dest)).hex(),
                struct.pack("<I", svc_word(svc)).hex(), "synthetic " + str(i), "仅宿主")
               for i, (site, dest, svc) in enumerate(
                   ((0x100, 0x200, 0x91), (0x300, 0x200, 0x92),
-                   (0x500, 0x400, 0x93))))
+                   (0x500, 0x400, 0x93), (0x700, 0x600, 0x94))))
 
 
 def fixture():
@@ -64,7 +64,7 @@ class RetrofitGuestTests(unittest.TestCase):
         changed, cut, gate, report = retrofit_bytes(
             raw, FIXUPS, CUTS, GATES, sites=SITES)
         self.assertEqual(len(changed), len(raw))
-        self.assertEqual(report["new_gate_count"], 3)
+        self.assertEqual(report["new_gate_count"], 4)
         self.assertFalse(report["second_mercenary_enabled"])
         self.assertEqual(macho_sections(changed), macho_sections(raw))
         self.assertEqual(changed[off1:off1 + 32], raw[off1:off1 + 32])

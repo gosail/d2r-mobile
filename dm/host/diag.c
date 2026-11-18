@@ -1304,6 +1304,78 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
     return 1;
 }
 
+/* Called only on the guest/server tick thread, never from UIKit callbacks.
+ * The asynchronous dialog provides a choice, then the one-shot lease is
+ * validated AGAIN against the real game before the original 0x632510
+ * dispatcher is invoked with the copied 17-byte packet. */
+static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
+    if (!g_dm_dualmerc_pending.active) return;
+    dm_dualmerc_pending *p=&g_dm_dualmerc_pending;
+    uint32_t tick=cur_tick();
+    if (!G || !player || G!=p->G || player!=p->player ||
+        tick-p->lease.opened_tick > DM_DUALMERC_TXN_TTL) {
+        LOG("DM_DUAL_MERC_TRIAL：NPC 选择超时或本局变化，原雇佣包已取消");
+        dm_dualmerc_pending_reset();
+        return;
+    }
+    int selected=-2;
+    if (!dm_dualmerc_ui_poll || !dm_dualmerc_ui_poll(p->nonce,&selected))
+        return;
+    if (selected < 0 || selected >= DM_DUALMERC_SLOTS ||
+        !dm_merc_txn_choose(&p->lease,(unsigned)selected)) {
+        LOG("DM_DUAL_MERC_TRIAL：玩家取消替换，原雇佣包未投递");
+        dm_dualmerc_pending_reset(); return;
+    }
+    dm_dualmerc_roster roster;
+    dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+    dm_merc_txn_offer live;
+    int count=dm_dualmerc_runtime_roster(G,player,&roster,gear);
+    unsigned target=UINT32_MAX;
+    if (count != 2 ||
+        !dm_dualmerc_native_offer(G,player,p->packet,&live) ||
+        !dm_merc_txn_authorize(&p->lease,&live,&roster,tick,&target)) {
+        LOG("DM_DUAL_MERC_TRIAL：NPC/佣兵身份已变化，替换授权作废");
+        dm_dualmerc_pending_reset(); return;
+    }
+    if (gear[0].status!=DM_MERC_GEAR_OK || gear[0].count ||
+        gear[1].status!=DM_MERC_GEAR_OK || gear[1].count ||
+        !dm_dualmerc_trial_mode_live(
+            dm_merc_probe_unit_read(G,roster.slot[target].runtime_unit_id,0).mode)) {
+        LOG("DM_DUAL_MERC_TRIAL：替换前装备/单位状态变化，拒绝投递");
+        dm_dualmerc_pending_reset(); return;
+    }
+    uint32_t target_id=roster.slot[target].runtime_unit_id;
+    uint32_t peer_id=roster.slot[1-target].runtime_unit_id;
+    p->target_id=target_id; p->peer_id=peer_id;
+    g_dm_dualmerc_selected_G=G;
+    g_dm_dualmerc_selected_player=player;
+    g_dm_dualmerc_selected_id=target_id;
+    g_dm_dualmerc_selected_act=live.offered_act;
+    p->native_override_seen=0;
+    module_t *mm=main_mod();
+    if (mm && mm->base) {
+        typedef void (*recv_fn)(uint64_t,uint64_t,uint64_t,uint64_t);
+        LOG("DM_DUAL_MERC_TRIAL：用户选择替换第%u位幕%u佣兵id%u，确认后投递原生 0x36",
+            target+1,roster.slot[target].act,target_id);
+        ((recv_fn)(mm->base+0x632510))((uint64_t)(uintptr_t)p->packet,
+            DM_DUALMERC_NATIVE_PACKET_BYTES,p->packet_flags,p->callback);
+        if (!p->native_override_seen)
+            LOG("【红】DM_DUAL_MERC_TRIAL：本次原生雇佣未经过选定单位查询；不得用作正式存档");
+        else {
+            dm_dualmerc_roster after;
+            dm_merc_trace_gear ag[DM_DUALMERC_SLOTS];
+            int n=dm_dualmerc_runtime_roster(G,player,&after,ag);
+            int correct= n==2 && after.slot[target].act==live.offered_act &&
+                         after.slot[target].runtime_unit_id!=target_id &&
+                         after.slot[1-target].runtime_unit_id==peer_id;
+            LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
+                correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
+        }
+    }
+    dm_dualmerc_target_clear();
+    dm_dualmerc_pending_reset();
+}
+
 /* 0x687648: forward native getpet(G, player, 7, 1).
  * A NULL is returned only for one existing alive different-Act merc with a
  * fully validated empty inventory AND an un-equipped new candidate. The

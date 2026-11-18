@@ -1064,6 +1064,97 @@ void front_run(void (*guest)(void)) {
     guest();
 }
 
+// iPad offline dual-merc replacement chooser. The game/server thread never
+// waits for UIKit. A request nonce prevents a stale dialog from affecting a
+// later NPC interaction. THIS ONLY RETURNS A CHOICE: it cannot by itself
+// remove a mercenary, spend gold, or replay a native hire packet.
+static _Atomic uint64_t g_dm_merc_choice_nonce;
+static _Atomic int g_dm_merc_choice_result = -2; // -2 pending, -1 cancel, 0/1 slot
+static UIAlertController *g_dm_merc_choice_alert;
+static NSString *dm_merc_act_name(unsigned act) {
+    switch (act) {
+    case 1: return @"第一幕 · 罗格弓箭手";
+    case 2: return @"第二幕 · 沙漠佣兵";
+    case 3: return @"第三幕 · 铁狼法师";
+    case 5: return @"第五幕 · 野蛮人";
+    default: return nil;
+    }
+}
+void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
+    if (!nonce || !dm_merc_act_name(act0) || !dm_merc_act_name(act1) ||
+        act0 == act1) return;
+    atomic_store(&g_dm_merc_choice_result, -2);
+    atomic_store(&g_dm_merc_choice_nonce, nonce);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (atomic_load(&g_dm_merc_choice_nonce) != nonce) return;
+        if (g_dm_merc_choice_alert) {
+            [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
+            g_dm_merc_choice_alert = nil;
+        }
+        UIViewController *vc = nil, *alt = nil;
+        for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
+            if (![sc isKindOfClass:UIWindowScene.class]) continue;
+            for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+                if (!w.rootViewController) continue;
+                if (w.isKeyWindow) vc = w.rootViewController;
+                else if (sc.activationState == UISceneActivationStateForegroundActive && !alt)
+                    alt = w.rootViewController;
+            }
+        }
+        vc = vc ?: alt;
+        while (vc.presentedViewController) vc = vc.presentedViewController;
+        if (!vc) {
+            if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
+                atomic_store(&g_dm_merc_choice_result, -1);
+            return;
+        }
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"选择替换的佣兵"
+            message:@"当前已有两名不同幕的佣兵。请选择要替换的一名，或取消雇佣。"
+            preferredStyle:UIAlertControllerStyleAlert];
+        a.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        a.view.tintColor = [UIColor colorWithRed:199.0/255 green:179.0/255
+                                               blue:119.0/255 alpha:1.0];
+        __weak UIAlertController *weakA = a;
+        for (unsigned slot=0;slot<2;slot++) {
+            unsigned act = slot ? act1 : act0;
+            unsigned selected = slot;
+            [a addAction:[UIAlertAction actionWithTitle:dm_merc_act_name(act)
+                style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                (void)action;
+                if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
+                    atomic_store(&g_dm_merc_choice_result, (int)selected);
+                if (g_dm_merc_choice_alert == weakA) g_dm_merc_choice_alert = nil;
+            }]];
+        }
+        [a addAction:[UIAlertAction actionWithTitle:@"取消雇佣"
+            style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+            (void)action;
+            if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
+                atomic_store(&g_dm_merc_choice_result, -1);
+            if (g_dm_merc_choice_alert == weakA) g_dm_merc_choice_alert = nil;
+        }]];
+        g_dm_merc_choice_alert = a;
+        [vc presentViewController:a animated:YES completion:nil];
+    });
+}
+int dm_dualmerc_ui_poll(uint64_t nonce, int *choice) {
+    if (!nonce || !choice || atomic_load(&g_dm_merc_choice_nonce) != nonce)
+        return 0;
+    int result = atomic_load(&g_dm_merc_choice_result);
+    if (result == -2) return 0;
+    if (atomic_exchange(&g_dm_merc_choice_nonce, 0) != nonce) return 0;
+    *choice = result;
+    return 1;
+}
+void dm_dualmerc_ui_cancel(uint64_t nonce) {
+    if (!nonce || atomic_exchange(&g_dm_merc_choice_nonce, 0) != nonce) return;
+    atomic_store(&g_dm_merc_choice_result, -1);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
+        g_dm_merc_choice_alert = nil;
+    });
+}
+
 // 软键盘输入框（front.h）：主线程弹 UIAlertController + 文本框，客体线程阻塞到确定 / 取消。无窗口（非 boot 模式）不弹，返回 -1
 // 测试脚本驱动真输入对话框用（触点脚本的 type / alert 两个动作）：当前弹着的对话框与它的结束回调。产品路径不读这两个量。
 // Software keyboard input box (front.h): the main thread presents a UIAlertController + text field, and the guest thread blocks until OK / Cancel. With no window (non-boot mode) nothing is presented and -1 is returned

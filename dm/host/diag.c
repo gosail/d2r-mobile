@@ -1103,20 +1103,33 @@ static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
 static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
     typedef uint64_t (*fn)(uint64_t, uint64_t, uint32_t, uint32_t);
     uint64_t G = regs[0], player = regs[1];
-    uint64_t node = ((fn)(mm->base + 0x6c3130))(G, player,
+    /* Original 0x6c3130 resolves the pet-list ID to a UNIT pointer,
+     * NOT a pointer to the pet linked-list node. This distinction is
+     * essential: comparing the two pointers always rejected keep-first. */
+    uint64_t old_unit = ((fn)(mm->base + 0x6c3130))(G, player,
         (uint32_t)regs[2], (uint32_t)regs[3]);
-    regs[0] = node;
-    if (!dm_dualmerc_trial_enabled() || !node || !G || !player ||
+    regs[0] = old_unit;
+    if (!dm_dualmerc_trial_enabled() || !old_unit || !G || !player ||
         G != regs[21] || player != regs[20] || !regs[19] ||
         (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1) return;
-    uint64_t first = 0;
-    int count = dm_dualmerc_trial_pet_nodes(player, &first);
-    if (count != 1 || first != node) return;
-    uint32_t old_id = UINT32_MAX, new_type = UINT32_MAX, new_cls = 0;
-    if (!tk_rd(node + 4, &old_id, 4) ||
+    uint64_t first_pet_node = 0;
+    int count = dm_dualmerc_trial_pet_nodes(player, &first_pet_node);
+    if (count != 1 || !first_pet_node) return;
+    uint32_t old_id = UINT32_MAX, listed_id = UINT32_MAX;
+    uint32_t old_class = 0, old_mode = UINT32_MAX, new_type = UINT32_MAX;
+    uint32_t new_id = UINT32_MAX, new_cls = 0;
+    if (!tk_rd(old_unit + 8, &old_id, 4) ||
+        !tk_rd(old_unit + 4, &old_class, 4) ||
+        !tk_rd(old_unit + 0xc, &old_mode, 4) ||
+        !tk_rd(first_pet_node + 4, &listed_id, 4) ||
+        !dm_dualmerc_trial_pet_id_matches(old_id, listed_id) ||
         !tk_rd(regs[19], &new_type, 4) || new_type != 1 ||
+        !tk_rd(regs[19] + 8, &new_id, 4) || new_id == old_id ||
         !tk_rd(regs[19] + 4, &new_cls, 4)) return;
     dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
+    /* The independent game-unit table must resolve to the same unit,
+     * class and mode before suppressing the old-mercenary lookup. */
+    if (old.mode != old_mode || old.cls != old_class) return;
     dm_merc_trace_gear fresh = {0};
     dm_merc_probe_inventory(regs[19], &fresh);
     dm_dualmerc_trial_conditions c = {
@@ -1127,8 +1140,9 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         .old_gear_count = old.gear.count,
         .new_gear_status = fresh.status,
         .new_gear_count = fresh.count,
-        .old_alive = old.mode != UINT32_MAX && old.mode > 0,
-        .native_result_matches_roster = first == node,
+        .old_alive = dm_dualmerc_trial_mode_live(old.mode),
+        .native_result_matches_roster =
+            dm_dualmerc_trial_pet_id_matches(old_id, listed_id),
         .guest_classes_valid = old.cls && new_cls
     };
     if (!dm_dualmerc_trial_keep_one(&c)) {

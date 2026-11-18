@@ -24,6 +24,20 @@ typedef struct {
     unsigned guest_classes_valid;
 } dm_dualmerc_trial_conditions;
 
+/* 0x6c3130 returns the existing UNIT; player pet-list +0x98 stores
+ * PET NODES. The only safe cross-reference is the unit ID, not a pointer
+ * equality across these unrelated allocation types. */
+static inline int dm_dualmerc_trial_pet_id_matches(uint32_t native_unit_id,
+                                                    uint32_t pet_node_id) {
+    return native_unit_id != UINT32_MAX && native_unit_id == pet_node_id;
+}
+
+/* Verified monster modes 12/13 represent dying/dead. A dead hireling
+ * consumes its slot but is never eligible for this keep-alive experiment. */
+static inline int dm_dualmerc_trial_mode_live(uint32_t mode) {
+    return mode > 0 && mode < 12;
+}
+
 static inline int dm_dualmerc_trial_keep_one(const dm_dualmerc_trial_conditions *c) {
     if (!c || c->server_hirelings != 1 ||
         !c->native_result_matches_roster || !c->guest_classes_valid ||

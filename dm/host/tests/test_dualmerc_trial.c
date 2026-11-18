@@ -10,6 +10,16 @@ int main(void) {
     c.old_gear_status = DM_MERC_GEAR_OK;
     c.new_gear_status = DM_MERC_GEAR_ABSENT;
     assert(dm_dualmerc_trial_keep_one(&c));
+    /* The native result is a UNIT pointer and the roster is a PET NODE.
+     * Match their unit IDs, never compare these two allocation addresses. */
+    assert(dm_dualmerc_trial_pet_id_matches(0x1234, 0x1234));
+    assert(!dm_dualmerc_trial_pet_id_matches(0x1234, 0x1235));
+    assert(!dm_dualmerc_trial_pet_id_matches(UINT32_MAX, UINT32_MAX));
+    assert(dm_dualmerc_trial_mode_live(1));
+    assert(dm_dualmerc_trial_mode_live(11));
+    assert(!dm_dualmerc_trial_mode_live(0));
+    assert(!dm_dualmerc_trial_mode_live(12));
+    assert(!dm_dualmerc_trial_mode_live(13));
     c.new_gear_status = DM_MERC_GEAR_OK;
     assert(dm_dualmerc_trial_keep_one(&c));
     c.new_gear_count = 1;

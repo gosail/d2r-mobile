@@ -47,7 +47,7 @@ int main(void) {
     assert(!dm_merc_txn_authorize(&txn,&changed,&r,110,&chosen));
     assert(dm_merc_txn_begin(&txn,o,&r,100)==DM_MERC_TXN_CHOOSE);
     assert(dm_merc_txn_choose(&txn,0));
-    assert(!dm_merc_txn_authorize(&txn,&o,&r,226,&chosen));
+    assert(!dm_merc_txn_authorize(&txn,&o,&r,1601,&chosen));
 
     o.offered_act = 2; o.difficulty=2; /* Nightmare/Hell: same Act II */
     assert(dm_merc_txn_begin(&txn,o,&r,100)==DM_MERC_TXN_READY);

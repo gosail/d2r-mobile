@@ -12,7 +12,7 @@
 #define DM_DUALMERC_HIRE_TXN_H
 #include "dm_dualmerc_policy.h"
 #include <string.h>
-#define DM_DUALMERC_TXN_TTL 125u /* server ticks: no stale NPC dialogs */
+#define DM_DUALMERC_TXN_TTL 1500u /* 60s at 25 ticks/sec */
 typedef enum {
     DM_MERC_TXN_REJECT = 0,
     DM_MERC_TXN_READY = 1,

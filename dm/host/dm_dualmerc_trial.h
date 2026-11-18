@@ -58,6 +58,17 @@ static inline int dm_dualmerc_trial_block_equipped(
     unsigned count, unsigned inventory_verified, unsigned equipped_items) {
     return count == 1 && (!inventory_verified || equipped_items > 0);
 }
+/* After 0x6c1b00 completes, prove both distinct runtime unit IDs are
+ * still present. A count of two alone can include unrelated stale records. */
+static inline int dm_dualmerc_trial_both_present(
+    unsigned count, uint32_t first, uint32_t second,
+    uint32_t expected_old, uint32_t expected_new) {
+    return count == DM_DUALMERC_SLOTS &&
+           expected_old != UINT32_MAX && expected_new != UINT32_MAX &&
+           expected_old != expected_new &&
+           ((first == expected_old && second == expected_new) ||
+            (first == expected_new && second == expected_old));
+}
 static inline int dm_dualmerc_trial_block_full(unsigned count) {
     return count >= DM_DUALMERC_SLOTS;
 }

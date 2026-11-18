@@ -1056,6 +1056,8 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
 }
 
 static _Atomic int g_dm_trial_full_notice;
+static _Atomic uint64_t g_dm_trial_hire_G, g_dm_trial_hire_player;
+static _Atomic uint32_t g_dm_trial_hire_old, g_dm_trial_hire_new;
 
 /* This code is present ONLY in a deliberately marked offline experimental
  * IPA carrying SVC #0x94. Ordinary builds never contain that native gate.
@@ -1151,6 +1153,10 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
             c.new_gear_count, c.new_gear_status, old.mode);
         return;
     }
+    atomic_store(&g_dm_trial_hire_old, old_id);
+    atomic_store(&g_dm_trial_hire_new, new_id);
+    atomic_store(&g_dm_trial_hire_G, G);
+    atomic_store(&g_dm_trial_hire_player, player);
     regs[0] = 0;
     LOG("DM_DUAL_MERC_TRIAL：已保留第一名幕%u佣兵 id%u，将登记幕%u第二名（只限当前游戏进程）",
         c.old_act, old_id, c.new_act);
@@ -1220,6 +1226,28 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
         regs[0] = ((fn)(mm->base + 0x6c1b00))(regs[0], regs[1], regs[2], regs[3], regs[4], regs[5]);
         break;
     }
+    }
+    if (num == SVC_HOST_DUALMERC_LINK && G &&
+        G == atomic_load(&g_dm_trial_hire_G) &&
+        player == atomic_load(&g_dm_trial_hire_player)) {
+        /* Match the exact old/new unit IDs, not just a count. */
+        uint64_t first = 0, second = 0, next = 0;
+        int count = dm_dualmerc_trial_pet_nodes(player, &first);
+        uint32_t id0 = UINT32_MAX, id1 = UINT32_MAX;
+        if (first && tk_rd(first + 4, &id0, 4) &&
+            tk_rd(first + 0x18, &next, 8) && next) {
+            second = next;
+            tk_rd(second + 4, &id1, 4);
+        }
+        int both = dm_dualmerc_trial_both_present(
+            count, id0, id1, atomic_load(&g_dm_trial_hire_old),
+            atomic_load(&g_dm_trial_hire_new));
+        LOG("DM_DUAL_MERC_TRIAL：新佣兵绑定返回；旧ID%u 新ID%u，服务器宠物列表%u/%u（完整双人ID核对：%s）",
+            atomic_load(&g_dm_trial_hire_old),
+            atomic_load(&g_dm_trial_hire_new),
+            id0, id1, both ? "通过" : "未通过，不能视为双佣兵");
+        atomic_store(&g_dm_trial_hire_G, 0);
+        atomic_store(&g_dm_trial_hire_player, 0);
     }
     if (on) {
         LOG("DM_DUAL_MERC_NATIVE：%s 后，重读服务端/客户端宠物表（不读取可能已经释放的旧单位指针）", phase);

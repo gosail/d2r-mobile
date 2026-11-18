@@ -54,6 +54,12 @@ int main(void) {
     assert(!dm_dualmerc_trial_block_full(1));
     assert(dm_dualmerc_trial_block_full(2));
     assert(dm_dualmerc_trial_block_full(3));
+    assert(dm_dualmerc_trial_both_present(2, 10, 20, 10, 20));
+    assert(dm_dualmerc_trial_both_present(2, 20, 10, 10, 20));
+    assert(!dm_dualmerc_trial_both_present(1, 10, 20, 10, 20));
+    assert(!dm_dualmerc_trial_both_present(2, 10, 10, 10, 20));
+    assert(!dm_dualmerc_trial_both_present(2, 10, 20, 10, 10));
+    assert(!dm_dualmerc_trial_both_present(2, 10, 20, UINT32_MAX, 20));
     puts("dual merc native keep-one trial: guarded and full-roster fail-closed");
     return 0;
 }

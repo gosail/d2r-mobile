@@ -1596,6 +1596,7 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         }
     }
     dm_dual_merc_probe_tick(G, player, 0);
+    dm_dualmerc_pending_tick(G, player);
     /* A factual, once-per-run notice only after BOTH pet nodes really exist.
      * Do not claim persistence or the independent gear UI already works. */
     if (player && dm_dualmerc_trial_enabled()) {
@@ -2249,41 +2250,10 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
     // (the only possible source is a UI mouse click landing on the click receiver). Walking to a target (0x02 / 0x04 etc., which carry a unit) is not blocked -- walking over after tapping an NPC / item is the original game's behavior.
     { uint64_t dm_stick_last_ns(void); uint8_t op = 0xff; if (regs[0] && regs[1] >= 1 && tk_rd(regs[0] + 4, &op, 1) && (op == 0x01 || op == 0x03) && now_ns() - dm_stick_last_ns() > 700000000ull && !dm_move_allowed()) {
         static int dropped; if (dropped++ < 10) LOG("产品规则：丢弃非摇杆来源的点地移动包 0x%02x（第 %d 条）", op, dropped); return; } }
-    /* Never run vanilla replacement after the experimental second merc
-     * exists: its original UI cannot name which slot to remove.
-     * Reject the incoming hire C2S before native gold/item mutation. */
-    if (dm_dualmerc_trial_enabled() && g_lastG && g_player_unit &&
-        regs[0] && regs[1] >= 5) {
-        uint8_t op = 0;
-        if (tk_rd(regs[0] + 4, &op, 1) && op == 0x36) {
-            uint64_t first = 0;
-            int count = dm_dualmerc_trial_pet_nodes(g_player_unit, &first);
-            if (count < 0) {
-                LOG("DM_DUAL_MERC_TRIAL：佣兵列表读取异常，拒绝未经确认的实验性雇佣");
-                atomic_store(&g_dm_trial_full_notice, 3);
-                return;
-            }
-            if (dm_dualmerc_trial_block_full((unsigned)count)) {
-                LOG("DM_DUAL_MERC_TRIAL：已有两佣兵，阻止原版自动替换");
-                atomic_store(&g_dm_trial_full_notice, 1);
-                return;
-            }
-            if (count == 1) {
-                uint32_t id = UINT32_MAX;
-                if (!first || !tk_rd(first + 4, &id, 4)) {
-                    atomic_store(&g_dm_trial_full_notice, 2);
-                    return;
-                }
-                dm_merc_probe_unit old = dm_merc_probe_unit_read(g_lastG, id, 0);
-                if (dm_dualmerc_trial_block_equipped(1,
-                       old.gear.status == DM_MERC_GEAR_OK, old.gear.count)) {
-                    LOG("DM_DUAL_MERC_TRIAL：旧佣兵装备非空或未能确认；阻止雇佣以避免丢失装备");
-                    atomic_store(&g_dm_trial_full_notice, 2);
-                    return;
-                }
-            }
-        }
-    }
+    /* Validate a real hire candidate and the full per-Act roster before
+     * native gold debit. Two full -> choose; same Act -> targeted replace.
+     * This path is compiled/active only in the disposable offline trial. */
+    if (dm_dualmerc_hire_preflight(regs)) return;
     static void (*recv)(uint64_t, uint64_t, uint64_t, uint64_t);
     if (!recv) { module_t *m = NULL; for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
                  recv = (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))(m->base + 0x632510); }
@@ -2302,6 +2272,15 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
       if (m && in_game() && regs[1] == 17 && tk_rd(regs[0], in, sizeof in) && in[4] == 0x16) { memcpy(&pk_id, in + 5, 4); uint64_t u = dm_diag_srv_item(pk_id);
           if (u) { pk_code = ((uint32_t (*)(uint64_t))(m->base + 0x570260))(u); pk_auto = dm_potpick_auto(pk_id); } else pk_id = 0; } }
     recv(regs[0], regs[1], regs[2], regs[3]);
+    /* Direct same-Act replacement is synchronous. Never let its selected
+     * target leak into the next game command or another NPC transaction. */
+    if (g_dm_dualmerc_selected_G == g_lastG &&
+        g_dm_dualmerc_selected_player == g_player_unit &&
+        !g_dm_dualmerc_pending.active) {
+        if (!g_dm_dualmerc_pending.native_override_seen)
+            LOG("【红】DM_DUAL_MERC_TRIAL：同幕原生替换没有命中选定目标，不能视作通过");
+        dm_dualmerc_target_clear();
+    }
     if (pk_id) { static uint32_t win, used, skipped; uint32_t t = cur_tick(); if (t - win >= 25) { win = t; used = 0; }
         if (used >= 4) skipped++;
         else { used++; uint64_t u = dm_diag_srv_item(pk_id), d = 0, pp = 0; uint32_t mode = 0, x = 0, y = 0; uint8_t page = 0; char where[64];

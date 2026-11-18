@@ -10,6 +10,8 @@
 #include "dm_bossrush.h"
 #include "dm_dualmerc_policy.h"
 #include "dm_dualmerc_trial.h"
+#include "dm_dualmerc_hire_txn.h"
+#include "dm_dualmerc_packet.h"
 #include "hle.h"
 #include "dm_merc_trace.h"
 #include <TargetConditionals.h>
@@ -1096,6 +1098,118 @@ static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
         node = next;
     }
     return DM_DUALMERC_SLOTS + 1;
+}
+
+/* The NPC picker is an optional iOS-only frontend; Mac/Android do not
+ * silently replay queued packets without an implemented interface. */
+extern void dm_dualmerc_ui_request(uint64_t, unsigned, unsigned) __attribute__((weak));
+extern int dm_dualmerc_ui_poll(uint64_t, int *) __attribute__((weak));
+extern void dm_dualmerc_ui_cancel(uint64_t) __attribute__((weak));
+
+typedef struct {
+    uint64_t G, player, packet_flags, callback, nonce;
+    uint8_t packet[DM_DUALMERC_PACKET_BYTES];
+    dm_merc_txn lease;
+    uint32_t target_id, peer_id;
+    unsigned expected_act;
+    int active, native_override_seen;
+} dm_dualmerc_pending;
+static dm_dualmerc_pending g_dm_dualmerc_pending;
+static uint64_t g_dm_dualmerc_nonce_seq;
+static uint64_t g_dm_dualmerc_selected_G, g_dm_dualmerc_selected_player;
+static uint32_t g_dm_dualmerc_selected_id = UINT32_MAX;
+static unsigned g_dm_dualmerc_selected_act;
+
+/* Verified pointer read of a live server monster UNIT by identity; never
+ * reuse the node pointer as a unit pointer. */
+static uint64_t dm_dualmerc_server_monster(uint64_t G, uint32_t id) {
+    uint64_t unit = 0;
+    if (!G || id == UINT32_MAX ||
+        !tk_rd(G + 0x2630 + (uint64_t)(id & 0x7f) * 8, &unit, 8)) return 0;
+    for (int k = 0; unit && k < 512; ++k) {
+        uint32_t actual = UINT32_MAX, type = UINT32_MAX;
+        if (!tk_rd(unit, &type, 4) ||
+            !tk_rd(unit + 8, &actual, 4)) return 0;
+        if (actual == id) return type == 1 ? unit : 0;
+        if (!tk_rd(unit + 0x158, &unit, 8)) return 0;
+    }
+    return 0;
+}
+
+/* Build actual two-slot state from the server's type-7 pet list. All pet
+ * unit IDs, classes and gear statuses are checked before authorizing gold.
+ * No difficulty assumption: a deceased Act II merc is still the Act II slot.
+ */
+static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
+                                      dm_dualmerc_roster *out,
+                                      dm_merc_trace_gear gear[DM_DUALMERC_SLOTS]) {
+    if (!out || !gear) return -1;
+    memset(out, 0, sizeof *out);
+    memset(gear, 0, sizeof(dm_merc_trace_gear) * DM_DUALMERC_SLOTS);
+    uint64_t node = 0;
+    int count = dm_dualmerc_trial_pet_nodes(player, &node);
+    if (count < 0 || count > DM_DUALMERC_SLOTS) return -1;
+    for (int i = 0; i < count; ++i) {
+        uint32_t id = UINT32_MAX, type = UINT32_MAX, cls = 0, mode = UINT32_MAX;
+        uint64_t unit = 0, next = 0;
+        if (!node || !tk_rd(node + 4, &id, 4) ||
+            !tk_rd(node + 0x18, &next, 8) ||
+            !(unit = dm_dualmerc_server_monster(G, id)) ||
+            !tk_rd(unit, &type, 4) || type != 1 ||
+            !tk_rd(unit + 4, &cls, 4) ||
+            !tk_rd(unit + 0xc, &mode, 4)) return -1;
+        unsigned act = dm_dualmerc_act_for_class(cls);
+        if (!act || mode == UINT32_MAX) return -1;
+        dm_dualmerc_slot *slot = &out->slot[i];
+        slot->occupied = 1;
+        slot->act = (uint8_t)act;
+        slot->difficulty = 0; /* Hire origin Act is authoritative, difficulty immaterial. */
+        slot->dead = !dm_dualmerc_trial_mode_live(mode);
+        slot->runtime_unit_id = id;
+        dm_merc_probe_inventory(unit, &gear[i]);
+        node = next;
+    }
+    return !dm_dualmerc_roster_valid(out) || node ? -1 : count;
+}
+
+static int dm_dualmerc_native_offer(uint64_t G, uint64_t player,
+                                     const uint8_t packet[DM_DUALMERC_PACKET_BYTES],
+                                     dm_merc_txn_offer *offer) {
+    dm_dualmerc_packet parsed = {0};
+    if (!offer || !dm_dualmerc_packet_parse(packet,DM_DUALMERC_PACKET_BYTES,&parsed))
+        return 0;
+    module_t *mm = main_mod();
+    if (!mm || !mm->base) return 0;
+    /* Verbatim native 0x6dadc8 call to 0x7f2320(player, npcID, 0x32);
+     * it returns the NPC unit; vendor class comes from native MonStats. */
+    typedef uint64_t (*resolve_fn)(uint64_t, uint32_t, uint32_t);
+    uint64_t npc = ((resolve_fn)(mm->base + 0x7f2320))(player,
+                                                       parsed.npc_unit_id, 0x32);
+    uint32_t type = UINT32_MAX, cls = 0, owner_id = UINT32_MAX;
+    uint8_t diff = UINT8_MAX;
+    if (!npc || !tk_rd(npc, &type, 4) || type != 1 ||
+        !tk_rd(npc + 4, &cls, 4) ||
+        !tk_rd(player + 8, &owner_id, 4) ||
+        !tk_rd(G + 0x104, &diff, 1) || diff > 2) return 0;
+    unsigned act = dm_dualmerc_act_for_vendor(cls);
+    if (!act) return 0;
+    *offer = (dm_merc_txn_offer){
+        .game_session = G, .owner_id = owner_id,
+        .npc_id = parsed.npc_unit_id, .hire_row = parsed.hire_row,
+        .offered_act = act, .difficulty = diff
+    };
+    return 1;
+}
+
+static void dm_dualmerc_pending_reset(void) {
+    if (g_dm_dualmerc_pending.active && dm_dualmerc_ui_cancel)
+        dm_dualmerc_ui_cancel(g_dm_dualmerc_pending.nonce);
+    memset(&g_dm_dualmerc_pending, 0, sizeof g_dm_dualmerc_pending);
+}
+static void dm_dualmerc_target_clear(void) {
+    g_dm_dualmerc_selected_G = g_dm_dualmerc_selected_player = 0;
+    g_dm_dualmerc_selected_id = UINT32_MAX;
+    g_dm_dualmerc_selected_act = 0;
 }
 
 /* 0x687648: forward native getpet(G, player, 7, 1).

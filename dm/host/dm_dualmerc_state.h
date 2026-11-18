@@ -144,6 +144,12 @@ static inline int dm_dualmerc_state_apply_verified(
     dm_dualmerc_roster r = dm_dualmerc_state_roster(s);
     dm_dualmerc_decision d = dm_dualmerc_plan(&r, next->act, next->difficulty);
     if (!dm_dualmerc_choice_allowed(&d, chosen_slot)) return 0;
+    /* The source slot can be overwritten only after the player has removed
+     * its gear through the NATIVE equipment transaction. The sidecar codec
+     * cannot itself transfer item ownership; overwriting occupied gear here
+     * would permanently drop valid bitstreams from the only known record. */
+    if (s->slot[chosen_slot].occupied &&
+        s->slot[chosen_slot].gear_count != 0) return 0;
     dm_dualmerc_saved_slot old = s->slot[chosen_slot];
     uint8_t previous_native = s->native_slot;
     s->slot[chosen_slot] = *next;

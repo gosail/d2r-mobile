@@ -60,12 +60,24 @@ static void recruit_and_replace(void) {
     uint64_t gen = s.generation;
     candidate = make(2, 0, 338, 0x20002);
     assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
+    /* A replacement must NOT erase an old equipped mercenary's item.
+     * First remove it through the native equipment UI; this simulation
+     * models the already-verified completed unequip transaction. */
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1, 1));
+    assert(s.slot[1].gear[0].persistent_item_id == 0x10002);
+    assert(s.generation == gen);
+    memset(s.slot[1].gear, 0, sizeof s.slot[1].gear);
+    s.slot[1].gear_count = 0;
     assert(dm_dualmerc_state_apply_verified(&s, &candidate, 1, 1, 1));
     assert(s.slot[0].gear[0].persistent_item_id == 0x10001);
     assert(s.slot[1].gear[0].persistent_item_id == 0x20002);
     assert(s.generation == gen + 1);
 
     candidate = make(5, 0, 560, 0x50005);
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
+    assert(s.slot[0].gear[0].persistent_item_id == 0x10001);
+    memset(s.slot[0].gear, 0, sizeof s.slot[0].gear);
+    s.slot[0].gear_count = 0;
     assert(dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
     assert(s.slot[1].gear[0].persistent_item_id == 0x20002);
     candidate = make(3, 0, 359, 0x20002); /* gear already belongs to Act II */

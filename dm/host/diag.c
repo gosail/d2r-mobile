@@ -1226,6 +1226,42 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
     uint64_t old_unit = ((fn)(mm->base + 0x6c3130))(G, player,
         (uint32_t)regs[2], (uint32_t)regs[3]);
     regs[0] = old_unit;
+    /* A selected replacement, including a different Act, must target the
+     * actual specified old UNIT, not whichever first pet the original
+     * singleton lookup chooses. This is trial-only and refuses gear. */
+    if (dm_dualmerc_trial_enabled() && G == g_dm_dualmerc_selected_G &&
+        player == g_dm_dualmerc_selected_player &&
+        g_dm_dualmerc_selected_id != UINT32_MAX) {
+        dm_dualmerc_roster roster;
+        dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+        int count = dm_dualmerc_runtime_roster(G, player, &roster, gear);
+        uint32_t candidate_cls = 0, candidate_type = UINT32_MAX;
+        if (count == 2 && regs[19] &&
+            tk_rd(regs[19], &candidate_type, 4) && candidate_type == 1 &&
+            tk_rd(regs[19] + 4, &candidate_cls, 4) &&
+            dm_dualmerc_act_for_class(candidate_cls) ==
+                 g_dm_dualmerc_selected_act) {
+            dm_dualmerc_decision plan = dm_dualmerc_plan(
+                 &roster,g_dm_dualmerc_selected_act,0);
+            for (int i=0;i<DM_DUALMERC_SLOTS;i++) {
+                if (roster.slot[i].runtime_unit_id !=
+                         g_dm_dualmerc_selected_id ||
+                    !dm_dualmerc_choice_allowed(&plan,(unsigned)i) ||
+                    gear[i].status != DM_MERC_GEAR_OK ||
+                    gear[i].count) continue;
+                uint64_t target = dm_dualmerc_server_monster(
+                     G, g_dm_dualmerc_selected_id);
+                if (target) {
+                    regs[0] = target;
+                    g_dm_dualmerc_pending.native_override_seen = 1;
+                    LOG("DM_DUAL_MERC_TRIAL：按选择替换幕%u佣兵，旧单位ID%u；另一名保留",
+                        roster.slot[i].act, g_dm_dualmerc_selected_id);
+                    return;
+                }
+            }
+        }
+        LOG("【红】DM_DUAL_MERC_TRIAL：原生选择目标再验证失败；不能保证替换结果，禁止使用正式角色");
+    }
     if (!dm_dualmerc_trial_enabled() || !old_unit || !G || !player ||
         G != regs[21] || player != regs[20] || !regs[19] ||
         (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1) return;

@@ -27,6 +27,19 @@ static inline unsigned dm_dualmerc_act_for_class(uint32_t cls) {
     }
 }
 
+/* Switch 3.3 Hireling Seller MonStats class indices. These are unique
+ * vendors for actual hirelist interactions; they are invariant across game
+ * difficulty and must be checked against the live resolved NPC unit. */
+static inline unsigned dm_dualmerc_act_for_vendor(uint32_t npc_class) {
+    switch (npc_class) {
+    case 150: return 1; /* Kashya */
+    case 198: return 2; /* Greiz */
+    case 252: return 3; /* Asheara */
+    case 515: return 5; /* Qual-Kehk */
+    default: return 0;
+    }
+}
+
 /* Decode only a direct AArch64 BL (not BLR / indirect calls).
  * Supports both forward and negative branch offsets without touching code. */
 static inline int dm_dualmerc_bl_target(uint32_t insn, uint64_t at_rva,

@@ -45,6 +45,12 @@ int main(void) {
     assert(dm_dualmerc_act_for_class(560) == 5);
     assert(dm_dualmerc_act_for_class(561) == 5);
     assert(dm_dualmerc_act_for_class(0) == 0);
+    assert(dm_dualmerc_act_for_vendor(150) == 1);
+    assert(dm_dualmerc_act_for_vendor(198) == 2);
+    assert(dm_dualmerc_act_for_vendor(252) == 3);
+    assert(dm_dualmerc_act_for_vendor(515) == 5);
+    assert(dm_dualmerc_act_for_vendor(0) == 0);
+    assert(dm_dualmerc_act_for_vendor(367) == 0); /* Tyrael resurrects, does not sell mercs. */
     uint64_t bl_target = 0xffff;
     assert(dm_dualmerc_bl_target(0x9400000c, 0x40, 0x200, &bl_target));
     assert(bl_target == 0x70);

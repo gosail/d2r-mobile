@@ -1308,7 +1308,9 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             module_t *mm = main_mod();
             if (mm) dm_game_notice((uint8_t *)mm->base, reason == 1
                 ? "已有两名佣兵：选择替换目标尚未完成，本次未扣金币"
-                : "请先卸下旧佣兵装备再测试双佣兵；本次未雇佣");
+                : reason == 2
+                ? "请先卸下旧佣兵装备再测试双佣兵；本次未雇佣"
+                : "佣兵状态无法安全读取，本次雇佣已取消");
         }
     }
     uint32_t sig = 0;
@@ -1944,7 +1946,7 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
             int count = dm_dualmerc_trial_pet_nodes(g_player_unit, &first);
             if (count < 0) {
                 LOG("DM_DUAL_MERC_TRIAL：佣兵列表读取异常，拒绝未经确认的实验性雇佣");
-                atomic_store(&g_dm_trial_full_notice, 1);
+                atomic_store(&g_dm_trial_full_notice, 3);
                 return;
             }
             if (dm_dualmerc_trial_block_full((unsigned)count)) {

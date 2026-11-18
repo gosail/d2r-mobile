@@ -84,6 +84,12 @@ static void recruit_and_replace(void) {
     assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
     assert(s.slot[0].act == 5);
     assert(s.slot[0].gear[0].persistent_item_id == 0x50005);
+    /* Now simulate confirmed native unequip. The collision alone must still
+     * reject the candidate and must not lose Act V's stable identity. */
+    memset(s.slot[0].gear, 0, sizeof s.slot[0].gear);
+    s.slot[0].gear_count = 0;
+    assert(!dm_dualmerc_state_apply_verified(&s, &candidate, 0, 0, 1));
+    assert(s.slot[0].act == 5 && s.slot[0].gear_count == 0);
     assert(dm_dualmerc_state_valid(&s));
 }
 

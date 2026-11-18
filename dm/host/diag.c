@@ -1057,6 +1057,7 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
 
 static _Atomic int g_dm_trial_full_notice;
 static _Atomic uint64_t g_dm_trial_hire_G, g_dm_trial_hire_player;
+static _Atomic uint64_t g_dm_trial_verified_two_G;
 static _Atomic uint32_t g_dm_trial_hire_old, g_dm_trial_hire_new;
 
 /* This code is present ONLY in a deliberately marked offline experimental
@@ -1126,7 +1127,8 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         !tk_rd(first_pet_node + 4, &listed_id, 4) ||
         !dm_dualmerc_trial_pet_id_matches(old_id, listed_id) ||
         !tk_rd(regs[19], &new_type, 4) || new_type != 1 ||
-        !tk_rd(regs[19] + 8, &new_id, 4) || new_id == old_id ||
+        !tk_rd(regs[19] + 8, &new_id, 4) ||
+        new_id == UINT32_MAX || new_id == old_id ||
         !tk_rd(regs[19] + 4, &new_cls, 4)) return;
     dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
     /* The independent game-unit table must resolve to the same unit,
@@ -1153,6 +1155,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
             c.new_gear_count, c.new_gear_status, old.mode);
         return;
     }
+    atomic_store(&g_dm_trial_verified_two_G, 0);
     atomic_store(&g_dm_trial_hire_old, old_id);
     atomic_store(&g_dm_trial_hire_new, new_id);
     atomic_store(&g_dm_trial_hire_G, G);
@@ -1242,6 +1245,7 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
         int both = dm_dualmerc_trial_both_present(
             count, id0, id1, atomic_load(&g_dm_trial_hire_old),
             atomic_load(&g_dm_trial_hire_new));
+        if (both) atomic_store(&g_dm_trial_verified_two_G, G);
         LOG("DM_DUAL_MERC_TRIAL：新佣兵绑定返回；旧ID%u 新ID%u，服务器宠物列表%u/%u（完整双人ID核对：%s）",
             atomic_load(&g_dm_trial_hire_old),
             atomic_load(&g_dm_trial_hire_new),
@@ -1287,12 +1291,13 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             last_notice_game = G;
             shown_two = 0;
         }
-        if (!shown_two && dm_dualmerc_trial_pet_nodes(player, NULL) == 2) {
+        if (!shown_two && atomic_load(&g_dm_trial_verified_two_G) == G &&
+            dm_dualmerc_trial_pet_nodes(player, NULL) == 2) {
             module_t *mm = main_mod();
             if (mm) {
                 shown_two = 1;
                 dm_game_notice((uint8_t *)mm->base,
-                    "检测到两名佣兵已加入当前游戏；装备分开管理和重新读档尚未完成");
+                    "服务器已核对两名佣兵ID；客户端装备界面和重进恢复尚未完成");
                 LOG("DM_DUAL_MERC_TRIAL：服务端宠物表同时有 2 名，已显示实测提示");
             }
         }

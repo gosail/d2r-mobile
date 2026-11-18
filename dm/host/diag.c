@@ -1281,6 +1281,8 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         g_dm_dualmerc_selected_player=g_player_unit;
         g_dm_dualmerc_selected_id=roster.slot[choice].runtime_unit_id;
         g_dm_dualmerc_selected_act=offer.offered_act;
+        g_dm_dualmerc_pending.target_id=g_dm_dualmerc_selected_id;
+        g_dm_dualmerc_pending.peer_id=roster.slot[1-choice].runtime_unit_id;
         g_dm_dualmerc_pending.native_override_seen=0;
         LOG("DM_DUAL_MERC_TRIAL：同幕雇佣，只允许替换第%u名幕%u佣兵ID%u",
             choice+1,offer.offered_act,g_dm_dualmerc_selected_id);
@@ -1366,9 +1368,18 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
             dm_dualmerc_roster after;
             dm_merc_trace_gear ag[DM_DUALMERC_SLOTS];
             int n=dm_dualmerc_runtime_roster(G,player,&after,ag);
-            int correct= n==2 && after.slot[target].act==live.offered_act &&
-                         after.slot[target].runtime_unit_id!=target_id &&
-                         after.slot[1-target].runtime_unit_id==peer_id;
+            /* The native pet list may reorder when one pet is replaced;
+             * verify the other merc's exact ID and a new offered-Act unit
+             * regardless of linked-list node insertion order. */
+            int peer_ok=0, new_ok=0, old_gone=1;
+            for (int i=0;i<n && i<DM_DUALMERC_SLOTS;i++) {
+                if (after.slot[i].runtime_unit_id == peer_id) peer_ok=1;
+                if (after.slot[i].runtime_unit_id == target_id) old_gone=0;
+                if (after.slot[i].act == live.offered_act &&
+                    after.slot[i].runtime_unit_id != target_id &&
+                    after.slot[i].runtime_unit_id != peer_id) new_ok=1;
+            }
+            int correct=n==2 && peer_ok && new_ok && old_gone;
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
         }
@@ -2278,8 +2289,23 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
     if (g_dm_dualmerc_selected_G == g_lastG &&
         g_dm_dualmerc_selected_player == g_player_unit &&
         !g_dm_dualmerc_pending.active) {
-        if (!g_dm_dualmerc_pending.native_override_seen)
-            LOG("【红】DM_DUAL_MERC_TRIAL：同幕原生替换没有命中选定目标，不能视作通过");
+        dm_dualmerc_roster after;
+        dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+        int count=dm_dualmerc_runtime_roster(g_lastG,g_player_unit,&after,gear);
+        int peer_ok=0, new_act_ok=0, old_gone=1;
+        for (int i=0;i<count && i<DM_DUALMERC_SLOTS;i++) {
+            if (after.slot[i].runtime_unit_id ==
+                g_dm_dualmerc_pending.peer_id) peer_ok=1;
+            if (after.slot[i].runtime_unit_id ==
+                g_dm_dualmerc_pending.target_id) old_gone=0;
+            if (after.slot[i].act == g_dm_dualmerc_selected_act &&
+                after.slot[i].runtime_unit_id !=
+                g_dm_dualmerc_pending.target_id) new_act_ok=1;
+        }
+        int correct=count==2 && peer_ok && new_act_ok && old_gone &&
+                    g_dm_dualmerc_pending.native_override_seen;
+        LOG("DM_DUAL_MERC_TRIAL：同幕原生替换，旧佣兵消失、其他幕佣兵保留和新佣兵加入：%s",
+            correct ? "通过（服务器状态）" : "未通过，不能视作双佣兵功能完成");
         dm_dualmerc_target_clear();
     }
     if (pk_id) { static uint32_t win, used, skipped; uint32_t t = cur_tick(); if (t - win >= 25) { win = t; used = 0; }

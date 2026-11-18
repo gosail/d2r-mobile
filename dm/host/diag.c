@@ -705,6 +705,7 @@ static int state_read_item(uint64_t u, state_item *it, size_t ord, uint64_t *nex
     return 1;
 }
 enum { CLS_TBK = 533, CLS_TSC = 544 };   // 回城书 / 回城卷轴（原版 misc.txt 行序 + 武器 306 + 护甲 217，跳过 Expansion 分隔行；与手机存档 tsc=544 对上） | Tome of Town Portal / Scroll of Town Portal (the original game's misc.txt row order + weapons 306 + armor 217, skipping the Expansion separator row; matches tsc=544 in the phone save)
+static uint64_t g_lastG;   // 服务端本局地址：供事务前置校验的共享上下文
 static uint64_t g_player_unit;   // 最近一拍找到的受控玩家单位（0 = 没读到） | Controlled player unit found on the most recent tick (0 = not read)
 // 测试开关 DM_TEST_WORLD_SEEK（造现场用，客户端一侧在 dm_world.c w_test_seek_step）的服务端一半：探路不走路，用游戏服务端自己的传送 main+0x7cc530(游戏, 单位, 房间, x, y, 0, 0)
 // ——传送技能、传送阵、任务挪人都调它（D2MOO sub_6FCBDFE0）：房间给 0 时它在单位当前房间与相邻房间里按坐标找，在落点旁找空位，给客户端发重定位包。
@@ -1983,7 +1984,7 @@ static void ticks_hash(const uint64_t *regs) {
 // injection precedes this tick's state hash (the ground-truth tick hash likewise includes the effects of these packets).
 static FILE *g_c2sfp;
 static struct c2s_ent { uint32_t tick, unit, len; int has_unit, sys; uint8_t *pkt; } *g_rp; static size_t g_nrp, g_irp;
-static uint64_t g_lastG; static uint32_t g_sysclient; static int g_sysclient_set; static unsigned g_sysdrop;   // 最近一次拍入口的 G；系统类消息的客户端号（取宿主自己的加入消息） | G of the most recent tick entry; client number for system-class messages (taken from the host's own join message)
+static uint32_t g_sysclient; static int g_sysclient_set; static unsigned g_sysdrop;   // 最近一次拍入口的 G；系统类消息的客户端号（取宿主自己的加入消息） | G of the most recent tick entry; client number for system-class messages (taken from the host's own join message)
 static int64_t g_rplast = -1; static unsigned g_rpdrop;
 // 越肩镜头（dm_cam.c dm_cam_attack）：放技能的命令包带着目标——对地点（0x05 / 0x08 / 0x0c / 0x0f：x、y 各 2 字节，子格；落点附近的活怪见下）或对单位
 // （0x06 / 0x07 / 0x09 / 0x0a / 0x0d / 0x0e / 0x10 / 0x11：类型、单位号各 4 字节；只认玩家 0 与怪 1，它们的路径 +0x38 → +0 / +4 是 16.16 定点子格坐标）。

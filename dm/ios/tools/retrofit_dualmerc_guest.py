@@ -164,7 +164,8 @@ def retrofit_bytes(guest, fixups, cuts, gates, sites=None):
             raise ValueError("Invalid native site/scope")
         if original[x0 + site:x0 + site + 4].hex() != old:
             raise ValueError(f"Unverified or already patched original callsite 0x{site:x}")
-    if any("双佣兵实验原生调用观测" in line for line in cuts.splitlines()):
+    if any(("双佣兵实验原生调用观测" in line or
+            "双佣兵原生雇佣实验" in line) for line in cuts.splitlines()):
         raise ValueError("Native dual-merc audit already applied")
     # Aligned zero-filled trailing slack in the executable x1 section.
     body = original[x1:x1 + sz1]
@@ -196,11 +197,11 @@ def retrofit_bytes(guest, fixups, cuts, gates, sites=None):
             raise ValueError("Invalid host SVC instruction encoding")
         num = (svc_insn >> 5) & 0xffff
         new_gates.append(f"{ret_rva:#x}\tsvc\t{num}\t{site:#x}")
-    # No bytes outside the exact 4 code sites and 160-byte scratch area changed.
+    # No bytes outside the verified callsites and trampoline padding changed.
     endings = lambda body: body + ("\n" if body and not body.endswith("\n") else "")
     return (bytes(original), endings(cuts) + "\n".join(new_cuts) + "\n",
             endings(gates) + "\n".join(new_gates) + "\n",
-            {"status": "host_native_pass_through_gates_only", "sites": len(entries),
+            {"status": "guarded_native_hire_gates", "sites": len(entries),
              "patch_start_rva": f"0x{patch_off + first:x}",
              "source_text_end": f"0x{text_end:x}", "new_gate_count": len(new_gates),
              "original_hire_policy_changed": False, "second_mercenary_enabled": False})

@@ -75,11 +75,19 @@ class RetrofitGuestTests(unittest.TestCase):
             expected = gate_stub(start, site + 4, 0x8000, 3)
             self.assertEqual(changed[off1 + 32 + i * STUB_BYTES:
                                      off1 + 32 + (i + 1) * STUB_BYTES], expected)
-            self.assertIn(f"{start+32:#x}\tsvc\t{0x91+i}", gate)
+            # SVC #0x94 (get-existing-pet) is listed FIRST. It is not
+            # the numerical successor of 0x91, so derive it from the cut.
+            guest_svc, = struct.unpack("<I", bytes.fromhex(svc))
+            host_svc = (guest_svc >> 5) & 0xffff
+            self.assertIn(f"{start+32:#x}\tsvc\t{host_svc}", gate)
             self.assertIn(old, cut)
         # Other original game code and signed sections unchanged.
-        self.assertEqual(changed[off0 + 0x700:off0 + 0x800],
-                         raw[off0 + 0x700:off0 + 0x800])
+        # 0x700 is now a fourth intentional BL->gate patch site.
+        # Test the untouched instructions after that single 4-byte word.
+        self.assertEqual(changed[off0 + 0x704:off0 + 0x800],
+                         raw[off0 + 0x704:off0 + 0x800])
+        self.assertNotEqual(changed[off0 + 0x700:off0 + 0x704],
+                            raw[off0 + 0x700:off0 + 0x704])
 
     def test_reapply_and_mismatched_old_bytes_refuse(self):
         raw, _ = fixture()

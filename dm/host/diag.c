@@ -1212,6 +1212,98 @@ static void dm_dualmerc_target_clear(void) {
     g_dm_dualmerc_selected_act = 0;
 }
 
+/* Called from the normal server C2S pump BEFORE it deducts gold or invokes
+ * native hire. The third/same-Act request is held until an exact one-shot
+ * lease authorizes the native replacement target. Only in experimental IPA.
+ * Return 1 to consume the packet without calling the original dispatcher.
+ */
+static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
+    if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
+        !regs[0] || regs[1] < DM_DUALMERC_NATIVE_PACKET_BYTES) return 0;
+    uint8_t opcode=0;
+    if (!tk_rd(regs[0]+4, &opcode, 1) || opcode != 0x36) return 0;
+    if (g_dm_dualmerc_pending.active) {
+        LOG("DM_DUAL_MERC_TRIAL：前一次替换选择尚未完成，拒绝第二个雇佣包");
+        return 1;
+    }
+    if (regs[1] != DM_DUALMERC_NATIVE_PACKET_BYTES) {
+        atomic_store(&g_dm_trial_full_notice, 3);
+        return 1;
+    }
+    uint8_t raw[DM_DUALMERC_PACKET_BYTES];
+    if (!tk_rd(regs[0],raw,sizeof raw)) {
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    dm_dualmerc_roster roster;
+    dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+    int count=dm_dualmerc_runtime_roster(g_lastG,g_player_unit,&roster,gear);
+    if (count < 0) {
+        LOG("DM_DUAL_MERC_TRIAL：佣兵身份/装备读取失败，拒绝雇佣包");
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    if (count == 0) return 0; /* Original first hire is unchanged. */
+    dm_merc_txn_offer offer;
+    if (!dm_dualmerc_native_offer(g_lastG,g_player_unit,raw,&offer)) {
+        LOG("DM_DUAL_MERC_TRIAL：原生雇佣NPC或候选记录无法验证");
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    /* The original game supports only one equipped hireling. Until the
+     * secondary inventory can save/restore items, an existing equipped
+     * hireling must never be subjected to the new transaction. */
+    for (int i=0;i<count;i++) {
+        if (gear[i].status != DM_MERC_GEAR_OK || gear[i].count != 0) {
+            atomic_store(&g_dm_trial_full_notice,2);
+            LOG("DM_DUAL_MERC_TRIAL：现有幕%u佣兵带装备或装备校验不完整，保留原版角色",
+                roster.slot[i].act);
+            return 1;
+        }
+    }
+    dm_merc_txn lease;
+    dm_merc_txn_status action=dm_merc_txn_begin(
+        &lease,offer,&roster,cur_tick());
+    if (action == DM_MERC_TXN_REJECT) {
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    if (count == 1) {
+        /* For a different Act, the separate keep-first native hook will
+         * conditionally hide the old pet. Same Act runs vanilla replacement. */
+        return 0;
+    }
+    if (action == DM_MERC_TXN_READY) {
+        /* Two full, new hire from the SAME Act: only the matching slot
+         * may be replaced; never silently target the other Act's hireling. */
+        unsigned choice=UINT32_MAX;
+        if (!dm_merc_txn_authorize(&lease,&offer,&roster,cur_tick(),&choice)) {
+            atomic_store(&g_dm_trial_full_notice,3); return 1;
+        }
+        g_dm_dualmerc_selected_G=g_lastG;
+        g_dm_dualmerc_selected_player=g_player_unit;
+        g_dm_dualmerc_selected_id=roster.slot[choice].runtime_unit_id;
+        g_dm_dualmerc_selected_act=offer.offered_act;
+        g_dm_dualmerc_pending.native_override_seen=0;
+        LOG("DM_DUAL_MERC_TRIAL：同幕雇佣，只允许替换第%u名幕%u佣兵ID%u",
+            choice+1,offer.offered_act,g_dm_dualmerc_selected_id);
+        return 0; /* Original native transaction, with verified target. */
+    }
+    if (action != DM_MERC_TXN_CHOOSE || !dm_dualmerc_ui_request ||
+        !dm_dualmerc_ui_poll || !dm_dualmerc_ui_cancel) {
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    uint64_t nonce=++g_dm_dualmerc_nonce_seq;
+    if (!nonce) nonce=++g_dm_dualmerc_nonce_seq;
+    g_dm_dualmerc_pending=(dm_dualmerc_pending){
+        .G=g_lastG, .player=g_player_unit, .packet_flags=regs[2],
+        .callback=regs[3], .nonce=nonce, .lease=lease, .active=1,
+        .target_id=UINT32_MAX, .peer_id=UINT32_MAX,
+        .expected_act=offer.offered_act
+    };
+    memcpy(g_dm_dualmerc_pending.packet,raw,sizeof raw);
+    dm_dualmerc_ui_request(nonce,roster.slot[0].act,roster.slot[1].act);
+    LOG("DM_DUAL_MERC_TRIAL：两佣兵已满；询问选择替换幕%u或幕%u，不调用原生雇佣",
+        roster.slot[0].act,roster.slot[1].act);
+    return 1;
+}
+
 /* 0x687648: forward native getpet(G, player, 7, 1).
  * A NULL is returned only for one existing alive different-Act merc with a
  * fully validated empty inventory AND an un-equipped new candidate. The

@@ -127,6 +127,14 @@ static void roundtrip_and_limits(void) {
     assert(dm_dualmerc_state_encode(&s, wire, sizeof wire, &rejected_orphan) ==
            DM_DUALMERC_CODEC_INVALID && rejected_orphan == 0);
     s = clean;
+    /* Decreasing an equipped bitstream's size without wiping its old tail
+     * cannot silently pass canonical serialization. */
+    s.slot[0].gear[0].data[s.slot[0].gear[0].size] = 0xa5;
+    assert(!dm_dualmerc_state_valid(&s));
+    size_t rejected_tail = 17;
+    assert(dm_dualmerc_state_encode(&s, wire, sizeof wire, &rejected_tail) ==
+           DM_DUALMERC_CODEC_INVALID && rejected_tail == 0);
+    s = clean;
     /* Even gear_count==0 is not proof of an empty mercenary if the
      * in-memory former equipment record was not cleared. */
     dm_dualmerc_saved_slot gear_backup = s.slot[1];

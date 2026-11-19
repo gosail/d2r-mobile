@@ -1071,6 +1071,9 @@ void front_run(void (*guest)(void)) {
 static _Atomic uint64_t g_dm_merc_choice_nonce;
 static _Atomic int g_dm_merc_choice_result = -2; // -2 pending, -1 cancel, 0/1 slot
 static UIAlertController *g_dm_merc_choice_alert;
+/* UIKit-owned identity: a queued cancellation must never close a newer NPC
+ * chooser, even when the old game callback arrives after a new request. */
+static uint64_t g_dm_merc_choice_alert_nonce;
 static NSString *dm_merc_act_name(unsigned act) {
     switch (act) {
     case 1: return @"第一幕 · 罗格弓箭手";
@@ -1090,6 +1093,7 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
         if (g_dm_merc_choice_alert) {
             [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
             g_dm_merc_choice_alert = nil;
+            g_dm_merc_choice_alert_nonce = 0;
         }
         UIViewController *vc = nil, *alt = nil;
         for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
@@ -1123,7 +1127,10 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
                 (void)action;
                 if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
                     atomic_store(&g_dm_merc_choice_result, (int)selected);
-                if (g_dm_merc_choice_alert == weakA) g_dm_merc_choice_alert = nil;
+                if (g_dm_merc_choice_alert == weakA) {
+                    g_dm_merc_choice_alert = nil;
+                    g_dm_merc_choice_alert_nonce = 0;
+                }
             }]];
         }
         [a addAction:[UIAlertAction actionWithTitle:@"取消雇佣"
@@ -1131,9 +1138,13 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
             (void)action;
             if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
                 atomic_store(&g_dm_merc_choice_result, -1);
-            if (g_dm_merc_choice_alert == weakA) g_dm_merc_choice_alert = nil;
+            if (g_dm_merc_choice_alert == weakA) {
+                g_dm_merc_choice_alert = nil;
+                g_dm_merc_choice_alert_nonce = 0;
+            }
         }]];
         g_dm_merc_choice_alert = a;
+        g_dm_merc_choice_alert_nonce = nonce;
         [vc presentViewController:a animated:YES completion:nil];
     });
 }
@@ -1150,8 +1161,12 @@ void dm_dualmerc_ui_cancel(uint64_t nonce) {
     if (!nonce || atomic_exchange(&g_dm_merc_choice_nonce, 0) != nonce) return;
     atomic_store(&g_dm_merc_choice_result, -1);
     dispatch_async(dispatch_get_main_queue(), ^{
+        /* Ignore a delayed cancel for a dialog already superseded by a
+         * different nonce. */
+        if (g_dm_merc_choice_alert_nonce != nonce) return;
         [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
         g_dm_merc_choice_alert = nil;
+        g_dm_merc_choice_alert_nonce = 0;
     });
 }
 

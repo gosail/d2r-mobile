@@ -1366,10 +1366,10 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
     return 1;
 }
 
-/* Called only on the guest/server tick thread, never from UIKit callbacks.
- * The asynchronous dialog provides a choice, then the one-shot lease is
- * validated AGAIN against the real game before the original 0x632510
- * dispatcher is invoked with the copied 17-byte packet. */
+/* Called from the original C2S receive-pump callback, never a simulation
+ * frame or UIKit completion. The dialog only provides the choice; the
+ * one-shot lease and both authoritative mercenary IDs are revalidated
+ * inside the legal native packet phase before dispatch. */
 static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
     if (!g_dm_dualmerc_pending.active) return;
     dm_dualmerc_pending *p=&g_dm_dualmerc_pending;
@@ -1668,7 +1668,18 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         }
     }
     dm_dual_merc_probe_tick(G, player, 0);
-    dm_dualmerc_pending_tick(G, player);
+    /* A running simulation frame MUST NOT execute an NPC C2S transaction:
+     * the native receive pump is the only place allowed to mutate gold/pets.
+     * Ticks only expire a stale choice; completed UI choices are delivered
+     * by the next real C2S pump invocation below. */
+    if (g_dm_dualmerc_pending.active &&
+        (!G || !player || G != g_dm_dualmerc_pending.G ||
+         player != g_dm_dualmerc_pending.player ||
+         cur_tick() - g_dm_dualmerc_pending.lease.opened_tick >
+             DM_DUALMERC_TXN_TTL)) {
+        LOG("DM_DUAL_MERC_TRIAL：待选择雇佣已经离局或超时，已取消而未投递");
+        dm_dualmerc_pending_reset();
+    }
     if (player && atomic_load(&g_dm_trial_verified_two_G) == G &&
         !atomic_load(&g_dm_trial_verified_client) &&
         dm_dualmerc_trial_pet_nodes(player, NULL) == 2 &&
@@ -2321,6 +2332,11 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
     // Removed the former "also drop when !g_lastG (tick entry not yet seen)": that was judged by arrival timing -- client commands during loading that arrived before the server's first tick were dropped,
     // later ones were let through; if a dropped one was a loading handshake request, the client would wait for the reply forever (r13 cvd4 once hung in join-time loading with the server running only ticks 0–2, suspected to be this)
     if (g_rp && (!g_nrp || rp_window())) { if (!g_rpdrop++) LOG("DM_C2S_REPLAY：拍 %u 起丢弃客户端自发命令（首条）", cur_tick()); return; }
+    /* When the UIKit choice becomes ready, resume the pending original hire
+     * on the *real* C2S receive-pump path, before the next unrelated command.
+     * Never inject this native transaction from the physics/render tick. */
+    if (g_dm_dualmerc_pending.active)
+        dm_dualmerc_pending_tick(g_lastG, g_player_unit);
     // 命令号在投递缓冲的第 4 字节（前 4 字节是头，同 cube_pickup_rewrite）：原先这里读的是第 0 字节，规则从没匹配上过。
     // 产品规则：除摇杆外任何触点不许触发移动。键鼠版「点地走 / 跑到某点」是命令包 0x01 / 0x03；手柄摇杆移动是 0x42，
     // 松开摇杆时补一条 0x01（停在当前位置，实测）。所以：玩家摇杆最近 0.7 秒内没动过时到达的 0x01 / 0x03 一律不投递

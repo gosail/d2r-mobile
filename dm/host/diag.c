@@ -1226,6 +1226,9 @@ static int dm_dualmerc_native_hire_rows_match(uint64_t G,
             result.conflicts);
         return 0;
     }
+    LOG("DM_DUAL_MERC_TRIAL：候选字段%u，Hireling表只读交叉核对=%s，命中%u行（Switch 3.3字段含义仍须真机证实）",
+        want->native_hire_token, result.name_matches ? "名字索引" : "类型编号",
+        result.name_matches ? result.name_matches : result.subtype_matches);
     return 1;
 }
 static int dm_dualmerc_native_offer(uint64_t G, uint64_t player,
@@ -1380,7 +1383,16 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         LOG("DM_DUAL_MERC_TRIAL：佣兵身份/装备读取失败，拒绝雇佣包");
         atomic_store(&g_dm_trial_full_notice,3); return 1;
     }
-    if (count == 0) return 0; /* Original first hire is unchanged. */
+    if (count == 0) {
+        /* A first original hire is not an expanded dual-hire transaction.
+         * Audit the token interpretation for future evidence, but NEVER
+         * block the ordinary initial hire because trial table layout is
+         * not yet confirmed against the owner's 3.3 game bytes. */
+        dm_merc_txn_offer observed;
+        if (!dm_dualmerc_native_offer(g_lastG,g_player_unit,raw,&observed))
+            LOG("DM_DUAL_MERC_TRIAL：首雇佣候选表只读识别失败；保留原版首雇佣原路径");
+        return 0;
+    }
     dm_merc_txn_offer offer;
     if (!dm_dualmerc_native_offer(g_lastG,g_player_unit,raw,&offer)) {
         LOG("DM_DUAL_MERC_TRIAL：原生雇佣NPC或候选记录无法验证");

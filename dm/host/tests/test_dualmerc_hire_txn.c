@@ -9,6 +9,69 @@ static dm_dualmerc_slot merc(unsigned act, unsigned diff, unsigned id,
     m.runtime_unit_id = id; m.dead = dead;
     return m;
 }
+/* The native pet-list may reorder nodes without changing either
+ * hireling. The selected UNIT must remain the same, independently of index. */
+static void test_pet_list_reorder(void) {
+    dm_dualmerc_roster before={0}, swapped={0};
+    dm_merc_txn lease;
+    dm_merc_txn_offer offer={55,100,200,300,5,0};
+    unsigned chosen=99;
+    before.slot[0]=merc(1,0,101,0);
+    before.slot[1]=merc(2,1,102,1);
+    swapped.slot[0]=before.slot[1];
+    swapped.slot[1]=before.slot[0];
+
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_CHOOSE);
+    assert(dm_merc_txn_choose(&lease,0));
+    assert(dm_merc_txn_authorize(&lease,&offer,&swapped,501,&chosen));
+    assert(chosen==1); /* Act I ID 101 moved from slot 0 to slot 1. */
+    assert(!dm_merc_txn_authorize(&lease,&offer,&swapped,501,&chosen));
+
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_CHOOSE);
+    assert(dm_merc_txn_choose(&lease,1));
+    assert(dm_merc_txn_authorize(&lease,&offer,&swapped,501,&chosen));
+    assert(chosen==0); /* The dead Act II ID 102 moved to slot 0. */
+
+    offer.offered_act=2; offer.difficulty=2;
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_READY);
+    assert(dm_merc_txn_authorize(&lease,&offer,&swapped,501,&chosen));
+    assert(chosen==0); /* Same Act always targets the original merc ID. */
+
+    offer.offered_act=5; offer.difficulty=0;
+    dm_dualmerc_roster altered=swapped;
+    altered.slot[0].dead=0; /* Changed death state invalidates the lease. */
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_CHOOSE);
+    assert(dm_merc_txn_choose(&lease,1));
+    assert(!dm_merc_txn_authorize(&lease,&offer,&altered,501,&chosen));
+    assert(!lease.state);
+    altered=swapped;
+    altered.slot[0].runtime_unit_id=103;
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_CHOOSE);
+    assert(dm_merc_txn_choose(&lease,1));
+    assert(!dm_merc_txn_authorize(&lease,&offer,&altered,501,&chosen));
+
+    altered=swapped;
+    altered.slot[0].runtime_unit_id=101; /* Duplicate runtime ID is ambiguous. */
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_CHOOSE);
+    assert(dm_merc_txn_choose(&lease,1));
+    assert(!dm_merc_txn_authorize(&lease,&offer,&altered,501,&chosen));
+
+    /* The sole hireling can move between linked-list indices as well. */
+    before.slot[1]=(dm_dualmerc_slot){0};
+    swapped.slot[0]=(dm_dualmerc_slot){0};
+    swapped.slot[1]=before.slot[0];
+    assert(dm_merc_txn_begin(&lease,offer,&before,500)==DM_MERC_TXN_READY);
+    assert(dm_merc_txn_authorize(&lease,&offer,&swapped,501,&chosen));
+    assert(chosen==0); /* ADD must select the refreshed empty slot. */
+
+    /* Timer wrap still uses modulo-32-bit tick arithmetic safely. */
+    assert(dm_merc_txn_begin(&lease,offer,&before,UINT32_MAX-10)==DM_MERC_TXN_READY);
+    assert(dm_merc_txn_authorize(&lease,&offer,&before,5,&chosen));
+    assert(chosen==1);
+    assert(dm_merc_txn_begin(&lease,offer,&before,UINT32_MAX-10)==DM_MERC_TXN_READY);
+    assert(!dm_merc_txn_authorize(&lease,&offer,&before,1600,&chosen));
+}
+
 int main(void) {
     dm_dualmerc_roster r = {0};
     dm_merc_txn txn;
@@ -62,5 +125,6 @@ int main(void) {
     r.slot[1].act=2;
     o.offered_act=4;
     assert(dm_merc_txn_begin(&txn,o,&r,100)==DM_MERC_TXN_REJECT);
-    puts("dualmerc hire transaction: 20+ assertions passed");
+    test_pet_list_reorder();
+    puts("dualmerc hire transaction: identity/reorder/expiry assertions passed");
 }

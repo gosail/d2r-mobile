@@ -1264,6 +1264,17 @@ static void dm_dualmerc_target_clear(void) {
  * lease authorizes the native replacement target. Only in experimental IPA.
  * Return 1 to consume the packet without calling the original dispatcher.
  */
+/* Original delivery callback must remain valid for a deferred replay.
+ * Guest stack or heap callbacks are short-lived: they must never be cached
+ * across UI frames. NULL or aligned pointers inside verified main code
+ * are the only kinds currently accepted, with unknown ABI still unproven. */
+static int dm_dualmerc_replay_callback_stable(uint64_t fn) {
+    if (!fn) return 1;
+    module_t *mm=main_mod();
+    if (!mm || !mm->base || !mm->text_end) return 0;
+    uint64_t base=(uint64_t)(uintptr_t)mm->base;
+    return fn>=base && fn-base<mm->text_end && !(fn & 3);
+}
 static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
     if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
         !regs[0] || regs[1] < DM_DUALMERC_NATIVE_PACKET_BYTES) return 0;
@@ -1335,7 +1346,9 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         return 0; /* Original native transaction, with verified target. */
     }
     if (action != DM_MERC_TXN_CHOOSE || !dm_dualmerc_ui_request ||
-        !dm_dualmerc_ui_poll || !dm_dualmerc_ui_cancel) {
+        !dm_dualmerc_ui_poll || !dm_dualmerc_ui_cancel ||
+        !dm_dualmerc_replay_callback_stable(regs[3])) {
+        LOG("DM_DUAL_MERC_TRIAL：不能安全延迟本次雇佣包（前端选择器或回调地址不可用），已取消");
         atomic_store(&g_dm_trial_full_notice,3); return 1;
     }
     uint64_t nonce=++g_dm_dualmerc_nonce_seq;

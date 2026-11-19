@@ -67,6 +67,17 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
             offer.index("*offer = (dm_merc_txn_offer)")
         )
 
+    def test_first_vanilla_hire_is_observed_but_never_blocked(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        preflight = source.split(
+            "static int dm_dualmerc_hire_preflight(", 1)[1].split(
+            "static void dm_dualmerc_pending_tick(", 1)[0]
+        first = preflight.split("if (count == 0) {", 1)[1].split(
+            "dm_merc_txn_offer offer;", 1)[0]
+        self.assertIn("dm_dualmerc_native_offer(", first)
+        self.assertIn("return 0;", first)
+        self.assertNotIn("return 1;", first)
+
     def test_failed_post_hire_confirmation_aborts_trial(self):
         source = SOURCE.read_text(encoding="utf-8")
         pending = source.split(

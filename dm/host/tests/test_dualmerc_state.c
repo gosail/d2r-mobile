@@ -116,6 +116,24 @@ static void roundtrip_and_limits(void) {
     s.slot[0] = original;
 
     assert(dm_dualmerc_state_valid(&s));
+    /* A removed item whose count was reset without clearing the backing
+     * bitstream must never pass the codec or replacement preflight. */
+    dm_dualmerc_saved_state clean = s;
+    s.slot[0].gear[1].body_slot = 2;
+    s.slot[0].gear[1].persistent_item_id = 0xbadc0fffull;
+    s.slot[0].gear[1].size = 4;
+    assert(!dm_dualmerc_state_valid(&s));
+    size_t rejected_orphan = 17;
+    assert(dm_dualmerc_state_encode(&s, wire, sizeof wire, &rejected_orphan) ==
+           DM_DUALMERC_CODEC_INVALID && rejected_orphan == 0);
+    s = clean;
+    /* Even gear_count==0 is not proof of an empty mercenary if the
+     * in-memory former equipment record was not cleared. */
+    dm_dualmerc_saved_slot gear_backup = s.slot[1];
+    s.slot[1].gear_count = 0;
+    assert(!dm_dualmerc_state_valid(&s));
+    s.slot[1] = gear_backup;
+    assert(dm_dualmerc_state_valid(&s));
     s.native_slot = 1;
     assert(dm_dualmerc_state_valid(&s)); /* either equipped merc may be native */
     n = encode();

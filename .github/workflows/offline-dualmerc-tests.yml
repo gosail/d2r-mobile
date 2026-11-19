@@ -11,6 +11,8 @@ on:
       - "dm/host/dm_dualmerc_hire_txn.h"
       - "dm/host/dm_dualmerc_packet.h"
       - "dm/host/dm_dualmerc_disk.h"
+      - "dm/host/dm_dualmerc_d2s.h"
+      - "dm/host/dm_dualmerc_equip.h"
       - "dm/host/dm_merc_trace.h"
       - "dm/host/tests/test_dualmerc_policy.c"
       - "dm/host/tests/test_dualmerc_state.c"
@@ -18,6 +20,8 @@ on:
       - "dm/host/tests/test_dualmerc_hire_txn.c"
       - "dm/host/tests/test_dualmerc_packet.c"
       - "dm/host/tests/test_dualmerc_disk.c"
+      - "dm/host/tests/test_dualmerc_d2s.c"
+      - "dm/host/tests/test_dualmerc_equip.c"
       - "dm/host/tests/test_merc_trace.c"
       - "dm/tools/dualmerc_native_cuts.py"
       - "dm/ios/tools/retrofit_dualmerc_guest.py"
@@ -42,7 +46,7 @@ jobs:
       - name: Verify two-slot roster, item isolation and persistence
         run: |
           set -eu
-          for name in test_dualmerc_policy test_dualmerc_state test_dualmerc_trial test_dualmerc_hire_txn test_dualmerc_packet test_dualmerc_disk test_merc_trace; do
+          for name in test_dualmerc_policy test_dualmerc_state test_dualmerc_trial test_dualmerc_hire_txn test_dualmerc_packet test_dualmerc_d2s test_dualmerc_equip test_dualmerc_disk test_merc_trace; do
             cc -std=c11 -Wall -Wextra -Werror -pedantic \
               "dm/host/tests/$name.c" -o "/tmp/$name"
             "/tmp/$name"

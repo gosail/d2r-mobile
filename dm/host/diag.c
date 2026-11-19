@@ -1193,8 +1193,8 @@ static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
 
 /* The engine already exposes this exact Hireling table base and stride to
  * dm_rift.c for its mercenary class validation. This extra prefix check
- * refuses an unrecognized NPC/Id/difficulty combination BEFORE gold debit.
- * The native C2S hire token remains an experimental Id interpretation, not
+ * refuses an unrecognized NPC/name-or-subtype/difficulty BEFORE gold debit.
+ * The native C2S candidate token has two explicitly distinct hypotheses, not
  * proof of a reversible game-engine transaction. */
 static int dm_dualmerc_native_hire_rows_match(uint64_t G,
                            const dm_dualmerc_hire_request *want) {
@@ -1221,8 +1221,9 @@ static int dm_dualmerc_native_hire_rows_match(uint64_t G,
     }
     if (!dm_dualmerc_hire_check_ok(&result)) {
         LOG("DM_DUAL_MERC_TRIAL：Hireling候选记录不一致或不唯一；Id%u NPC类号%u 幕%u 难度%u 命中%u 冲突%u",
-            want->native_hire_id,want->vendor_class,want->vendor_act,
-            want->game_difficulty,result.matches,result.conflicts);
+            want->native_hire_token,want->vendor_class,want->vendor_act,
+            want->game_difficulty,result.subtype_matches + result.name_matches,
+            result.conflicts);
         return 0;
     }
     return 1;
@@ -1249,7 +1250,7 @@ static int dm_dualmerc_native_offer(uint64_t G, uint64_t player,
     unsigned act = dm_dualmerc_act_for_vendor(cls);
     if (!act) return 0;
     const dm_dualmerc_hire_request wanted={
-        .native_hire_id=parsed.hire_row,
+        .native_hire_token=parsed.hire_row,
         .vendor_class=cls,
         .vendor_act=act,
         .game_difficulty=diff

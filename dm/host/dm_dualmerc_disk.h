@@ -7,6 +7,7 @@
 #ifndef DM_DUALMERC_DISK_H
 #define DM_DUALMERC_DISK_H
 #include "dm_dualmerc_state.h"
+#include "dm_dualmerc_d2s.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -122,4 +123,87 @@ static inline int dm_dualmerc_disk_load(const char *workdir, const char *name,
     if (err) { errno = err; return -1; }
     return 0;
 }
+
+/* Validate sidecar against the *exact same* native .d2s file in the
+ * uncommitted workdir. This must run under the project's existing
+ * filesystem transaction lock, with all native file writers closed.
+ * A successful read of SWM2 alone must never trigger a mercenary restore.
+ *
+ * The older raw dm_dualmerc_disk_{save,load} functions above are codec/disk
+ * regression helpers. Runtime code MUST use *_verified variants below.
+ */
+static inline int dm_dualmerc_disk_native_matches(
+    const char *workdir, const char *name,
+    const dm_dualmerc_saved_state *state)
+{
+    if (!state || !dm_dualmerc_state_valid(state)) {
+        errno=EINVAL; return 0;
+    }
+    int dir=dm_dualmerc_disk_dir(workdir,name);
+    if (dir < 0) return 0;
+    char filename[128];
+    int z=snprintf(filename,sizeof filename,"%s.d2s",name);
+    if (z < 0 || z >= (int)sizeof filename) {
+        close(dir); errno=ENAMETOOLONG; return 0;
+    }
+    int fd=openat(dir,filename,O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int err=0, ok=0;
+    if (fd < 0) {
+        err=errno;
+    } else {
+        struct stat st={0}, finish={0};
+        if (fstat(fd,&st) || !S_ISREG(st.st_mode) ||
+            st.st_size < DM_DUALMERC_D2S_HEADER_MIN ||
+            st.st_size > DM_DUALMERC_D2S_MAX) err=EINVAL;
+        uint8_t *buf=err ? NULL : malloc((size_t)st.st_size);
+        if (!err && !buf) err=ENOMEM;
+        if (!err) {
+            size_t got=0, n=(size_t)st.st_size;
+            while (got < n) {
+                ssize_t nr=read(fd,buf+got,n-got);
+                if (nr < 0 && errno == EINTR) continue;
+                if (nr <= 0) {
+                    err=nr < 0 ? errno : EIO;
+                    break;
+                }
+                got+=(size_t)nr;
+            }
+            dm_dualmerc_native_anchor a={0};
+            if (!err &&
+                (fstat(fd,&finish) || finish.st_size != st.st_size))
+                err=EIO;
+            if (!err &&
+                dm_dualmerc_d2s_read(buf,n,&a) &&
+                dm_dualmerc_d2s_matches_state(&a,state))
+                ok=1;
+            else if (!err) err=EBADMSG;
+        }
+        free(buf);
+        if (close(fd) && !err) { err=errno; ok=0; }
+    }
+    close(dir);
+    if (err) errno=err;
+    return ok;
+}
+static inline int dm_dualmerc_disk_save_verified(
+    const char *workdir, const char *name,
+    const dm_dualmerc_saved_state *state)
+{
+    if (!dm_dualmerc_disk_native_matches(workdir,name,state)) return -1;
+    return dm_dualmerc_disk_save(workdir,name,state);
+}
+static inline int dm_dualmerc_disk_load_verified(
+    const char *workdir, const char *name, dm_dualmerc_saved_state *out)
+{
+    if (!out) { errno=EINVAL; return -1; }
+    dm_dualmerc_saved_state *tmp=malloc(sizeof *tmp);
+    if (!tmp) { errno=ENOMEM; return -1; }
+    int rc=dm_dualmerc_disk_load(workdir,name,tmp);
+    if (rc == 0 && !dm_dualmerc_disk_native_matches(workdir,name,tmp))
+        rc=-1;
+    if (rc == 0) *out=*tmp;
+    free(tmp);
+    return rc;
+}
+
 #endif

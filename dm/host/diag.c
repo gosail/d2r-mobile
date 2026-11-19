@@ -1061,6 +1061,8 @@ static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
 static _Atomic int g_dm_trial_full_notice;
 static _Atomic uint64_t g_dm_trial_hire_G, g_dm_trial_hire_player;
 static _Atomic uint64_t g_dm_trial_verified_two_G;
+static _Atomic int g_dm_trial_verified_client;
+
 static _Atomic uint32_t g_dm_trial_hire_old, g_dm_trial_hire_new;
 
 /* This code is present ONLY in a deliberately marked offline experimental
@@ -1207,6 +1209,36 @@ static void dm_dualmerc_pending_reset(void) {
         dm_dualmerc_ui_cancel(g_dm_dualmerc_pending.nonce);
     memset(&g_dm_dualmerc_pending, 0, sizeof g_dm_dualmerc_pending);
 }
+/* Check the CLIENT-side owner/type-7 list, independently of server pets.
+ * The server may add two mercenaries without both ever reaching the render/
+ * inventory UI. Client observations are read-only and never grant a hire. */
+static int dm_dualmerc_client_both(uint64_t player, uint32_t old_id,
+                                   uint32_t new_id) {
+    module_t *mm = main_mod();
+    uint64_t first = 0, node = 0;
+    uint32_t owner = UINT32_MAX;
+    if (!mm || !mm->base || !player ||
+        !tk_rd(player + 8, &owner, 4) ||
+        !tk_rd((uint64_t)(uintptr_t)mm->base + 0x2d33528,
+               &first, 8)) return 0;
+    node = first;
+    unsigned found = 0;
+    for (int i=0;node && i<512;i++) {
+        uint32_t type=UINT32_MAX, id=UINT32_MAX, oid=UINT32_MAX;
+        uint64_t next=0;
+        if (!tk_rd(node+4,&type,4) || !tk_rd(node+8,&id,4) ||
+            !tk_rd(node+0xc,&oid,4) ||
+            !tk_rd(node+0x30,&next,8)) return 0;
+        if (type==7 && oid==owner) {
+            if (id==old_id) found |= 1;
+            if (id==new_id) found |= 2;
+        }
+        if (next==node) return 0;
+        node=next;
+    }
+    return found == 3;
+}
+
 static void dm_dualmerc_target_clear(void) {
     g_dm_dualmerc_selected_G = g_dm_dualmerc_selected_player = 0;
     g_dm_dualmerc_selected_id = UINT32_MAX;
@@ -1482,6 +1514,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         return;
     }
     atomic_store(&g_dm_trial_verified_two_G, 0);
+    atomic_store(&g_dm_trial_verified_client, 0);
     atomic_store(&g_dm_trial_hire_old, old_id);
     atomic_store(&g_dm_trial_hire_new, new_id);
     atomic_store(&g_dm_trial_hire_G, G);
@@ -1609,6 +1642,14 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
     }
     dm_dual_merc_probe_tick(G, player, 0);
     dm_dualmerc_pending_tick(G, player);
+    if (player && atomic_load(&g_dm_trial_verified_two_G) == G &&
+        !atomic_load(&g_dm_trial_verified_client) &&
+        dm_dualmerc_trial_pet_nodes(player, NULL) == 2 &&
+        dm_dualmerc_client_both(player, atomic_load(&g_dm_trial_hire_old),
+                               atomic_load(&g_dm_trial_hire_new))) {
+        atomic_store(&g_dm_trial_verified_client, 1);
+        LOG("DM_DUAL_MERC_TRIAL：客户端 type7 属主链同时出现新旧佣兵 ID，两端 ID 匹配；装备/跨区/读档仍待验证");
+    }
     /* A factual, once-per-run notice only after BOTH pet nodes really exist.
      * Do not claim persistence or the independent gear UI already works. */
     if (player && dm_dualmerc_trial_enabled()) {
@@ -1619,12 +1660,13 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             shown_two = 0;
         }
         if (!shown_two && atomic_load(&g_dm_trial_verified_two_G) == G &&
+            atomic_load(&g_dm_trial_verified_client) &&
             dm_dualmerc_trial_pet_nodes(player, NULL) == 2) {
             module_t *mm = main_mod();
             if (mm) {
                 shown_two = 1;
                 dm_game_notice((uint8_t *)mm->base,
-                    "服务器已核对两名佣兵ID；客户端装备界面和重进恢复尚未完成");
+                    "服务器和客户端均已找到两名佣兵；独立装备与读档恢复仍待验证");
                 LOG("DM_DUAL_MERC_TRIAL：服务端宠物表同时有 2 名，已显示实测提示");
             }
         }

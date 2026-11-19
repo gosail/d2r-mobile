@@ -182,6 +182,13 @@ if RULE_RUN:
                  f' | This game program (build ID {BUILD_ID}) is not supported by D2R Mobile yet: only 1.0.34.0 (build ID {RULE_BUILD}) is.')
     RULE_ORIG_SHA = hashlib.sha256(IMG).hexdigest()
 cuts = list(CUTS.get(BUILD_ID, []))
+# Only the user's disposable offline dual-merc test build gets the native
+# transaction call-site audit. All three BL instructions are pass-through
+# host SVC calls; no native hire/delete/save behavior is suppressed.
+# Normal builds remain byte-for-byte unaffected by this extra gate set.
+if NAME == "main" and os.environ.get("DM_OFFLINE_DUAL_MERC_TEST") == "1":
+    from dualmerc_native_cuts import host_audit_cuts
+    cuts += host_audit_cuts(BUILD_ID)
 # 触屏版规则域默认同时带宿主私有门；规则闸门可显式关闭，保留同一出包入口和规则域。
 # The touchscreen rule domain by default also carries the host-private gates; the rule gate check can turn them off explicitly, keeping the same packaging entry point and rule domain.
 PRIVATE_GATES = os.environ.get("DM_PRIVATE_GATES", "1") != "0"

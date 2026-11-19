@@ -21,6 +21,7 @@ void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void); 
 #include "dm_touch_native_art.h"
 #include "dm_actions.h"
 #include <stdatomic.h>
+#include "../../host/dm_dualmerc_ui_channel.h"
 #include "dm_touch_game_state.h"
 #include "../../host/dm_cursor.h"
 #include "../../host/dm_hud.h"
@@ -1062,6 +1063,112 @@ void front_run(void (*guest)(void)) {
     dm_touch_game_live_check(1);
     if(!dm_touch_game_attach()) LOG("【红】技能绑定读取没挂上（产物没有观测门 OBS_BINDING_GETTER，或 main 模块不符）：技能键图标 / 回城键绑定不工作");   // 产品功能缺门不许静默 | A product feature missing its gate must not be silent
     guest();
+}
+
+// iPad offline dual-merc replacement chooser. The game/server thread never
+// waits for UIKit. A request nonce prevents a stale dialog from affecting a
+// later NPC interaction. THIS ONLY RETURNS A CHOICE: it cannot by itself
+// remove a mercenary, spend gold, or replay a native hire packet.
+static dm_dualmerc_ui_channel g_dm_merc_choice_channel =
+    DM_DUALMERC_UI_CHANNEL_INIT;
+static UIAlertController *g_dm_merc_choice_alert;
+/* UIKit-owned identity: a queued cancellation must never close a newer NPC
+ * chooser, even when the old game callback arrives after a new request. */
+static uint64_t g_dm_merc_choice_alert_nonce;
+static NSString *dm_merc_act_name(unsigned act) {
+    switch (act) {
+    case 1: return @"第一幕 · 罗格弓箭手";
+    case 2: return @"第二幕 · 沙漠佣兵";
+    case 3: return @"第三幕 · 铁狼法师";
+    case 5: return @"第五幕 · 野蛮人";
+    default: return nil;
+    }
+}
+void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
+                            unsigned dead_mask) {
+    if (!nonce || !dm_merc_act_name(act0) || !dm_merc_act_name(act1) ||
+        act0 == act1 || (dead_mask & ~3u) || dead_mask == 3u) return;
+    if (!dm_dualmerc_ui_channel_begin(&g_dm_merc_choice_channel,nonce))
+        return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!dm_dualmerc_ui_channel_pending(&g_dm_merc_choice_channel,nonce)) return;
+        if (g_dm_merc_choice_alert) {
+            [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
+            g_dm_merc_choice_alert = nil;
+            g_dm_merc_choice_alert_nonce = 0;
+        }
+        UIViewController *vc = nil, *alt = nil;
+        for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
+            if (![sc isKindOfClass:UIWindowScene.class]) continue;
+            for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+                if (!w.rootViewController) continue;
+                if (w.isKeyWindow) vc = w.rootViewController;
+                else if (sc.activationState == UISceneActivationStateForegroundActive && !alt)
+                    alt = w.rootViewController;
+            }
+        }
+        vc = vc ?: alt;
+        while (vc.presentedViewController) vc = vc.presentedViewController;
+        if (!vc) {
+            dm_dualmerc_ui_channel_answer(&g_dm_merc_choice_channel,nonce,-1);
+            return;
+        }
+        NSString *message = dead_mask
+            ? @"当前已有两名佣兵。死亡佣兵暂不支持原生替换，请选择存活的佣兵，或取消。"
+            : @"当前已有两名不同幕的佣兵。请选择要替换的一名，或取消雇佣。";
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"选择替换的佣兵"
+            message:message preferredStyle:UIAlertControllerStyleAlert];
+        a.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        a.view.tintColor = [UIColor colorWithRed:199.0/255 green:179.0/255
+                                               blue:119.0/255 alpha:1.0];
+        __weak UIAlertController *weakA = a;
+        for (unsigned slot=0;slot<2;slot++) {
+            unsigned act = slot ? act1 : act0;
+            unsigned selected = slot;
+            BOOL dead = !!(dead_mask & (1u << slot));
+            NSString *optionTitle = dm_merc_act_name(act);
+            if (dead)
+                optionTitle = [optionTitle stringByAppendingString:@"（已死亡，暂不可替换）"];
+            UIAlertAction *option = [UIAlertAction actionWithTitle:optionTitle
+                style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                (void)action;
+                dm_dualmerc_ui_channel_answer(&g_dm_merc_choice_channel,nonce,(int)selected);
+                if (g_dm_merc_choice_alert == weakA) {
+                    g_dm_merc_choice_alert = nil;
+                    g_dm_merc_choice_alert_nonce = 0;
+                }
+            }];
+            option.enabled = !dead;
+            [a addAction:option];
+        }
+        [a addAction:[UIAlertAction actionWithTitle:@"取消雇佣"
+            style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+            (void)action;
+            dm_dualmerc_ui_channel_answer(&g_dm_merc_choice_channel,nonce,-1);
+            if (g_dm_merc_choice_alert == weakA) {
+                g_dm_merc_choice_alert = nil;
+                g_dm_merc_choice_alert_nonce = 0;
+            }
+        }]];
+        g_dm_merc_choice_alert = a;
+        g_dm_merc_choice_alert_nonce = nonce;
+        [vc presentViewController:a animated:YES completion:nil];
+    });
+}
+int dm_dualmerc_ui_poll(uint64_t nonce, int *choice) {
+    return dm_dualmerc_ui_channel_poll(&g_dm_merc_choice_channel,
+                                       nonce,choice);
+}
+void dm_dualmerc_ui_cancel(uint64_t nonce) {
+    if (!dm_dualmerc_ui_channel_cancel(&g_dm_merc_choice_channel,nonce))
+        return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        /* An old queued cancellation cannot dismiss a newer alert. */
+        if (g_dm_merc_choice_alert_nonce != nonce) return;
+        [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
+        g_dm_merc_choice_alert = nil;
+        g_dm_merc_choice_alert_nonce = 0;
+    });
 }
 
 // 软键盘输入框（front.h）：主线程弹 UIAlertController + 文本框，客体线程阻塞到确定 / 取消。无窗口（非 boot 模式）不弹，返回 -1

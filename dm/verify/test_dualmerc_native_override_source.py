@@ -34,6 +34,22 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
             code.index("regs[0] = target;")
         )
 
+    def test_dead_mercanary_fails_before_native_replacement(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        hire = source.split(
+            "static int dm_dualmerc_hire_preflight(", 1)[1].split(
+            "static void dm_dualmerc_pending_tick(", 1)[0]
+        pending = source.split(
+            "static void dm_dualmerc_pending_tick(", 1)[1].split(
+            "static void dm_dualmerc_native_lookup(", 1)[0]
+        self.assertIn(
+            "lease.plan.action == DM_DUALMERC_ADD && roster.slot[0].dead", hire
+        )
+        self.assertIn("if (roster.slot[choice].dead)", hire)
+        self.assertIn("if (roster.slot[target].dead)", pending)
+        self.assertIn("atomic_store(&g_dm_trial_full_notice,5);", hire)
+        self.assertIn("atomic_store(&g_dm_trial_full_notice,5);", pending)
+
     def test_failure_must_not_fall_back_to_unselected_native_unit(self):
         code = self.selected
         self.assertIn("die(\"DM_DUAL_MERC_TRIAL", code)

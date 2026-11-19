@@ -66,7 +66,9 @@ static inline int dm_dualmerc_d2s_matches_state(
     if (!v || !s || !dm_dualmerc_state_valid(s) ||
         s->native_slot >= DM_DUALMERC_SLOTS) return 0;
     const dm_dualmerc_saved_slot *m = &s->slot[s->native_slot];
-    return m->occupied && m->hireling_row == v->hireling_row &&
+    return m->occupied && s->native_seed == v->seed &&
+           s->native_d2s_checksum == v->checksum &&
+           m->hireling_row == v->hireling_row &&
            m->name_id == v->name_id && m->experience == v->exp &&
            (m->dead != 0) == (v->dead != 0);
 }

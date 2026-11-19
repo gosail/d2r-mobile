@@ -27,6 +27,9 @@ int main(void) {
     state->slot[0].monster_class=271;
     state->slot[0].level=20; state->slot[0].hireling_row=4;
     state->slot[0].name_id=9; state->slot[0].experience=10000;
+    assert(!dm_dualmerc_d2s_matches_state(&a,state));
+    state->native_seed = a.seed;
+    state->native_d2s_checksum = a.checksum;
     assert(dm_dualmerc_d2s_matches_state(&a,state));
     state->slot[1].occupied=1; state->slot[1].act=2;
     state->slot[1].monster_class=338; state->slot[1].level=12;
@@ -38,6 +41,12 @@ int main(void) {
     state->slot[0].experience=9999;
     assert(!dm_dualmerc_d2s_matches_state(&a,state));
     state->slot[0].experience=10000;
+    state->native_seed++;
+    assert(!dm_dualmerc_d2s_matches_state(&a,state));
+    state->native_seed--;
+    state->native_d2s_checksum++;
+    assert(!dm_dualmerc_d2s_matches_state(&a,state));
+    state->native_d2s_checksum--;
     buf[300]^=1;
     assert(!dm_dualmerc_d2s_read(buf,n,&a));
     assert(!memcmp(&a,&saved,sizeof a));

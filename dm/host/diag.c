@@ -11,6 +11,7 @@
 #include "dm_dualmerc_policy.h"
 #include "dm_dualmerc_trial.h"
 #include "dm_dualmerc_hire_txn.h"
+#include "dm_dualmerc_hire_rows.h"
 #include "dm_dualmerc_packet.h"
 #include "dm_dualmerc_equip.h"
 #include "hle.h"
@@ -1190,6 +1191,42 @@ static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
     return !dm_dualmerc_roster_valid(out) || node ? -1 : count;
 }
 
+/* The engine already exposes this exact Hireling table base and stride to
+ * dm_rift.c for its mercenary class validation. This extra prefix check
+ * refuses an unrecognized NPC/Id/difficulty combination BEFORE gold debit.
+ * The native C2S hire token remains an experimental Id interpretation, not
+ * proof of a reversible game-engine transaction. */
+static int dm_dualmerc_native_hire_rows_match(uint64_t G,
+                           const dm_dualmerc_hire_request *want) {
+    module_t *mm=main_mod();
+    uint8_t table_version=0;
+    uint64_t table=0, rows=0, count=0;
+    if (!G || !mm || !mm->base ||
+        !dm_dualmerc_hire_request_valid(want) ||
+        !tk_rd(G+0x106,&table_version,1) ||
+        table_version<1 || table_version>3 ||
+        !tk_rd((uint64_t)(uintptr_t)mm->base+0x2d64a18+
+                (uint64_t)table_version*16, &table, 8) || !table ||
+        !tk_rd(table+0x558,&rows,8) || !rows ||
+        !tk_rd(table+0x560,&count,8) ||
+        !count || count > DM_DUALMERC_HIRE_COUNT_MAX)
+        return 0;
+    dm_dualmerc_hire_check result={0};
+    for (uint64_t i=0; i<count; ++i) {
+        uint8_t prefix[DM_DUALMERC_HIRE_PREFIX_BYTES];
+        if (!tk_rd(rows+i*DM_DUALMERC_HIRE_STRIDE,
+                   prefix,sizeof prefix) ||
+            !dm_dualmerc_hire_check_add(&result,want,prefix))
+            return 0;
+    }
+    if (!dm_dualmerc_hire_check_ok(&result)) {
+        LOG("DM_DUAL_MERC_TRIAL：Hireling候选记录不一致或不唯一；Id%u NPC类号%u 幕%u 难度%u 命中%u 冲突%u",
+            want->native_hire_id,want->vendor_class,want->vendor_act,
+            want->game_difficulty,result.matches,result.conflicts);
+        return 0;
+    }
+    return 1;
+}
 static int dm_dualmerc_native_offer(uint64_t G, uint64_t player,
                                      const uint8_t packet[DM_DUALMERC_PACKET_BYTES],
                                      dm_merc_txn_offer *offer) {
@@ -1211,6 +1248,13 @@ static int dm_dualmerc_native_offer(uint64_t G, uint64_t player,
         !tk_rd(G + 0x104, &diff, 1) || diff > 2) return 0;
     unsigned act = dm_dualmerc_act_for_vendor(cls);
     if (!act) return 0;
+    const dm_dualmerc_hire_request wanted={
+        .native_hire_id=parsed.hire_row,
+        .vendor_class=cls,
+        .vendor_act=act,
+        .game_difficulty=diff
+    };
+    if (!dm_dualmerc_native_hire_rows_match(G,&wanted)) return 0;
     *offer = (dm_merc_txn_offer){
         .game_session = G, .owner_id = owner_id,
         .npc_id = parsed.npc_unit_id, .hire_row = parsed.hire_row,

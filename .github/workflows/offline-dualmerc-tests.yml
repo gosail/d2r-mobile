@@ -28,6 +28,8 @@ on:
       - "dm/tools/dualmerc_native_cuts.py"
       - "dm/ios/tools/retrofit_dualmerc_guest.py"
       - "dm/ios/tests/test_retrofit_dualmerc_guest.py"
+      - "dm/ios/tests/test_dualmerc_chooser_source.py"
+      - "dm/ios/Sources/front_ios.m"
       - "dm/verify/hire_handler.py"
       - "dm/verify/hire_handler_guest.py"
       - "dm/verify/hire_chain_contract.py"
@@ -62,3 +64,4 @@ jobs:
           python3 -m unittest discover -s dm/verify -p 'test_hire_chain_contract.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_dualmerc_native_cuts.py' -v
           python3 -m unittest discover -s dm/ios/tests -p 'test_retrofit_dualmerc_guest.py' -v
+          python3 -m unittest discover -s dm/ios/tests -p 'test_dualmerc_chooser_source.py' -v

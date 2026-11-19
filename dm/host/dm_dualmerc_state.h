@@ -117,8 +117,12 @@ static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
          * outside gear_count is still an item-ownership claim in memory;
          * accepting it would let a later hire overwrite the sole copy. */
         for (unsigned i = m->gear_count; i < DM_DUALMERC_GEAR_MAX; ++i) {
-            const dm_dualmerc_equipped_item blank = {0};
-            if (memcmp(&m->gear[i], &blank, sizeof blank)) return 0;
+            const dm_dualmerc_equipped_item *it = &m->gear[i];
+            /* Compare fields explicitly: structure padding is not a
+             * portable indication of a retained item. */
+            if (it->body_slot || it->size || it->persistent_item_id) return 0;
+            for (size_t byte = 0; byte < sizeof it->data; ++byte)
+                if (it->data[byte]) return 0;
         }
     }
     /* Exactly one occupied slot is backed by vanilla .d2s; the other

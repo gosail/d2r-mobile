@@ -34,7 +34,7 @@ static void empty_and_corruption(void) {
     memset(&s, 0, sizeof s);
     assert(dm_dualmerc_state_valid(&s));
     size_t n = encode();
-    assert(n == 92);
+    assert(n == 100);
     assert(dm_dualmerc_state_decode(wire, n, &decoded) == DM_DUALMERC_CODEC_OK);
     assert(!memcmp(&s, &decoded, sizeof s));
     assert(dm_dualmerc_state_decode(wire, n - 1, &decoded) == DM_DUALMERC_CODEC_INVALID);
@@ -94,11 +94,21 @@ static void recruit_and_replace(void) {
 }
 
 static void roundtrip_and_limits(void) {
+    /* The in-memory state is provisional after native roster mutations:
+     * it CANNOT be persisted until vanilla .d2s has been validated. */
+    size_t rejected = 0;
+    assert(dm_dualmerc_state_encode(&s, wire, sizeof wire, &rejected) ==
+           DM_DUALMERC_CODEC_INVALID && rejected == 0);
+    s.native_d2s_checksum = 0xcafefeed;
+    s.native_seed = 0x12345678;
     size_t n = encode();
     assert(dm_dualmerc_state_decode(wire, n, &decoded) == DM_DUALMERC_CODEC_OK);
     assert(!memcmp(&s, &decoded, sizeof s));
     assert(!memcmp(wire, "SWM2", 4));
     assert(dm_dualmerc_load_u64(wire+8) == s.generation);
+    assert(dm_dualmerc_load_u16(wire+4) == 3);
+    assert(dm_dualmerc_load_u32(wire+24) == 0xcafefeed);
+    assert(dm_dualmerc_load_u32(wire+28) == 0x12345678);
 
     dm_dualmerc_saved_slot original = s.slot[0];
     s.slot[0] = make(2, 1, 338, 0x10001);

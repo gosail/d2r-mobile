@@ -14,7 +14,7 @@
 #define DM_DUALMERC_GEAR_MAX 10
 #define DM_DUALMERC_ITEM_BYTES_MAX 1024
 #define DM_DUALMERC_STATE_BYTES_MAX (2u * DM_DUALMERC_GEAR_MAX * (DM_DUALMERC_ITEM_BYTES_MAX + 16u) + 256u)
-#define DM_DUALMERC_STATE_VERSION 2
+#define DM_DUALMERC_STATE_VERSION 3
 
 typedef struct {
     uint8_t body_slot;
@@ -33,6 +33,8 @@ typedef struct {
 typedef struct {
     uint64_t generation;
     uint8_t native_slot; /* Which of the two is serialized by original .d2s */
+    uint32_t native_d2s_checksum; /* Exact committed vanilla .d2s CRC checksum */
+    uint32_t native_seed;         /* Vanilla merc control seed, never runtime unit ID */
     dm_dualmerc_saved_slot slot[DM_DUALMERC_SLOTS];
 } dm_dualmerc_saved_state;
 
@@ -115,8 +117,10 @@ static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
     /* Exactly one occupied slot is backed by vanilla .d2s; the other
      * is sidecar-only. Without this tag, reload may duplicate an item. */
     return dm_dualmerc_roster_valid(&roster) &&
+           (!!s->native_d2s_checksum == !!s->native_seed) &&
            (occupied ? s->native_slot < DM_DUALMERC_SLOTS &&
-                       s->slot[s->native_slot].occupied : s->native_slot == 0);
+                       s->slot[s->native_slot].occupied :
+                       s->native_slot == 0 && !s->native_seed);
 }
 
 static inline dm_dualmerc_roster dm_dualmerc_state_roster(const dm_dualmerc_saved_state *s) {
@@ -152,36 +156,47 @@ static inline int dm_dualmerc_state_apply_verified(
         s->slot[chosen_slot].gear_count != 0) return 0;
     dm_dualmerc_saved_slot old = s->slot[chosen_slot];
     uint8_t previous_native = s->native_slot;
+    uint32_t old_crc = s->native_d2s_checksum, old_seed = s->native_seed;
     s->slot[chosen_slot] = *next;
     s->native_slot = (uint8_t)native_after;
+    /* Native .d2s must be re-read AFTER the hire and its native save
+     * transaction. A previous checksum/seed cannot attest to new gear or
+     * a different mercenary record. Never keep an obsolete binding. */
+    s->native_d2s_checksum = 0;
+    s->native_seed = 0;
     if (!dm_dualmerc_state_valid(s)) {
         s->slot[chosen_slot] = old;
         s->native_slot = previous_native;
+        s->native_d2s_checksum = old_crc;
+        s->native_seed = old_seed;
         return 0;
     }
     ++s->generation;
     return 1;
 }
 
-/* Canonical format: magic SWM2, v2, two slots, generation, total size,
- * native-slot pointer (which slot is present in original .d2s),
- * one 32-byte slot record per slot followed by 0-10 item bitstreams,
- * CRC32. Write inside the existing transactional save work directory. */
+/* Canonical format: magic SWM2, v3, two slots, generation, total size,
+ * 32-byte header including native-slot index, native vanilla .d2s
+ * checksum and merc seed, then one 32-byte record per slot and up to
+ * 10 item bitstreams per slot, trailer CRC32. Never silently read v2.
+ * Sidecar and original d2s must be in the same atomic transaction. */
 static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
     const dm_dualmerc_saved_state *s, uint8_t *dst, size_t cap, size_t *written)
 {
     if (written) *written = 0;
-    if (!s || !dst || !written || !dm_dualmerc_state_valid(s))
+    if (!s || !dst || !written || !dm_dualmerc_state_valid(s) ||
+        ((s->slot[0].occupied || s->slot[1].occupied) &&
+          (!s->native_seed || !s->native_d2s_checksum)))
         return DM_DUALMERC_CODEC_INVALID;
     if (cap > DM_DUALMERC_STATE_BYTES_MAX) cap = DM_DUALMERC_STATE_BYTES_MAX;
     /* Preflight the *entire* serialization size. On insufficient capacity,
      * do not modify even one byte of caller's buffer. */
-    size_t required = 24 + 4 + 32 * DM_DUALMERC_SLOTS;
+    size_t required = 32 + 4 + 32 * DM_DUALMERC_SLOTS;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k)
         for (unsigned i = 0; i < s->slot[k].gear_count; ++i)
             required += 12 + s->slot[k].gear[i].size;
     if (required > cap) return DM_DUALMERC_CODEC_CAPACITY;
-    size_t len = 24;
+    size_t len = 32;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k) {
         const dm_dualmerc_saved_slot *m = &s->slot[k];
         if (len + 32 + 4 > cap) return DM_DUALMERC_CODEC_CAPACITY;
@@ -218,6 +233,8 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
     dm_dualmerc_store_u32(dst + 16, (uint32_t)(len + 4));
     dst[20] = s->native_slot;
     memset(dst + 21, 0, 3);
+    dm_dualmerc_store_u32(dst + 24, s->native_d2s_checksum);
+    dm_dualmerc_store_u32(dst + 28, s->native_seed);
     dm_dualmerc_store_u32(dst + len, dm_dualmerc_crc32(dst, len));
     *written = len + 4;
     return DM_DUALMERC_CODEC_OK;
@@ -228,7 +245,7 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_encode(
 static inline dm_dualmerc_codec_result dm_dualmerc_state_decode(
     const uint8_t *src, size_t n, dm_dualmerc_saved_state *dst)
 {
-    if (!src || !dst || n < 24 + 2 * 32 + 4 ||
+    if (!src || !dst || n < 32 + 2 * 32 + 4 ||
         n > DM_DUALMERC_STATE_BYTES_MAX || memcmp(src, "SWM2", 4) ||
         dm_dualmerc_load_u16(src + 4) != DM_DUALMERC_STATE_VERSION ||
         dm_dualmerc_load_u16(src + 6) != DM_DUALMERC_SLOTS ||
@@ -240,7 +257,9 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_decode(
     dm_dualmerc_saved_state tmp = {0};
     tmp.generation = dm_dualmerc_load_u64(src + 8);
     tmp.native_slot = src[20];
-    size_t at = 24;
+    tmp.native_d2s_checksum = dm_dualmerc_load_u32(src + 24);
+    tmp.native_seed = dm_dualmerc_load_u32(src + 28);
+    size_t at = 32;
     for (unsigned k = 0; k < DM_DUALMERC_SLOTS; ++k) {
         if (at + 32 > n - 4) return DM_DUALMERC_CODEC_INVALID;
         dm_dualmerc_saved_slot *m = &tmp.slot[k];
@@ -275,7 +294,9 @@ static inline dm_dualmerc_codec_result dm_dualmerc_state_decode(
             at += 12 + it->size;
         }
     }
-    if (at != n - 4 || !dm_dualmerc_state_valid(&tmp))
+    if (at != n - 4 || !dm_dualmerc_state_valid(&tmp) ||
+        ((tmp.slot[0].occupied || tmp.slot[1].occupied) &&
+         (!tmp.native_d2s_checksum || !tmp.native_seed)))
         return DM_DUALMERC_CODEC_INVALID;
     *dst = tmp;
     return DM_DUALMERC_CODEC_OK;

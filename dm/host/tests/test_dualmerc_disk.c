@@ -26,6 +26,8 @@ int main(void) {
     s->slot[1].gear[0].persistent_item_id = 0x12345678;
     memcpy(s->slot[1].gear[0].data, "GEAR", 4);
     s->native_slot = 0; s->generation = 7;
+    s->native_d2s_checksum = 0xcafefeed;
+    s->native_seed = 0x12345678;
 
     assert(dm_dualmerc_disk_save(root, "Hero", s) == 0);
     assert(dm_dualmerc_disk_load(root, "Hero", r) == 0);

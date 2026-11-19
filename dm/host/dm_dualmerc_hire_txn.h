@@ -93,24 +93,66 @@ static inline int dm_merc_txn_authorize(
         !dm_dualmerc_roster_valid(current)) {
         dm_merc_txn_cancel(t); return 0;
     }
-    for (unsigned i = 0; i < DM_DUALMERC_SLOTS; i++) {
-        const dm_dualmerc_slot *a = &t->roster.slot[i];
-        const dm_dualmerc_slot *z = &current->slot[i];
-        if (a->occupied != z->occupied || a->act != z->act ||
-            a->difficulty != z->difficulty || a->dead != z->dead ||
-            a->runtime_unit_id != z->runtime_unit_id) {
+    /* Native pet-list insertion can reorder the two nodes while an iPad
+     * choice is open. Preserve the chosen MERCENARY identity, not its list
+     * index. An unknown, duplicated, or altered unit ID still fails closed. */
+    if (t->choice >= DM_DUALMERC_SLOTS) {
+        dm_merc_txn_cancel(t); return 0;
+    }
+    unsigned matched_mask = 0;
+    unsigned live_for_saved[DM_DUALMERC_SLOTS] = {
+        DM_DUALMERC_SLOTS, DM_DUALMERC_SLOTS
+    };
+    for (unsigned i = 0; i < DM_DUALMERC_SLOTS; ++i) {
+        const dm_dualmerc_slot *old = &t->roster.slot[i];
+        if (!old->occupied) continue;
+        if (old->runtime_unit_id == UINT32_MAX) {
+            dm_merc_txn_cancel(t); return 0;
+        }
+        for (unsigned j = 0; j < DM_DUALMERC_SLOTS; ++j) {
+            const dm_dualmerc_slot *now = &current->slot[j];
+            if (!now->occupied ||
+                now->runtime_unit_id != old->runtime_unit_id) continue;
+            if (live_for_saved[i] != DM_DUALMERC_SLOTS ||
+                (matched_mask & (1u << j)) ||
+                old->act != now->act ||
+                old->difficulty != now->difficulty ||
+                old->dead != now->dead) {
+                dm_merc_txn_cancel(t); return 0;
+            }
+            live_for_saved[i] = j;
+            matched_mask |= 1u << j;
+        }
+        if (live_for_saved[i] == DM_DUALMERC_SLOTS) {
             dm_merc_txn_cancel(t); return 0;
         }
     }
-    dm_dualmerc_decision p = dm_dualmerc_plan(current,
-        live->offered_act,live->difficulty);
-    if (p.action != t->plan.action ||
-        p.replace_mask != t->plan.replace_mask ||
-        p.slot != t->plan.slot ||
-        !dm_dualmerc_choice_allowed(&p,t->choice)) {
+    unsigned live_occupied = 0;
+    for (unsigned j = 0; j < DM_DUALMERC_SLOTS; ++j)
+        if (current->slot[j].occupied) live_occupied |= 1u << j;
+    if (live_occupied != matched_mask) {
         dm_merc_txn_cancel(t); return 0;
     }
-    *slot_out = t->choice;
+    unsigned chosen = DM_DUALMERC_SLOTS;
+    if (t->roster.slot[t->choice].occupied) {
+        chosen = live_for_saved[t->choice];
+    } else if (t->plan.action == DM_DUALMERC_ADD) {
+        for (unsigned j = 0; j < DM_DUALMERC_SLOTS; ++j)
+            if (!current->slot[j].occupied) {
+                chosen = j; break;
+            }
+    }
+    dm_dualmerc_decision p = dm_dualmerc_plan(current,
+        live->offered_act,live->difficulty);
+    if (chosen >= DM_DUALMERC_SLOTS ||
+        p.action != t->plan.action ||
+        !dm_dualmerc_choice_allowed(&p,chosen) ||
+        ((p.action == DM_DUALMERC_ADD ||
+          p.action == DM_DUALMERC_REPLACE_SAME_ACT) &&
+         p.slot != (int)chosen)) {
+        dm_merc_txn_cancel(t); return 0;
+    }
+    *slot_out = chosen;
     dm_merc_txn_cancel(t); /* one-shot; replayed confirmation denied */
     return 1;
 }

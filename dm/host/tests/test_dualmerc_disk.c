@@ -113,6 +113,36 @@ int main(void) {
     s->native_seed--;
     assert(dm_dualmerc_disk_save_verified(root,"Hero",s)==0);
 
+    /* A different, correctly checksummed vanilla mercenary must NEVER
+     * inherit the former .swmerc. A valid D2S checksum alone is insufficient
+     * to validate the secondary mercenary and its item ownership. */
+    r->generation=1999;
+    dm_dualmerc_store_u16(d2s+183,42); /* different saved merc name */
+    dm_dualmerc_store_u32(d2s+12,0);
+    dm_dualmerc_store_u32(d2s+12,dm_dualmerc_d2s_checksum(d2s,sizeof d2s));
+    native=fopen(native_path,"wb");
+    assert(native && fwrite(d2s,1,sizeof d2s,native)==sizeof d2s);
+    assert(fclose(native)==0);
+    dm_dualmerc_native_anchor changed={0};
+    assert(dm_dualmerc_disk_read_native_anchor(root,"Hero",&changed));
+    assert(changed.name_id==42 && changed.seed==s->native_seed);
+    assert(dm_dualmerc_disk_load_verified(root,"Hero",r)==-1);
+    assert(r->generation==1999);
+    dm_dualmerc_saved_state *rebound=malloc(sizeof *rebound);
+    assert(rebound);
+    *rebound=*s; rebound->native_seed=0; rebound->native_d2s_checksum=0;
+    assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",rebound,1)==-1);
+    assert(rebound->native_seed==0 && rebound->native_d2s_checksum==0);
+    free(rebound);
+    /* Restore the original saved mercenary: sidecar becomes valid again. */
+    dm_dualmerc_store_u16(d2s+183,0);
+    dm_dualmerc_store_u32(d2s+12,0);
+    dm_dualmerc_store_u32(d2s+12,dm_dualmerc_d2s_checksum(d2s,sizeof d2s));
+    native=fopen(native_path,"wb");
+    assert(native && fwrite(d2s,1,sizeof d2s,native)==sizeof d2s);
+    assert(fclose(native)==0);
+    assert(dm_dualmerc_disk_load_verified(root,"Hero",r)==0);
+
     assert(unlink(path) == 0);
     assert(unlink(native_path) == 0);
     assert(rmdir(hero) == 0);

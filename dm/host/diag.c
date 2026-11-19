@@ -12,6 +12,7 @@
 #include "dm_dualmerc_trial.h"
 #include "dm_dualmerc_hire_txn.h"
 #include "dm_dualmerc_packet.h"
+#include "dm_dualmerc_equip.h"
 #include "hle.h"
 #include "dm_merc_trace.h"
 #include <TargetConditionals.h>
@@ -1259,6 +1260,41 @@ static void dm_dualmerc_target_clear(void) {
     g_dm_dualmerc_selected_act = 0;
 }
 
+/* This trial has no durable second-merc item ownership or restore hook yet.
+ * Even the vanilla 0x5b packet targets a concrete mercenary unit ID. Until
+ * both native inventory panels AND a verified two-merc save pipeline exist,
+ * accept no equip mutation with two simultaneous hirelings.
+ */
+static int dm_dualmerc_equip_preflight(const uint64_t regs[31]) {
+    if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
+        !regs[0] || regs[1] < 1) return 0;
+    uint8_t op=0;
+    if (!tk_rd(regs[0]+4,&op,1) ||
+        (op != 0x51 && op != 0x5b)) return 0;
+    int count=dm_dualmerc_trial_pet_nodes(g_player_unit,NULL);
+    if (count < 0) {
+        LOG("DM_DUAL_MERC_TRIAL：装备前无法安全读取佣兵人数，已拒绝本次新装备操作");
+        atomic_store(&g_dm_trial_full_notice,4);
+        return 1;
+    }
+    if (!dm_dualmerc_equip_block_unpersisted((unsigned)count,op))
+        return 0;
+    if (op == 0x5b) {
+        uint8_t buf[DM_DUALMERC_EQUIP_WIRE_LEN];
+        dm_dualmerc_equip_packet packet={0};
+        if (regs[1] == DM_DUALMERC_EQUIP_NATIVE_LEN &&
+            tk_rd(regs[0],buf,sizeof buf) &&
+            dm_dualmerc_equip_decode(buf,sizeof buf,&packet)) {
+            LOG("DM_DUAL_MERC_TRIAL：拒绝第二佣兵读档未接线时的原生 0x5b 穿戴：物品 id%u → 佣兵 id%u 部位%u",
+                packet.item_id,packet.merc_unit_id,packet.bodyloc);
+        }
+    } else {
+        LOG("DM_DUAL_MERC_TRIAL：拒绝双佣兵状态下的原生 0x51 手持装备操作");
+    }
+    atomic_store(&g_dm_trial_full_notice,4);
+    return 1;
+}
+
 /* Called from the normal server C2S pump BEFORE it deducts gold or invokes
  * native hire. The third/same-Act request is held until an exact one-shot
  * lease authorizes the native replacement target. Only in experimental IPA.
@@ -1714,9 +1750,11 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         if (reason) {
             module_t *mm = main_mod();
             if (mm) dm_game_notice((uint8_t *)mm->base, reason == 1
-                ? "已有两名佣兵：选择替换目标尚未完成，本次未扣金币"
+                ? "已有两名佣兵：本次雇佣未获授权"
                 : reason == 2
-                ? "请先卸下旧佣兵装备再测试双佣兵；本次未雇佣"
+                ? "旧佣兵装备未清空，暂不允许雇佣"
+                : reason == 4
+                ? "两名佣兵独立装备读档尚未完成，已阻止本次穿戴"
                 : "佣兵状态无法安全读取，本次雇佣已取消");
         }
     }
@@ -2351,6 +2389,7 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
      * native gold debit. Two full -> choose; same Act -> targeted replace.
      * This path is compiled/active only in the disposable offline trial. */
     if (dm_dualmerc_hire_preflight(regs)) return;
+    if (dm_dualmerc_equip_preflight(regs)) return;
     static void (*recv)(uint64_t, uint64_t, uint64_t, uint64_t);
     if (!recv) { module_t *m = NULL; for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
                  recv = (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))(m->base + 0x632510); }

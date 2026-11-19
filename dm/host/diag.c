@@ -1531,9 +1531,13 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
             target+1,roster.slot[target].act,target_id);
         ((recv_fn)(mm->base+0x632510))((uint64_t)(uintptr_t)p->packet,
             DM_DUALMERC_NATIVE_PACKET_BYTES,p->packet_flags,p->callback);
-        if (!p->native_override_seen)
-            LOG("【红】DM_DUAL_MERC_TRIAL：本次原生雇佣未经过选定单位查询；不得用作正式存档");
-        else {
+        if (!p->native_override_seen) {
+            /* The native transaction already ran without proving that it
+             * selected the requested hireling. Do not permit a subsequent
+             * unverified save in this disposable-only experiment. */
+            die("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询，终止实验以保护上一份存档");
+            return;
+        } else {
             dm_dualmerc_roster after;
             dm_merc_trace_gear ag[DM_DUALMERC_SLOTS];
             int n=dm_dualmerc_runtime_roster(G,player,&after,ag);
@@ -1551,6 +1555,10 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
             int correct=n==2 && peer_ok && new_ok && old_gone;
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
+            if (!correct) {
+                die("DM_DUAL_MERC_TRIAL：替换后身份未通过校验，停止实验，不允许继续存档");
+                return;
+            }
         }
     }
     dm_dualmerc_target_clear();
@@ -2525,6 +2533,10 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
                     g_dm_dualmerc_pending.native_override_seen;
         LOG("DM_DUAL_MERC_TRIAL：同幕原生替换，旧佣兵消失、其他幕佣兵保留和新佣兵加入：%s",
             correct ? "通过（服务器状态）" : "未通过，不能视作双佣兵功能完成");
+        if (!correct) {
+            die("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配，终止实验");
+            return;
+        }
         dm_dualmerc_target_clear();
     }
     if (pk_id) { static uint32_t win, used, skipped; uint32_t t = cur_tick(); if (t - win >= 25) { win = t; used = 0; }

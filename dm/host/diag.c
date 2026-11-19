@@ -828,15 +828,29 @@ static void dm_merc_probe_sort(dm_merc_probe_unit *a, unsigned n) {
     }
 }
 
-/* The common unit+0x90 inventory pointer and item chain have been verified
- * on player units in this port. Mercenary inventory layout itself is a test
- * hypothesis: a valid 0x01020304 signature is mandatory, and an absent or
- * unreadable chain must NEVER be interpreted as "equipment destroyed".
- * This function reads only and leaves the runtime inventory intact. */
+/* The game's original merc equipment code (dm_rift.c) selects inventory
+ * from +0x98 if unit+0xa0 metadata at +8 is set, otherwise from +0x90.
+ * Reuse this exact selector instead of assuming a player's +0x90 layout.
+ * The inventory signature 0x01020304 and entire item chain must still
+ * validate before concluding that the old merc is unequipped. */
 static void dm_merc_probe_inventory(uint64_t unit, dm_merc_trace_gear *gear) {
-    uint64_t inv = 0, it = 0;
-    uint32_t signature = 0;
-    if (!unit || !tk_rd(unit + 0x90, &inv, sizeof inv)) {
+    uint64_t inv = 0, it = 0, alt_meta = 0;
+    uint32_t signature = 0, use_alt = 0;
+    /* Match the existing, observed inventory selector in dm_rift.c:
+     * unit+0xa0 identifies the alternate inventory arrangement, whose
+     * active inventory is unit+0x98 rather than unit+0x90.
+     * A damaged metadata pointer is NOT treated as an empty mercenary.
+     */
+    if (!unit || !tk_rd(unit + 0xa0, &alt_meta, sizeof alt_meta)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    if (alt_meta && !tk_rd(alt_meta + 8, &use_alt, sizeof use_alt)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    uint64_t inv_offset = (alt_meta && use_alt) ? 0x98 : 0x90;
+    if (!tk_rd(unit + inv_offset, &inv, sizeof inv)) {
         gear->status = DM_MERC_GEAR_INVALID;
         return;
     }

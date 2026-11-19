@@ -1120,7 +1120,7 @@ static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
 
 /* The NPC picker is an optional iOS-only frontend; Mac/Android do not
  * silently replay queued packets without an implemented interface. */
-extern void dm_dualmerc_ui_request(uint64_t, unsigned, unsigned) __attribute__((weak));
+extern void dm_dualmerc_ui_request(uint64_t, unsigned, unsigned, unsigned) __attribute__((weak));
 extern int dm_dualmerc_ui_poll(uint64_t, int *) __attribute__((weak));
 extern void dm_dualmerc_ui_cancel(uint64_t) __attribute__((weak));
 
@@ -1404,6 +1404,11 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         LOG("DM_DUAL_MERC_TRIAL：不能安全延迟本次雇佣包（前端选择器或回调地址不可用），已取消");
         atomic_store(&g_dm_trial_full_notice,3); return 1;
     }
+    if (roster.slot[0].dead && roster.slot[1].dead) {
+        LOG("DM_DUAL_MERC_TRIAL：两名佣兵均已死亡，无法安全选择原生替换目标，取消雇佣");
+        atomic_store(&g_dm_trial_full_notice,5);
+        return 1;
+    }
     uint64_t nonce=++g_dm_dualmerc_nonce_seq;
     if (!nonce) nonce=++g_dm_dualmerc_nonce_seq;
     g_dm_dualmerc_pending=(dm_dualmerc_pending){
@@ -1413,7 +1418,10 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         .expected_act=offer.offered_act
     };
     memcpy(g_dm_dualmerc_pending.packet,raw,sizeof raw);
-    dm_dualmerc_ui_request(nonce,roster.slot[0].act,roster.slot[1].act);
+    unsigned dead_mask = (unsigned)roster.slot[0].dead |
+                         ((unsigned)roster.slot[1].dead << 1);
+    dm_dualmerc_ui_request(nonce,roster.slot[0].act,roster.slot[1].act,
+                           dead_mask);
     LOG("DM_DUAL_MERC_TRIAL：两佣兵已满；询问选择替换幕%u或幕%u，不调用原生雇佣",
         roster.slot[0].act,roster.slot[1].act);
     return 1;

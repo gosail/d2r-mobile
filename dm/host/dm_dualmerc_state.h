@@ -105,6 +105,11 @@ static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
             if (it->body_slot >= DM_DUALMERC_GEAR_MAX ||
                 (used & (1u << it->body_slot)) || !it->persistent_item_id ||
                 !it->size || it->size > DM_DUALMERC_ITEM_BYTES_MAX) return 0;
+            /* A shortened bitstream with stale nonzero trailing bytes is
+             * not a canonical saved item. Do not silently discard unknown
+             * payload that might be the only previous equipment record. */
+            for (size_t byte = it->size; byte < sizeof it->data; ++byte)
+                if (it->data[byte]) return 0;
             used |= 1u << it->body_slot;
             for (unsigned j = 0; j < a; ++j)
                 for (unsigned k = 0; k < s->slot[j].gear_count; ++k)

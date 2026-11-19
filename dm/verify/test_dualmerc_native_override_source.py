@@ -50,6 +50,39 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("atomic_store(&g_dm_trial_full_notice,5);", hire)
         self.assertIn("atomic_store(&g_dm_trial_full_notice,5);", pending)
 
+    def test_native_offer_checks_authoritative_table_prefix(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        verify = source.split(
+            "static int dm_dualmerc_native_hire_rows_match(", 1)[1].split(
+            "static int dm_dualmerc_native_offer(", 1)[0]
+        offer = source.split(
+            "static int dm_dualmerc_native_offer(", 1)[1].split(
+            "static void dm_dualmerc_pending_reset(", 1)[0]
+        self.assertIn("DM_DUALMERC_HIRE_STRIDE", verify)
+        self.assertIn("dm_dualmerc_hire_check_ok(&result)", verify)
+        self.assertIn("table_version>3", verify)
+        self.assertIn("!dm_dualmerc_native_hire_rows_match(G,&wanted)", offer)
+        self.assertLess(
+            offer.index("!dm_dualmerc_native_hire_rows_match(G,&wanted)"),
+            offer.index("*offer = (dm_merc_txn_offer)")
+        )
+
+    def test_failed_post_hire_confirmation_aborts_trial(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        pending = source.split(
+            "static void dm_dualmerc_pending_tick(", 1)[1].split(
+            "static void dm_dualmerc_native_lookup(", 1)[0]
+        self.assertIn(
+            'die("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询', pending
+        )
+        self.assertIn(
+            'die("DM_DUAL_MERC_TRIAL：替换后身份未通过校验', pending
+        )
+        self.assertIn(
+            'die("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配',
+            source
+        )
+
     def test_failure_must_not_fall_back_to_unselected_native_unit(self):
         code = self.selected
         self.assertIn("die(\"DM_DUAL_MERC_TRIAL", code)

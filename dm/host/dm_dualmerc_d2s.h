@@ -72,4 +72,43 @@ static inline int dm_dualmerc_d2s_matches_state(
            m->name_id == v->name_id && m->experience == v->exp &&
            (m->dead != 0) == (v->dead != 0);
 }
+/* Called ONLY after the engine has completed the native .d2s save and the
+ * precise post-hire identity/gear ownership has independently been confirmed.
+ * Binds a provisional SWM2 state (seed/checksum cleared by apply_verified)
+ * to a byte-verified original save WITHOUT editing the original .d2s.
+ *
+ * This is a pure preparation step; it does not read the filesystem or prove
+ * that a second mercenary's item bitstream can be materialized on load.
+ * The caller must still re-read the SAME .d2s under the save transaction
+ * lock via dm_dualmerc_disk_save_verified before publishing the sidecar. */
+static inline int dm_dualmerc_d2s_bind_after_save(
+    dm_dualmerc_saved_state *state,
+    const dm_dualmerc_native_anchor *native,
+    int engine_hire_and_save_confirmed)
+{
+    if (!engine_hire_and_save_confirmed || !state || !native ||
+        !dm_dualmerc_state_valid(state) ||
+        !native->seed || !native->checksum ||
+        (native->version != 97 && native->version != 98 &&
+         native->version != 99))
+        return 0;
+    const dm_dualmerc_saved_slot *m = &state->slot[state->native_slot];
+    if (!m->occupied || m->hireling_row != native->hireling_row ||
+        m->name_id != native->name_id ||
+        m->experience != native->exp ||
+        ((m->dead != 0) != (native->dead != 0)))
+        return 0;
+    dm_dualmerc_saved_state candidate = *state;
+    /* Rebinding to a NEW identity is allowed only while provisional.
+     * A previously persisted, bound sidecar cannot silently switch native
+     * merc identity without a separately confirmed hire mutation. */
+    if ((candidate.native_seed || candidate.native_d2s_checksum) &&
+        candidate.native_seed != native->seed) return 0;
+    candidate.native_seed = native->seed;
+    candidate.native_d2s_checksum = native->checksum;
+    if (!dm_dualmerc_d2s_matches_state(native,&candidate))
+        return 0;
+    *state=candidate;
+    return 1;
+}
 #endif

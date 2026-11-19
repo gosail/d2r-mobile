@@ -28,9 +28,32 @@ int main(void) {
     state->slot[0].level=20; state->slot[0].hireling_row=4;
     state->slot[0].name_id=9; state->slot[0].experience=10000;
     assert(!dm_dualmerc_d2s_matches_state(&a,state));
-    state->native_seed = a.seed;
-    state->native_d2s_checksum = a.checksum;
+    /* The state becomes provisional after a hire. Rebinding happens only
+     * after an independently validated native save. Until then no sidecar
+     * encoder can consider the two records durably associated. */
+    assert(!dm_dualmerc_d2s_bind_after_save(state,&a,0));
+    assert(!state->native_seed && !state->native_d2s_checksum);
+    dm_dualmerc_native_anchor wrong=a;
+    wrong.hireling_row++;
+    assert(!dm_dualmerc_d2s_bind_after_save(state,&wrong,1));
+    wrong=a; wrong.version=105;
+    assert(!dm_dualmerc_d2s_bind_after_save(state,&wrong,1));
+    wrong=a; wrong.exp++;
+    assert(!dm_dualmerc_d2s_bind_after_save(state,&wrong,1));
+    assert(!state->native_seed && !state->native_d2s_checksum);
+    assert(dm_dualmerc_d2s_bind_after_save(state,&a,1));
+    assert(state->native_seed == a.seed);
+    assert(state->native_d2s_checksum == a.checksum);
     assert(dm_dualmerc_d2s_matches_state(&a,state));
+    wrong=a; wrong.seed++;
+    assert(!dm_dualmerc_d2s_bind_after_save(state,&wrong,1));
+    assert(dm_dualmerc_d2s_matches_state(&a,state));
+    /* A subsequent write of the SAME merc can change the .d2s checksum. */
+    wrong=a; wrong.checksum++;
+    assert(dm_dualmerc_d2s_bind_after_save(state,&wrong,1));
+    assert(dm_dualmerc_d2s_matches_state(&wrong,state));
+    assert(!dm_dualmerc_d2s_matches_state(&a,state));
+    assert(dm_dualmerc_d2s_bind_after_save(state,&a,1));
     state->slot[1].occupied=1; state->slot[1].act=2;
     state->slot[1].monster_class=338; state->slot[1].level=12;
     state->slot[1].hireling_row=20;

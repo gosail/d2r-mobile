@@ -49,14 +49,40 @@ class TestDualMercChooserSource(unittest.TestCase):
             cancel.index("dismissViewControllerAnimated:"))
         self.assertIn("g_dm_merc_choice_alert_nonce = 0;", cancel)
 
+    def test_nonce_and_result_are_protected_by_one_mutex(self):
+        front = self.source
+        self.assertIn("static pthread_mutex_t g_dm_merc_choice_mutex", front)
+        helper = body_between(
+            front, "static void dm_merc_choice_resolve(", "static UIAlertController")
+        self.assertIn("pthread_mutex_lock(&g_dm_merc_choice_mutex);", helper)
+        self.assertIn("g_dm_merc_choice_nonce == nonce", helper)
+        self.assertIn("g_dm_merc_choice_result == -2", helper)
+        self.assertIn("g_dm_merc_choice_result = result;", helper)
+        self.assertLess(
+            helper.index("pthread_mutex_lock(&g_dm_merc_choice_mutex)"),
+            helper.index("g_dm_merc_choice_result = result;"))
+        self.assertLess(
+            helper.index("g_dm_merc_choice_result = result;"),
+            helper.index("pthread_mutex_unlock(&g_dm_merc_choice_mutex);"))
+
+    def test_stale_alert_handler_uses_atomic_nonce_result_commit(self):
+        request = body_between(
+            self.source, "void dm_dualmerc_ui_request(", "int dm_dualmerc_ui_poll(")
+        self.assertIn("dm_merc_choice_resolve(nonce, (int)selected);", request)
+        self.assertIn("dm_merc_choice_resolve(nonce, -1);", request)
+        self.assertIn("dm_merc_choice_is_pending(nonce)", request)
+        self.assertNotIn("atomic_load(&g_dm_merc_choice_nonce)", request)
+        self.assertNotIn("atomic_store(&g_dm_merc_choice_result", request)
+
     def test_old_poll_and_cancel_cannot_erase_new_nonce(self):
         poll = body_between(
             self.source, "int dm_dualmerc_ui_poll(", "void dm_dualmerc_ui_cancel(")
         cancel = body_between(
             self.source, "void dm_dualmerc_ui_cancel(", "// 软键盘输入框")
         for operation in (poll, cancel):
-            self.assertIn("uint64_t expected = nonce;", operation)
-            self.assertIn("atomic_compare_exchange_strong(", operation)
+            self.assertIn("pthread_mutex_lock(&g_dm_merc_choice_mutex);", operation)
+            self.assertIn("g_dm_merc_choice_nonce == nonce", operation)
+            self.assertIn("pthread_mutex_unlock(&g_dm_merc_choice_mutex);", operation)
         self.assertNotIn("atomic_exchange(&g_dm_merc_choice_nonce, 0)", poll + cancel)
 
 

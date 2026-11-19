@@ -122,3 +122,11 @@ GitHub Actions 的最近多次构建在任何步骤执行前失败，未生成�
 - 新校验与状态检查已写入静态/纯 C 单测及 PR CI 工作流；GitHub 仓库还没有本轮成功运行的完整 CI 或可用新 IPA，原生布局及保存/恢复仍未接通。**只允许可丢弃的离线角色验证，PR 保持 Draft。**
 
 参考： https://github.com/IgorKonovalov/diablo-2-recompilation/blob/main/docs/tables/Hireling.md （1.14d 字段布局，**不能作为 Switch 3.3 原生布局已验证的替代证据**）。
+
+## 2026-11-19：iPad 选择框原子通道与存档绑定辅助流程
+
+- 修复替换选择框的 **TOCTOU 竞态**：先检查旧 `nonce` 再写入 `result` 的两个独立原子变量存在时间窗口，可能把旧弹窗的选择交给新 NPC 请求。新 `dm_dualmerc_ui_channel.h` 用同一个 pthread mutex 保护请求编号、结果、单次消费和取消，并通过单调 `nonce` 拒绝旧编号重用；iPad `front_ios.m` 已调用该模块。新增 `test_dualmerc_ui_channel.c` 包含异步过期回调与并发取消用例（CI 用 `-pthread` 编译）。
+- 在 `dm_dualmerc_d2s.h` 增加 `dm_dualmerc_d2s_bind_after_save`：原生雇佣和存盘经调用者独立确认后，才可为暂存 `SWM2` 更新原版佣兵的控制种子和校验值。要求原版 `.d2s` 的 **hireling row、姓名、经验、死亡状态和类型版本**匹配，禁止原来已绑定的扩展记录悄悄切换到另一枚佣兵控制种子。
+- 在 `dm_dualmerc_disk.h` 增加 `dm_dualmerc_disk_read_native_anchor` 和 `dm_dualmerc_disk_bind_save_after_native`：读取工作目录同名 `.d2s`，校验原版数据后在同目录写入 `.swmerc`，再次核对原版身份，失败不更新调用方内存；复用已有原子文件替换。C 单测加入未保存、身份错误、无效校验的拒绝场景。
+- **仍是未挂载的存盘组件**：游戏原生第二佣兵的装备位流、创建/重建与完整原生雇佣事务尚未验证；不能仅凭这些辅助函数宣称两名佣兵能退出重进或携带装备。运行时使用还必须在原有 `h_fs_Commit` 的事务锁内、原生文件写关闭且第二名物品所有权经过验证后接入。
+- C11/pthread 独立通道测试已经在隔离的本地等价代码上以 `-Wall -Wextra -Werror -pedantic` 通过；GitHub PR 完整测试工作流及 iOS 编译仍未成功运行，继续保留 Draft、离线临时角色限定。

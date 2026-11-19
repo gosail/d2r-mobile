@@ -132,13 +132,14 @@ static inline int dm_dualmerc_disk_load(const char *workdir, const char *name,
  * The older raw dm_dualmerc_disk_{save,load} functions above are codec/disk
  * regression helpers. Runtime code MUST use *_verified variants below.
  */
-static inline int dm_dualmerc_disk_native_matches(
-    const char *workdir, const char *name,
-    const dm_dualmerc_saved_state *state)
+/* Read a complete D2S from the workdir and validate its native checksum,
+ * version, length and mercenary anchor. Only the caller's verified workdir
+ * (under the existing FS transaction lock) may be used. Keep OUT unchanged
+ * on ALL failures, including an interrupted read or close failure. */
+static inline int dm_dualmerc_disk_read_native_anchor(
+    const char *workdir, const char *name, dm_dualmerc_native_anchor *out)
 {
-    if (!state || !dm_dualmerc_state_valid(state)) {
-        errno=EINVAL; return 0;
-    }
+    if (!out) { errno=EINVAL; return 0; }
     int dir=dm_dualmerc_disk_dir(workdir,name);
     if (dir < 0) return 0;
     char filename[128];
@@ -148,6 +149,7 @@ static inline int dm_dualmerc_disk_native_matches(
     }
     int fd=openat(dir,filename,O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     int err=0, ok=0;
+    dm_dualmerc_native_anchor anchor={0};
     if (fd < 0) {
         err=errno;
     } else {
@@ -168,22 +170,35 @@ static inline int dm_dualmerc_disk_native_matches(
                 }
                 got+=(size_t)nr;
             }
-            dm_dualmerc_native_anchor a={0};
-            if (!err &&
-                (fstat(fd,&finish) || finish.st_size != st.st_size))
+            if (!err && (fstat(fd,&finish) ||
+                         finish.st_size != st.st_size ||
+                         finish.st_mtime != st.st_mtime))
                 err=EIO;
-            if (!err &&
-                dm_dualmerc_d2s_read(buf,n,&a) &&
-                dm_dualmerc_d2s_matches_state(&a,state))
-                ok=1;
+            if (!err && dm_dualmerc_d2s_read(buf,n,&anchor)) ok=1;
             else if (!err) err=EBADMSG;
         }
         free(buf);
         if (close(fd) && !err) { err=errno; ok=0; }
     }
-    close(dir);
-    if (err) errno=err;
-    return ok;
+    if (close(dir) && !err) { err=errno; ok=0; }
+    if (!ok || err) { errno=err ? err : EBADMSG; return 0; }
+    *out=anchor;
+    return 1;
+}
+static inline int dm_dualmerc_disk_native_matches(
+    const char *workdir, const char *name,
+    const dm_dualmerc_saved_state *state)
+{
+    if (!state || !dm_dualmerc_state_valid(state)) {
+        errno=EINVAL; return 0;
+    }
+    dm_dualmerc_native_anchor anchor={0};
+    if (!dm_dualmerc_disk_read_native_anchor(workdir,name,&anchor))
+        return 0;
+    if (!dm_dualmerc_d2s_matches_state(&anchor,state)) {
+        errno=EBADMSG; return 0;
+    }
+    return 1;
 }
 static inline int dm_dualmerc_disk_save_verified(
     const char *workdir, const char *name,
@@ -203,6 +218,36 @@ static inline int dm_dualmerc_disk_load_verified(
         rc=-1;
     if (rc == 0) *out=*tmp;
     free(tmp);
+    return rc;
+}
+
+/* Prepare and publish an SWM2 sidecar after the native .d2s has already
+ * finished saving. A real engine bridge must first confirm the exact
+ * hire/gear ownership snapshot; this helper NEVER creates/moves items.
+ *
+ * Both this call and the native write must be in the SAME workdir transaction
+ * protected by the FS save lock. Keep the caller's in-memory state unchanged
+ * if .d2s validation, identity binding, or sidecar write fails. */
+static inline int dm_dualmerc_disk_bind_save_after_native(
+    const char *workdir, const char *name,
+    dm_dualmerc_saved_state *state, int engine_confirmed)
+{
+    if (!engine_confirmed || !state ||
+        !dm_dualmerc_state_valid(state)) {
+        errno=EINVAL; return -1;
+    }
+    dm_dualmerc_native_anchor native={0};
+    if (!dm_dualmerc_disk_read_native_anchor(workdir,name,&native))
+        return -1;
+    dm_dualmerc_saved_state *prepared=malloc(sizeof *prepared);
+    if (!prepared) { errno=ENOMEM; return -1; }
+    *prepared=*state;
+    if (!dm_dualmerc_d2s_bind_after_save(prepared,&native,engine_confirmed)) {
+        free(prepared); errno=EBADMSG; return -1;
+    }
+    int rc=dm_dualmerc_disk_save_verified(workdir,name,prepared);
+    if (rc == 0) *state=*prepared;
+    free(prepared);
     return rc;
 }
 

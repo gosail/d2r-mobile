@@ -1359,8 +1359,18 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         atomic_store(&g_dm_trial_full_notice,3); return 1;
     }
     if (count == 1) {
-        /* For a different Act, the separate keep-first native hook will
-         * conditionally hide the old pet. Same Act runs vanilla replacement. */
+        /* Keep-first can protect ONLY a living old unit. If the existing
+         * hireling is dead, the native singleton hire would otherwise
+         * destroy that Act's slot when hiring from a different Act.
+         * Preserve the original dead merc until that ABI is verified. */
+        if (action == DM_MERC_TXN_READY &&
+            lease.plan.action == DM_DUALMERC_ADD && roster.slot[0].dead) {
+            LOG("DM_DUAL_MERC_TRIAL：原佣兵已死亡，跨幕保留尚未验证；本次雇佣已在原生扣费前取消");
+            atomic_store(&g_dm_trial_full_notice,5);
+            return 1;
+        }
+        /* For a living different-Act hire, keep-first is independently
+         * checked by the native hook; same-Act is vanilla replacement. */
         return 0;
     }
     if (action == DM_MERC_TXN_READY) {
@@ -1369,6 +1379,13 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         unsigned choice=UINT32_MAX;
         if (!dm_merc_txn_authorize(&lease,&offer,&roster,cur_tick(),&choice)) {
             atomic_store(&g_dm_trial_full_notice,3); return 1;
+        }
+        /* Dead-merc removal in a two-pet roster is not a verified native
+         * transaction. Refuse it BEFORE the original NPC purchase. */
+        if (roster.slot[choice].dead) {
+            LOG("DM_DUAL_MERC_TRIAL：选中同幕佣兵已死亡，原生双佣兵替换未验证，取消");
+            atomic_store(&g_dm_trial_full_notice,5);
+            return 1;
         }
         g_dm_dualmerc_selected_G=g_lastG;
         g_dm_dualmerc_selected_player=g_player_unit;
@@ -1433,6 +1450,11 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
         !dm_dualmerc_native_offer(G,player,p->packet,&live) ||
         !dm_merc_txn_authorize(&p->lease,&live,&roster,tick,&target)) {
         LOG("DM_DUAL_MERC_TRIAL：NPC/佣兵身份已变化，替换授权作废");
+        dm_dualmerc_pending_reset(); return;
+    }
+    if (roster.slot[target].dead) {
+        LOG("DM_DUAL_MERC_TRIAL：被选中的佣兵已死亡，未验证原生死亡佣兵替换，取消投递");
+        atomic_store(&g_dm_trial_full_notice,5);
         dm_dualmerc_pending_reset(); return;
     }
     if (gear[0].status!=DM_MERC_GEAR_OK || gear[0].count ||
@@ -1774,6 +1796,8 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
                 ? "旧佣兵装备未清空，暂不允许雇佣"
                 : reason == 4
                 ? "两名佣兵独立装备读档尚未完成，已阻止本次穿戴"
+                : reason == 5
+                ? "死亡佣兵的双佣兵雇佣/替换尚未验证，本次已取消"
                 : "佣兵状态无法安全读取，本次雇佣已取消");
         }
     }

@@ -1153,12 +1153,19 @@ int dm_dualmerc_ui_poll(uint64_t nonce, int *choice) {
         return 0;
     int result = atomic_load(&g_dm_merc_choice_result);
     if (result == -2) return 0;
-    if (atomic_exchange(&g_dm_merc_choice_nonce, 0) != nonce) return 0;
+    /* Never erase a different dialog's nonce when an older poll races
+     * with a newly opened chooser. */
+    uint64_t expected = nonce;
+    if (!atomic_compare_exchange_strong(&g_dm_merc_choice_nonce,
+                                        &expected, 0)) return 0;
     *choice = result;
     return 1;
 }
 void dm_dualmerc_ui_cancel(uint64_t nonce) {
-    if (!nonce || atomic_exchange(&g_dm_merc_choice_nonce, 0) != nonce) return;
+    if (!nonce) return;
+    uint64_t expected = nonce;
+    if (!atomic_compare_exchange_strong(&g_dm_merc_choice_nonce,
+                                        &expected, 0)) return;
     atomic_store(&g_dm_merc_choice_result, -1);
     dispatch_async(dispatch_get_main_queue(), ^{
         /* Ignore a delayed cancel for a dialog already superseded by a

@@ -35,6 +35,13 @@ int main(void) {
     dm_dualmerc_store_u32(d2s+8,(uint32_t)sizeof d2s);
     dm_dualmerc_store_u32(d2s+179,0x12345678);
     dm_dualmerc_store_u32(d2s+12,dm_dualmerc_d2s_checksum(d2s,sizeof d2s));
+    /* After a successful native hire, SWM2 must initially be provisional.
+     * No sidecar may appear until the SAME exact native save is checked. */
+    assert(dm_dualmerc_state_valid(s));
+    assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",s,0)==-1);
+    assert(!s->native_d2s_checksum && !s->native_seed);
+    assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",s,1)==-1);
+    assert(!s->native_d2s_checksum && !s->native_seed);
     s->native_d2s_checksum = dm_dualmerc_load_u32(d2s+12);
     s->native_seed = 0x12345678;
     char native_path[512];
@@ -44,6 +51,15 @@ int main(void) {
     assert(native);
     assert(fwrite(d2s,1,sizeof d2s,native)==sizeof d2s);
     assert(fclose(native)==0);
+    /* Now that the authentic .d2s is complete, a confirmed engine snapshot
+     * can bind and persist its provisional sidecar in this workdir. */
+    s->native_d2s_checksum=0; s->native_seed=0;
+    dm_dualmerc_native_anchor fresh={0};
+    assert(dm_dualmerc_disk_read_native_anchor(root,"Hero",&fresh));
+    assert(fresh.seed==0x12345678);
+    assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",s,1)==0);
+    assert(s->native_seed==fresh.seed &&
+           s->native_d2s_checksum==fresh.checksum);
     assert(dm_dualmerc_disk_save_verified(root, "Hero", s) == 0);
     assert(dm_dualmerc_disk_load_verified(root, "Hero", r) == 0);
     assert(!memcmp(s, r, sizeof *s));
@@ -77,6 +93,14 @@ int main(void) {
     assert(fclose(native)==0);
     assert(dm_dualmerc_disk_load_verified(root,"Hero",r)==-1);
     assert(r->generation==999);
+    dm_dualmerc_saved_state *provisional=malloc(sizeof *provisional);
+    assert(provisional);
+    *provisional=*s;
+    provisional->native_seed=0;
+    provisional->native_d2s_checksum=0;
+    assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",provisional,1)==-1);
+    assert(provisional->native_seed==0 && provisional->native_d2s_checksum==0);
+    free(provisional);
     assert(dm_dualmerc_disk_save_verified(root,"Hero",s)==-1);
     d2s[300] ^= 1;
     native=fopen(native_path,"wb");

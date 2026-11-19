@@ -21,5 +21,11 @@ int main(void) {
     assert(!dm_dualmerc_packet_parse(b,sizeof b,&v));
     assert(!dm_dualmerc_packet_parse(NULL,sizeof b,&v));
     assert(!dm_dualmerc_packet_parse(b,sizeof b,NULL));
+    assert(dm_dualmerc_stable_callback(0,0,0));
+    assert(dm_dualmerc_stable_callback(0x1100,0x1000,0x200));
+    assert(!dm_dualmerc_stable_callback(0x1200,0x1000,0x200));
+    assert(!dm_dualmerc_stable_callback(0x1003,0x1000,0x200));
+    assert(!dm_dualmerc_stable_callback(0xff0,0x1000,0x200));
+    assert(!dm_dualmerc_stable_callback(0x1100,0,0x200));
     puts("dualmerc exact Switch 3.3 hire packet parser: passed");
 }

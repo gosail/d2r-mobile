@@ -1272,8 +1272,8 @@ static int dm_dualmerc_replay_callback_stable(uint64_t fn) {
     if (!fn) return 1;
     module_t *mm=main_mod();
     if (!mm || !mm->base || !mm->text_end) return 0;
-    uint64_t base=(uint64_t)(uintptr_t)mm->base;
-    return fn>=base && fn-base<mm->text_end && !(fn & 3);
+    return dm_dualmerc_stable_callback(fn,
+        (uint64_t)(uintptr_t)mm->base, mm->text_end);
 }
 static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
     if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||

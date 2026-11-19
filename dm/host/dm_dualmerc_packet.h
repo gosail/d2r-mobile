@@ -31,4 +31,12 @@ static inline int dm_dualmerc_packet_parse(const uint8_t *buf, size_t bytes,
     *out = p;
     return 1;
 }
+/* A deferred callback outside the stable native guest code can point into
+ * a dead stack frame. Reject it rather than replay an old C2S packet. */
+static inline int dm_dualmerc_stable_callback(uint64_t fn,
+                                              uint64_t base, uint64_t code_size) {
+    if (!fn) return 1;
+    if (!base || !code_size || fn < base || (fn & 3)) return 0;
+    return fn-base < code_size;
+}
 #endif

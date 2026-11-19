@@ -1507,7 +1507,20 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
         int count = dm_dualmerc_runtime_roster(G, player, &roster, gear);
         uint32_t candidate_cls = 0, candidate_type = UINT32_MAX;
-        if (count == 2 && regs[19] &&
+        /* The other mercenary must still be the EXACT same server unit.
+         * Verifying only the selected ID can silently replace the wrong
+         * pet when the singleton native getter returns another unit. */
+        int peer_present = 0;
+        if (count == 2 &&
+            g_dm_dualmerc_pending.target_id == g_dm_dualmerc_selected_id &&
+            g_dm_dualmerc_pending.peer_id != UINT32_MAX &&
+            g_dm_dualmerc_pending.peer_id != g_dm_dualmerc_selected_id) {
+            for (int j = 0; j < DM_DUALMERC_SLOTS; ++j)
+                if (roster.slot[j].runtime_unit_id ==
+                    g_dm_dualmerc_pending.peer_id)
+                    peer_present = 1;
+        }
+        if (count == 2 && peer_present && regs[19] &&
             tk_rd(regs[19], &candidate_type, 4) && candidate_type == 1 &&
             tk_rd(regs[19] + 4, &candidate_cls, 4) &&
             dm_dualmerc_act_for_class(candidate_cls) ==
@@ -1531,7 +1544,13 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
                 }
             }
         }
-        LOG("【红】DM_DUAL_MERC_TRIAL：原生选择目标再验证失败；不能保证替换结果，禁止使用正式角色");
+        /* The native caller will otherwise continue with the singleton
+         * getpet result, which may be the WRONG one of two hirelings.
+         * There is no validated native transaction abort ABI yet. A
+         * disposable offline trial must fail-stop here, BEFORE unlinking
+         * an unrelated mercenary. Never claim this is an in-game rollback. */
+        die("DM_DUAL_MERC_TRIAL：原生替换目标或另一佣兵ID校验失败，停止实验以避免误替换");
+        return;
     }
     if (!dm_dualmerc_trial_enabled() || !old_unit || !G || !player ||
         G != regs[21] || player != regs[20] || !regs[19] ||

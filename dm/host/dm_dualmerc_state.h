@@ -113,6 +113,13 @@ static inline int dm_dualmerc_state_valid(const dm_dualmerc_saved_state *s) {
             for (unsigned k = 0; k < i; ++k)
                 if (m->gear[k].persistent_item_id == it->persistent_item_id) return 0;
         }
+        /* Retired equipment must be explicitly cleared. A stale bitstream
+         * outside gear_count is still an item-ownership claim in memory;
+         * accepting it would let a later hire overwrite the sole copy. */
+        for (unsigned i = m->gear_count; i < DM_DUALMERC_GEAR_MAX; ++i) {
+            const dm_dualmerc_equipped_item blank = {0};
+            if (memcmp(&m->gear[i], &blank, sizeof blank)) return 0;
+        }
     }
     /* Exactly one occupied slot is backed by vanilla .d2s; the other
      * is sidecar-only. Without this tag, reload may duplicate an item. */

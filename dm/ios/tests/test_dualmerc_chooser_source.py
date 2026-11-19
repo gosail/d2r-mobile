@@ -30,6 +30,15 @@ class TestDualMercChooserSource(unittest.TestCase):
         self.assertIn("g_dm_merc_choice_alert_nonce = 0;", request)
         self.assertIn("g_dm_merc_choice_alert == weakA", request)
 
+    def test_dead_target_is_visibly_disabled(self):
+        request = body_between(
+            self.source, "void dm_dualmerc_ui_request(", "int dm_dualmerc_ui_poll(")
+        self.assertIn("unsigned dead_mask", request)
+        self.assertIn("dead_mask == 3u", request)
+        self.assertIn("BOOL dead = !!(dead_mask & (1u << slot));", request)
+        self.assertIn("option.enabled = !dead;", request)
+        self.assertIn("已死亡，暂不可替换", request)
+
     def test_cancel_never_dismisses_successor_alert(self):
         cancel = body_between(
             self.source, "void dm_dualmerc_ui_cancel(", "// 软键盘输入框")

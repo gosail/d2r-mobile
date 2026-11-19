@@ -5,6 +5,7 @@ on:
       - "feat/offline-dual-merc-probe-*"
   pull_request:
     paths:
+      - "dm/host/diag.c"
       - "dm/host/dm_dualmerc_policy.h"
       - "dm/host/dm_dualmerc_state.h"
       - "dm/host/dm_dualmerc_trial.h"
@@ -39,6 +40,7 @@ on:
       - "dm/verify/test_hire_handler_guest.py"
       - "dm/verify/test_hire_chain_contract.py"
       - "dm/verify/test_dualmerc_native_cuts.py"
+      - "dm/verify/test_dualmerc_native_override_source.py"
       - ".github/workflows/offline-dualmerc-tests.yml"
 jobs:
   policy-and-readonly-analysis:
@@ -63,5 +65,6 @@ jobs:
           python3 -m unittest discover -s dm/verify -p 'test_merc_probe_report.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_hire_chain_contract.py' -v
           python3 -m unittest discover -s dm/verify -p 'test_dualmerc_native_cuts.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_dualmerc_native_override_source.py' -v
           python3 -m unittest discover -s dm/ios/tests -p 'test_retrofit_dualmerc_guest.py' -v
           python3 -m unittest discover -s dm/ios/tests -p 'test_dualmerc_chooser_source.py' -v

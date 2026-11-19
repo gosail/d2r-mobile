@@ -21,6 +21,7 @@ void dm_gamepad_start(void (*on_mode)(int pad)); void dm_gamepad_touched(void); 
 #include "dm_touch_native_art.h"
 #include "dm_actions.h"
 #include <stdatomic.h>
+#include <pthread.h>
 #include "dm_touch_game_state.h"
 #include "../../host/dm_cursor.h"
 #include "../../host/dm_hud.h"
@@ -1068,8 +1069,27 @@ void front_run(void (*guest)(void)) {
 // waits for UIKit. A request nonce prevents a stale dialog from affecting a
 // later NPC interaction. THIS ONLY RETURNS A CHOICE: it cannot by itself
 // remove a mercenary, spend gold, or replay a native hire packet.
-static _Atomic uint64_t g_dm_merc_choice_nonce;
-static _Atomic int g_dm_merc_choice_result = -2; // -2 pending, -1 cancel, 0/1 slot
+/* Nonce and choice are ONE logical transaction. Separate atomics allowed
+ * an old alert handler to check its nonce, lose a race to a new request,
+ * then overwrite the new request's result. Keep both values under the same
+ * mutex; UIKit handlers, guest poll, and cancellation must all use it. */
+static pthread_mutex_t g_dm_merc_choice_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t g_dm_merc_choice_nonce;
+static int g_dm_merc_choice_result = -2; // -2 pending, -1 cancel, 0/1 slot
+static int dm_merc_choice_is_pending(uint64_t nonce) {
+    pthread_mutex_lock(&g_dm_merc_choice_mutex);
+    int pending = nonce && g_dm_merc_choice_nonce == nonce &&
+                  g_dm_merc_choice_result == -2;
+    pthread_mutex_unlock(&g_dm_merc_choice_mutex);
+    return pending;
+}
+static void dm_merc_choice_resolve(uint64_t nonce, int result) {
+    pthread_mutex_lock(&g_dm_merc_choice_mutex);
+    if (nonce && g_dm_merc_choice_nonce == nonce &&
+        g_dm_merc_choice_result == -2)
+        g_dm_merc_choice_result = result;
+    pthread_mutex_unlock(&g_dm_merc_choice_mutex);
+}
 static UIAlertController *g_dm_merc_choice_alert;
 /* UIKit-owned identity: a queued cancellation must never close a newer NPC
  * chooser, even when the old game callback arrives after a new request. */
@@ -1087,10 +1107,12 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
                             unsigned dead_mask) {
     if (!nonce || !dm_merc_act_name(act0) || !dm_merc_act_name(act1) ||
         act0 == act1 || (dead_mask & ~3u) || dead_mask == 3u) return;
-    atomic_store(&g_dm_merc_choice_result, -2);
-    atomic_store(&g_dm_merc_choice_nonce, nonce);
+    pthread_mutex_lock(&g_dm_merc_choice_mutex);
+    g_dm_merc_choice_result = -2;
+    g_dm_merc_choice_nonce = nonce;
+    pthread_mutex_unlock(&g_dm_merc_choice_mutex);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (atomic_load(&g_dm_merc_choice_nonce) != nonce) return;
+        if (!dm_merc_choice_is_pending(nonce)) return;
         if (g_dm_merc_choice_alert) {
             [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
             g_dm_merc_choice_alert = nil;
@@ -1109,8 +1131,7 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
         vc = vc ?: alt;
         while (vc.presentedViewController) vc = vc.presentedViewController;
         if (!vc) {
-            if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
-                atomic_store(&g_dm_merc_choice_result, -1);
+            dm_merc_choice_resolve(nonce, -1);
             return;
         }
         NSString *message = dead_mask
@@ -1132,8 +1153,7 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
             UIAlertAction *option = [UIAlertAction actionWithTitle:optionTitle
                 style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 (void)action;
-                if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
-                    atomic_store(&g_dm_merc_choice_result, (int)selected);
+                dm_merc_choice_resolve(nonce, (int)selected);
                 if (g_dm_merc_choice_alert == weakA) {
                     g_dm_merc_choice_alert = nil;
                     g_dm_merc_choice_alert_nonce = 0;
@@ -1145,8 +1165,7 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
         [a addAction:[UIAlertAction actionWithTitle:@"取消雇佣"
             style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
             (void)action;
-            if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
-                atomic_store(&g_dm_merc_choice_result, -1);
+            dm_merc_choice_resolve(nonce, -1);
             if (g_dm_merc_choice_alert == weakA) {
                 g_dm_merc_choice_alert = nil;
                 g_dm_merc_choice_alert_nonce = 0;
@@ -1158,27 +1177,30 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
     });
 }
 int dm_dualmerc_ui_poll(uint64_t nonce, int *choice) {
-    if (!nonce || !choice || atomic_load(&g_dm_merc_choice_nonce) != nonce)
-        return 0;
-    int result = atomic_load(&g_dm_merc_choice_result);
-    if (result == -2) return 0;
-    /* Never erase a different dialog's nonce when an older poll races
-     * with a newly opened chooser. */
-    uint64_t expected = nonce;
-    if (!atomic_compare_exchange_strong(&g_dm_merc_choice_nonce,
-                                        &expected, 0)) return 0;
-    *choice = result;
-    return 1;
+    if (!nonce || !choice) return 0;
+    pthread_mutex_lock(&g_dm_merc_choice_mutex);
+    int consumed = g_dm_merc_choice_nonce == nonce &&
+                   g_dm_merc_choice_result != -2;
+    if (consumed) {
+        *choice = g_dm_merc_choice_result;
+        g_dm_merc_choice_nonce = 0; // one-shot, while holding the SAME lock
+        g_dm_merc_choice_result = -2;
+    }
+    pthread_mutex_unlock(&g_dm_merc_choice_mutex);
+    return consumed;
 }
 void dm_dualmerc_ui_cancel(uint64_t nonce) {
     if (!nonce) return;
-    uint64_t expected = nonce;
-    if (!atomic_compare_exchange_strong(&g_dm_merc_choice_nonce,
-                                        &expected, 0)) return;
-    atomic_store(&g_dm_merc_choice_result, -1);
+    pthread_mutex_lock(&g_dm_merc_choice_mutex);
+    int matched = g_dm_merc_choice_nonce == nonce;
+    if (matched) {
+        g_dm_merc_choice_nonce = 0;
+        g_dm_merc_choice_result = -2;
+    }
+    pthread_mutex_unlock(&g_dm_merc_choice_mutex);
+    if (!matched) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        /* Ignore a delayed cancel for a dialog already superseded by a
-         * different nonce. */
+        /* An old queued cancellation cannot dismiss a newer alert. */
         if (g_dm_merc_choice_alert_nonce != nonce) return;
         [g_dm_merc_choice_alert dismissViewControllerAnimated:NO completion:nil];
         g_dm_merc_choice_alert = nil;

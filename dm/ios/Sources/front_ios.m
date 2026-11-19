@@ -1083,9 +1083,10 @@ static NSString *dm_merc_act_name(unsigned act) {
     default: return nil;
     }
 }
-void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
+void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1,
+                            unsigned dead_mask) {
     if (!nonce || !dm_merc_act_name(act0) || !dm_merc_act_name(act1) ||
-        act0 == act1) return;
+        act0 == act1 || (dead_mask & ~3u) || dead_mask == 3u) return;
     atomic_store(&g_dm_merc_choice_result, -2);
     atomic_store(&g_dm_merc_choice_nonce, nonce);
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1112,9 +1113,11 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
                 atomic_store(&g_dm_merc_choice_result, -1);
             return;
         }
+        NSString *message = dead_mask
+            ? @"当前已有两名佣兵。死亡佣兵暂不支持原生替换，请选择存活的佣兵，或取消。"
+            : @"当前已有两名不同幕的佣兵。请选择要替换的一名，或取消雇佣。";
         UIAlertController *a = [UIAlertController alertControllerWithTitle:@"选择替换的佣兵"
-            message:@"当前已有两名不同幕的佣兵。请选择要替换的一名，或取消雇佣。"
-            preferredStyle:UIAlertControllerStyleAlert];
+            message:message preferredStyle:UIAlertControllerStyleAlert];
         a.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         a.view.tintColor = [UIColor colorWithRed:199.0/255 green:179.0/255
                                                blue:119.0/255 alpha:1.0];
@@ -1122,7 +1125,11 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
         for (unsigned slot=0;slot<2;slot++) {
             unsigned act = slot ? act1 : act0;
             unsigned selected = slot;
-            [a addAction:[UIAlertAction actionWithTitle:dm_merc_act_name(act)
+            BOOL dead = !!(dead_mask & (1u << slot));
+            NSString *optionTitle = dm_merc_act_name(act);
+            if (dead)
+                optionTitle = [optionTitle stringByAppendingString:@"（已死亡，暂不可替换）"];
+            UIAlertAction *option = [UIAlertAction actionWithTitle:optionTitle
                 style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 (void)action;
                 if (atomic_load(&g_dm_merc_choice_nonce) == nonce)
@@ -1131,7 +1138,9 @@ void dm_dualmerc_ui_request(uint64_t nonce, unsigned act0, unsigned act1) {
                     g_dm_merc_choice_alert = nil;
                     g_dm_merc_choice_alert_nonce = 0;
                 }
-            }]];
+            }];
+            option.enabled = !dead;
+            [a addAction:option];
         }
         [a addAction:[UIAlertAction actionWithTitle:@"取消雇佣"
             style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {

@@ -140,6 +140,15 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("撤销此前客户端验证", source)
         self.assertIn("atomic_store(&g_dm_trial_verified_client,0);", source)
 
+    def test_client_pair_requires_exact_two_unique_owner_entries(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        client = source.split(
+            "static int dm_dualmerc_client_both(", 1)[1].split(
+            "/* Native replacement is complete only in the SERVER roster", 1)[0]
+        self.assertIn("old_id == new_id", client)
+        self.assertIn("if (!mask || (seen & mask) || ++count>DM_DUALMERC_SLOTS)", client)
+        self.assertIn("return !node && seen == 3u && count == DM_DUALMERC_SLOTS;", client)
+
     def test_client_tick_pair_validation_is_read_only_and_cheap(self):
         source = SOURCE.read_text(encoding="utf-8")
         tracker = source.split("static int dm_dualmerc_trial_pet_pair(", 1)[1].split(

@@ -1683,12 +1683,21 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         die("DM_DUAL_MERC_TRIAL：原生替换目标或另一佣兵ID校验失败，停止实验以避免误替换");
         return;
     }
+    /* A native keep-first override without a preflight-authorized ADD
+     * packet would bypass NPC/Act/price checks. Never mutate that path.
+     * For an authorized ADD, failing deep validation MUST stop execution
+     * rather than silently returning the old singleton merc for deletion. */
+    if (!g_dm_dualmerc_add.active) return;
     if (!dm_dualmerc_trial_enabled() || !old_unit || !G || !player ||
+        G != g_dm_dualmerc_add.G ||
+        player != g_dm_dualmerc_add.player ||
         G != regs[21] || player != regs[20] || !regs[19] ||
-        (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1) return;
+        (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1)
+        die("DM_DUAL_MERC_TRIAL：跨幕新增的原生查询参数无效，阻止旧佣兵被默认替换");
     uint64_t first_pet_node = 0;
     int count = dm_dualmerc_trial_pet_nodes(player, &first_pet_node);
-    if (count != 1 || !first_pet_node) return;
+    if (count != 1 || !first_pet_node)
+        die("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵数量改变，阻止原生默认替换");
     uint32_t old_id = UINT32_MAX, listed_id = UINT32_MAX;
     uint32_t old_class = 0, old_mode = UINT32_MAX, new_type = UINT32_MAX;
     uint32_t new_id = UINT32_MAX, new_cls = 0;
@@ -1700,11 +1709,13 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         !tk_rd(regs[19], &new_type, 4) || new_type != 1 ||
         !tk_rd(regs[19] + 8, &new_id, 4) ||
         new_id == UINT32_MAX || new_id == old_id ||
-        !tk_rd(regs[19] + 4, &new_cls, 4)) return;
+        !tk_rd(regs[19] + 4, &new_cls, 4))
+        die("DM_DUAL_MERC_TRIAL：跨幕新增时原生单位信息不完整，禁止删除旧佣兵");
     dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
     /* The independent game-unit table must resolve to the same unit,
      * class and mode before suppressing the old-mercenary lookup. */
-    if (old.mode != old_mode || old.cls != old_class) return;
+    if (old.mode != old_mode || old.cls != old_class)
+        die("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵身份/状态改变");
     dm_merc_trace_gear fresh = {0};
     dm_merc_probe_inventory(regs[19], &fresh);
     dm_dualmerc_trial_conditions c = {
@@ -1720,12 +1731,16 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
             dm_dualmerc_trial_pet_id_matches(old_id, listed_id),
         .guest_classes_valid = old.cls && new_cls
     };
-    if (!dm_dualmerc_trial_keep_one(&c)) {
-        LOG("DM_DUAL_MERC_TRIAL：拒绝保留，幕%u/%u，装备旧%u/%u 新%u/%u 模式%u",
-            c.old_act, c.new_act, c.old_gear_count, c.old_gear_status,
-            c.new_gear_count, c.new_gear_status, old.mode);
-        return;
-    }
+    if (!dm_dualmerc_trial_keep_one(&c) ||
+        old_id != g_dm_dualmerc_add.original_id ||
+        c.old_act != g_dm_dualmerc_add.original_act ||
+        c.new_act != g_dm_dualmerc_add.candidate_act ||
+        g_dm_dualmerc_add.original_dead !=
+            (unsigned)!dm_dualmerc_trial_mode_live(old.mode) ||
+        g_dm_dualmerc_add.keep_seen)
+        die("DM_DUAL_MERC_TRIAL：跨幕新增的原生身份/空装备校验失败，禁止回落原版替换");
+    g_dm_dualmerc_add.keep_seen=1;
+    g_dm_dualmerc_add.candidate_id=new_id;
     atomic_store(&g_dm_trial_verified_two_G, 0);
     atomic_store(&g_dm_trial_verified_client, 0);
     atomic_store(&g_dm_trial_hire_old, old_id);

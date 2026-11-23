@@ -53,7 +53,8 @@ static inline int dm_dualmerc_equip_target(const dm_dualmerc_roster *r,
     *slot=(unsigned)found;
     return 1;
 }
-/* A two-merc roster cannot safely take ANY equip packet while the second
+/* A roster with at least two native mercenaries cannot safely take ANY equip
+ * packet while the second
  * native equipment UI and per-slot save/load are disconnected. This includes
  * 0x51 (held-item) and 0x5b (backpack). The check does not block ordinary
  * one-merc games, and will be lifted only after durable item ownership tests. */

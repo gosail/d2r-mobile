@@ -159,7 +159,33 @@ static void completed_second_hire(void) {
     assert(!dm_dualmerc_trial_add_complete(NULL,gear,101,1,0,202,2));
 }
 
+/* Act V hires 560 and 561 are two separate native monster classes.
+ * A valid Act and ID alone cannot authorize silently swapping the class. */
+static void completed_class_identity(void) {
+    dm_dualmerc_roster r={0};
+    r.slot[0]=(dm_dualmerc_slot){
+        .occupied=1,.act=1,.runtime_unit_id=101,.monster_class=271
+    };
+    r.slot[1]=(dm_dualmerc_slot){
+        .occupied=1,.act=5,.runtime_unit_id=303,.monster_class=560
+    };
+    assert(dm_dualmerc_trial_classes_preserved(&r,101,271,303,560));
+    assert(!dm_dualmerc_trial_classes_preserved(&r,101,271,303,561));
+    r.slot[1].monster_class=561; /* Still Act V, but a different merc. */
+    assert(!dm_dualmerc_trial_classes_preserved(&r,101,271,303,560));
+    assert(dm_dualmerc_trial_classes_preserved(&r,101,271,303,561));
+    dm_dualmerc_slot tmp=r.slot[0];
+    r.slot[0]=r.slot[1];r.slot[1]=tmp;
+    assert(dm_dualmerc_trial_classes_preserved(&r,101,271,303,561));
+    assert(!dm_dualmerc_trial_classes_preserved(&r,101,271,101,271));
+    assert(!dm_dualmerc_trial_classes_preserved(&r,101,271,303,999));
+    assert(!dm_dualmerc_trial_classes_preserved(NULL,101,271,303,561));
+    r.slot[0].runtime_unit_id=101;
+    assert(!dm_dualmerc_trial_classes_preserved(&r,101,271,303,561));
+}
+
 int main(void) {
+    completed_class_identity();
     completed_second_hire();
     completed_native_replacement();
     selected_native_replacement();

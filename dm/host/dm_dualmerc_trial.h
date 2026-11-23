@@ -72,4 +72,44 @@ static inline int dm_dualmerc_trial_both_present(
 static inline int dm_dualmerc_trial_block_full(unsigned count) {
     return count >= DM_DUALMERC_SLOTS;
 }
+
+/* A native singleton getpet call is about to unlink ONE of the two units.
+ * Before overriding that result, establish exact target AND surviving peer
+ * identities, both inventories' empty/verified status, target liveness and
+ * candidate class. The original roster may be reordered; IDs are stable
+ * only inside the current session. No mutation or guest pointer deref here.
+ *
+ * Peer may be dead: its Act slot still exists and must be preserved.
+ * The selected target MUST be alive until a native dead-unit replacement
+ * transaction has been independently verified. */
+static inline int dm_dualmerc_trial_selected_target(
+    const dm_dualmerc_roster *roster,
+    const dm_merc_trace_gear gear[DM_DUALMERC_SLOTS],
+    uint32_t selected_id, uint32_t peer_id, unsigned offered_act,
+    uint32_t candidate_class, unsigned *selected_slot)
+{
+    if (!roster || !gear || !selected_slot ||
+        !dm_dualmerc_roster_valid(roster) ||
+        !dm_dualmerc_valid_act(offered_act) ||
+        dm_dualmerc_act_for_class(candidate_class) != offered_act ||
+        selected_id == UINT32_MAX || peer_id == UINT32_MAX ||
+        selected_id == peer_id) return 0;
+    int selected = -1, peer = -1;
+    for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i) {
+        const dm_dualmerc_slot *slot=&roster->slot[i];
+        if (!slot->occupied || slot->runtime_unit_id == UINT32_MAX ||
+            gear[i].status != DM_MERC_GEAR_OK || gear[i].count)
+            return 0;
+        if (slot->runtime_unit_id == selected_id) selected=(int)i;
+        if (slot->runtime_unit_id == peer_id) peer=(int)i;
+    }
+    if (selected < 0 || peer < 0 || selected == peer ||
+        roster->slot[selected].dead) return 0;
+    dm_dualmerc_decision p=dm_dualmerc_plan(roster,offered_act,0);
+    if (p.action != DM_DUALMERC_REPLACE_SAME_ACT &&
+        p.action != DM_DUALMERC_CHOOSE_REPLACEMENT) return 0;
+    if (!dm_dualmerc_choice_allowed(&p,(unsigned)selected)) return 0;
+    *selected_slot=(unsigned)selected;
+    return 1;
+}
 #endif

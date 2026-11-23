@@ -1326,8 +1326,10 @@ static int dm_dualmerc_client_both(uint64_t player, uint32_t old_id,
         !tk_rd(player + 8, &owner, 4) ||
         !tk_rd((uint64_t)(uintptr_t)mm->base + 0x2d33528,
                &first, 8)) return 0;
+    if (old_id == UINT32_MAX || new_id == UINT32_MAX ||
+        old_id == new_id) return 0;
     node = first;
-    unsigned found = 0;
+    unsigned seen=0, count=0;
     for (int i=0;node && i<512;i++) {
         uint32_t type=UINT32_MAX, id=UINT32_MAX, oid=UINT32_MAX;
         uint64_t next=0;
@@ -1335,13 +1337,18 @@ static int dm_dualmerc_client_both(uint64_t player, uint32_t old_id,
             !tk_rd(node+0xc,&oid,4) ||
             !tk_rd(node+0x30,&next,8)) return 0;
         if (type==7 && oid==owner) {
-            if (id==old_id) found |= 1;
-            if (id==new_id) found |= 2;
+            unsigned mask=id==old_id ? 1u : id==new_id ? 2u : 0u;
+            /* A stale third unit or a duplicate of either ID means the
+             * client is NOT presenting an exact two-mercenary roster. */
+            if (!mask || (seen & mask) || ++count>DM_DUALMERC_SLOTS)
+                return 0;
+            seen |= mask;
         }
         if (next==node) return 0;
         node=next;
     }
-    return found == 3;
+    /* Never accept a list truncated at the defensive 512-node bound. */
+    return !node && seen == 3u && count == DM_DUALMERC_SLOTS;
 }
 
 /* Native replacement is complete only in the SERVER roster so far.

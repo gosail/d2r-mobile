@@ -1322,6 +1322,18 @@ static int dm_dualmerc_client_both(uint64_t player, uint32_t old_id,
     return found == 3;
 }
 
+/* Native replacement is complete only in the SERVER roster so far.
+ * Invalidate the previous client confirmation and request a fresh exact
+ * (retained ID, inserted ID) check during later simulation ticks. This
+ * does not imply the client has two independently selectable gear pages. */
+static void dm_dualmerc_track_client_pair(uint64_t G, uint32_t retained_id,
+                                           uint32_t inserted_id) {
+    atomic_store(&g_dm_trial_hire_old,retained_id);
+    atomic_store(&g_dm_trial_hire_new,inserted_id);
+    atomic_store(&g_dm_trial_verified_client,0);
+    atomic_store(&g_dm_trial_verified_two_G,G);
+}
+
 static void dm_dualmerc_target_clear(void) {
     g_dm_dualmerc_selected_G = g_dm_dualmerc_selected_player = 0;
     g_dm_dualmerc_selected_id = UINT32_MAX;
@@ -1616,6 +1628,7 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
                 die("DM_DUAL_MERC_TRIAL：替换后身份未通过校验，停止实验，不允许继续存档");
                 return;
             }
+            dm_dualmerc_track_client_pair(G,peer_id,p->candidate_id);
         }
     }
     dm_dualmerc_target_clear();
@@ -2653,6 +2666,9 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
             die("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配，终止实验");
             return;
         }
+        dm_dualmerc_track_client_pair(g_lastG,
+            g_dm_dualmerc_pending.peer_id,
+            g_dm_dualmerc_pending.candidate_id);
         dm_dualmerc_target_clear();
     }
     if (pk_id) { static uint32_t win, used, skipped; uint32_t t = cur_tick(); if (t - win >= 25) { win = t; used = 0; }

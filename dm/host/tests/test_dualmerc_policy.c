@@ -44,6 +44,19 @@ int main(void) {
     assert(!dm_dualmerc_roster_valid(&r));
     assert(dm_dualmerc_plan(&r, 3, 0).action == DM_DUALMERC_REJECT);
     r.slot[1] = merc(3, 0, 0);
+    assert(dm_dualmerc_live_ids_valid(&r));
+    /* Saved records have no runtime IDs, but a LIVE two-merc pet list
+     * may never grant native actions with duplicate/unknown identities. */
+    r.slot[1].runtime_unit_id=r.slot[0].runtime_unit_id;
+    assert(!dm_dualmerc_live_ids_valid(&r));
+    r.slot[1].runtime_unit_id=UINT32_MAX;
+    assert(!dm_dualmerc_live_ids_valid(&r));
+    r.slot[1].runtime_unit_id=103;
+    r.slot[1].dead=2;
+    assert(!dm_dualmerc_roster_valid(&r));
+    assert(!dm_dualmerc_live_ids_valid(&r));
+    r.slot[1].dead=0;
+    assert(dm_dualmerc_live_ids_valid(&r));
     assert(dm_dualmerc_plan(&r, 4, 0).action == DM_DUALMERC_REJECT);
     assert(dm_dualmerc_plan(&r, 3, 3).action == DM_DUALMERC_REJECT);
     assert(dm_dualmerc_plan(NULL, 3, 0).action == DM_DUALMERC_REJECT);

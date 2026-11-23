@@ -59,7 +59,9 @@ static inline int dm_dualmerc_equip_target(const dm_dualmerc_roster *r,
  * one-merc games, and will be lifted only after durable item ownership tests. */
 static inline int dm_dualmerc_equip_block_unpersisted(
     unsigned active_hirelings, uint8_t opcode) {
-    return active_hirelings == DM_DUALMERC_SLOTS &&
+    /* 3+ is an invalid/over-cap native roster, not permission to modify
+     * another mercenary's items. Fail closed on any count >= 2. */
+    return active_hirelings >= DM_DUALMERC_SLOTS &&
            (opcode == 0x51 || opcode == 0x5b);
 }
 #endif

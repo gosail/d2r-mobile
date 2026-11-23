@@ -1661,7 +1661,10 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
             int correct=n==DM_DUALMERC_SLOTS &&
                 dm_dualmerc_trial_replacement_complete(
                     &after,ag,target_id,peer_id,p->candidate_id,
-                    p->peer_act,p->peer_dead,live.offered_act);
+                    p->peer_act,p->peer_dead,live.offered_act) &&
+                dm_dualmerc_trial_classes_preserved(
+                    &after,peer_id,p->peer_class,
+                    p->candidate_id,p->candidate_class);
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
             if (!correct) {
@@ -1913,7 +1916,12 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
                     g_dm_dualmerc_add.original_act,
                     g_dm_dualmerc_add.original_dead,
                     g_dm_dualmerc_add.candidate_id,
-                    g_dm_dualmerc_add.candidate_act))
+                    g_dm_dualmerc_add.candidate_act) ||
+                !dm_dualmerc_trial_classes_preserved(
+                    &after,g_dm_dualmerc_add.original_id,
+                    g_dm_dualmerc_add.original_class,
+                    g_dm_dualmerc_add.candidate_id,
+                    g_dm_dualmerc_add.candidate_class))
                 die("DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误，终止实验避免错误存档");
             g_dm_dualmerc_add.link_verified=1;
         } else if (!both) {
@@ -2701,11 +2709,15 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
                 !dm_dualmerc_trial_add_complete(
                     &after,gear,intent.original_id,intent.original_act,
                     intent.original_dead,intent.candidate_id,
-                    intent.candidate_act))
+                    intent.candidate_act) ||
+                !dm_dualmerc_trial_classes_preserved(
+                    &after,intent.original_id,intent.original_class,
+                    intent.candidate_id,intent.candidate_class))
                 die("DM_DUAL_MERC_TRIAL：跨幕新增未完成精确双佣兵绑定，停止实验避免覆盖旧佣兵");
         } else if (count != 1 || !after.slot[0].occupied ||
                    after.slot[0].runtime_unit_id != intent.original_id ||
                    after.slot[0].act != intent.original_act ||
+                   after.slot[0].monster_class != intent.original_class ||
                    after.slot[0].dead != intent.original_dead) {
             die("DM_DUAL_MERC_TRIAL：原生未执行保留Hook但佣兵已变化，禁止保存异常事务");
         }
@@ -2727,7 +2739,12 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
                         g_dm_dualmerc_pending.candidate_id,
                         g_dm_dualmerc_pending.peer_act,
                         g_dm_dualmerc_pending.peer_dead,
-                        g_dm_dualmerc_selected_act);
+                        g_dm_dualmerc_selected_act) &&
+                    dm_dualmerc_trial_classes_preserved(
+                        &after,g_dm_dualmerc_pending.peer_id,
+                        g_dm_dualmerc_pending.peer_class,
+                        g_dm_dualmerc_pending.candidate_id,
+                        g_dm_dualmerc_pending.candidate_class);
         LOG("DM_DUAL_MERC_TRIAL：同幕原生替换，旧佣兵消失、其他幕佣兵保留和新佣兵加入：%s",
             correct ? "通过（服务器状态）" : "未通过，不能视作双佣兵功能完成");
         if (!correct) {

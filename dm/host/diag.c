@@ -1129,7 +1129,7 @@ typedef struct {
     uint64_t G, player, packet_flags, callback, nonce;
     uint8_t packet[DM_DUALMERC_PACKET_BYTES];
     dm_merc_txn lease;
-    uint32_t target_id, peer_id;
+    uint32_t target_id, peer_id, candidate_id;
     unsigned expected_act, peer_act, peer_dead;
     int active, native_override_seen;
 } dm_dualmerc_pending;
@@ -1138,6 +1138,18 @@ static uint64_t g_dm_dualmerc_nonce_seq;
 static uint64_t g_dm_dualmerc_selected_G, g_dm_dualmerc_selected_player;
 static uint32_t g_dm_dualmerc_selected_id = UINT32_MAX;
 static unsigned g_dm_dualmerc_selected_act;
+
+/* One C2S packet lifetime only: a second cross-Act hire MUST keep the
+ * exact original mercenary or fail-stop before native unlink. The native
+ * Guest has no verified abort/rollback ABI; this is disposable-save-only.
+ * No pointer or runtime unit ID from here is persisted to a character. */
+typedef struct {
+    uint64_t G, player;
+    uint32_t original_id, candidate_id;
+    unsigned original_act, original_dead, candidate_act;
+    int active, keep_seen, link_verified;
+} dm_dualmerc_add_intent;
+static dm_dualmerc_add_intent g_dm_dualmerc_add;
 
 /* Verified pointer read of a live server monster UNIT by identity; never
  * reuse the node pointer as a unit pointer. */
@@ -1436,8 +1448,29 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
             atomic_store(&g_dm_trial_full_notice,5);
             return 1;
         }
-        /* For a living different-Act hire, keep-first is independently
-         * checked by the native hook; same-Act is vanilla replacement. */
+        /* A different-Act hire must have a named old unit to preserve.
+         * Reserve the intent only for THIS synchronous native C2S packet.
+         * The native hook will refuse to return the singleton old unit when
+         * the keep-first contract cannot be satisfied. */
+        if (lease.plan.action == DM_DUALMERC_ADD) {
+            uint32_t old_id=roster.slot[0].runtime_unit_id;
+            if (old_id == UINT32_MAX || !old_id ||
+                !dm_dualmerc_trial_mode_live(
+                    dm_merc_probe_unit_read(g_lastG,old_id,0).mode)) {
+                atomic_store(&g_dm_trial_full_notice,3);
+                return 1;
+            }
+            if (g_dm_dualmerc_add.active)
+                die("DM_DUAL_MERC_TRIAL：嵌套跨幕雇佣事务，拒绝继续");
+            g_dm_dualmerc_add=(dm_dualmerc_add_intent){
+                .G=g_lastG,.player=g_player_unit,
+                .original_id=old_id,.candidate_id=UINT32_MAX,
+                .original_act=roster.slot[0].act,
+                .original_dead=roster.slot[0].dead,
+                .candidate_act=offer.offered_act,.active=1
+            };
+        }
+        /* Same-Act is vanilla replacement with no extra slot. */
         return 0;
     }
     if (action == DM_MERC_TXN_READY) {
@@ -1462,6 +1495,7 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         g_dm_dualmerc_pending.peer_id=roster.slot[1-choice].runtime_unit_id;
         g_dm_dualmerc_pending.peer_act=roster.slot[1-choice].act;
         g_dm_dualmerc_pending.peer_dead=roster.slot[1-choice].dead;
+        g_dm_dualmerc_pending.candidate_id=UINT32_MAX;
         g_dm_dualmerc_pending.native_override_seen=0;
         LOG("DM_DUAL_MERC_TRIAL：同幕雇佣，只允许替换第%u名幕%u佣兵ID%u",
             choice+1,offer.offered_act,g_dm_dualmerc_selected_id);
@@ -1484,7 +1518,7 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         .G=g_lastG, .player=g_player_unit, .packet_flags=regs[2],
         .callback=regs[3], .nonce=nonce, .lease=lease, .active=1,
         .target_id=UINT32_MAX, .peer_id=UINT32_MAX,
-        .expected_act=offer.offered_act
+        .candidate_id=UINT32_MAX,.expected_act=offer.offered_act
     };
     memcpy(g_dm_dualmerc_pending.packet,raw,sizeof raw);
     unsigned dead_mask = (unsigned)roster.slot[0].dead |
@@ -1550,6 +1584,7 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
     g_dm_dualmerc_selected_player=player;
     g_dm_dualmerc_selected_id=target_id;
     g_dm_dualmerc_selected_act=live.offered_act;
+    p->candidate_id=UINT32_MAX;
     p->native_override_seen=0;
     module_t *mm=main_mod();
     if (mm && mm->base) {
@@ -1573,8 +1608,8 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
              * LIVE unit of the expected Act present, any list order. */
             int correct=n==DM_DUALMERC_SLOTS &&
                 dm_dualmerc_trial_replacement_complete(
-                    &after,target_id,peer_id,p->peer_act,
-                    p->peer_dead,live.offered_act);
+                    &after,target_id,peer_id,p->candidate_id,
+                    p->peer_act,p->peer_dead,live.offered_act);
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
             if (!correct) {
@@ -1628,6 +1663,10 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
             uint64_t target = dm_dualmerc_server_monster(
                 G,g_dm_dualmerc_selected_id);
             if (target) {
+                if (g_dm_dualmerc_pending.native_override_seen &&
+                    g_dm_dualmerc_pending.candidate_id != candidate_id)
+                    die("DM_DUAL_MERC_TRIAL：同一事务候选佣兵ID改变，终止实验");
+                g_dm_dualmerc_pending.candidate_id = candidate_id;
                 regs[0] = target;
                 g_dm_dualmerc_pending.native_override_seen = 1;
                 LOG("DM_DUAL_MERC_TRIAL：已验证两名单位ID与空装备，替换第%u位幕%u佣兵ID%u；另一名保留",
@@ -2534,6 +2573,7 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
                     dm_dualmerc_trial_replacement_complete(
                         &after,g_dm_dualmerc_pending.target_id,
                         g_dm_dualmerc_pending.peer_id,
+                        g_dm_dualmerc_pending.candidate_id,
                         g_dm_dualmerc_pending.peer_act,
                         g_dm_dualmerc_pending.peer_dead,
                         g_dm_dualmerc_selected_act);

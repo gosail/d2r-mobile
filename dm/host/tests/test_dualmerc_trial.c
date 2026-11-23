@@ -60,26 +60,32 @@ static void completed_native_replacement(void) {
         .runtime_unit_id=101,.dead=1};
     r.slot[1]=(dm_dualmerc_slot){.occupied=1,.act=5,
         .runtime_unit_id=303,.dead=0};
-    assert(dm_dualmerc_trial_replacement_complete(&r,202,101,5));
+    assert(dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
     dm_dualmerc_slot first=r.slot[0];
     r.slot[0]=r.slot[1]; r.slot[1]=first;
-    assert(dm_dualmerc_trial_replacement_complete(&r,202,101,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,303,101,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,303,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,2));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,101,101,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,UINT32_MAX,101,5));
+    assert(dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,303,101,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,2));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,101,101,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,UINT32_MAX,101,1,1,5));
     r.slot[0].dead=1; /* Newly hired unit must be living. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
     r.slot[0].dead=0;
+    r.slot[1].dead=0; /* Survivor became alive without being replaced. */
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
+    r.slot[1].dead=1;
+    r.slot[1].act=3; /* Survivor unexpectedly changed its class/Act. */
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
+    r.slot[1].act=1;
     r.slot[0].runtime_unit_id=202; /* Old target was never removed. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
     r.slot[0].runtime_unit_id=101; /* Duplicate IDs, no new unit. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
     r.slot[0].runtime_unit_id=303;
     r.slot[1].occupied=0;
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,5));
-    assert(!dm_dualmerc_trial_replacement_complete(NULL,202,101,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(NULL,202,101,1,1,5));
 }
 
 int main(void) {

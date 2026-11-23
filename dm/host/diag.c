@@ -18,6 +18,7 @@
 #include "dm_merc_trace.h"
 #include <TargetConditionals.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <dirent.h>
 #include <stdatomic.h>
 #include "dm_i18n.h"
@@ -1081,6 +1082,15 @@ static _Atomic int g_dm_trial_verified_client;
 
 static _Atomic uint32_t g_dm_trial_hire_old, g_dm_trial_hire_new;
 
+/* All fatal experimental native-hire failures poison the current HLE save
+ * transaction before aborting. The original committed character remains
+ * untouched when the workdir is not publishable. This does NOT reverse
+ * native gold/item changes already made in the current unsaved session. */
+static void dm_dualmerc_trial_abort(const char *reason) {
+    dm_fs_save_poison(EIO);
+    die("%s",reason);
+}
+
 /* This code is present ONLY in a deliberately marked offline experimental
  * IPA carrying SVC #0x94. Ordinary builds never contain that native gate.
  * Trial is on for that IPA so iPad users can test without launch arguments.
@@ -1509,7 +1519,7 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
                 return 1;
             }
             if (g_dm_dualmerc_add.active)
-                die("DM_DUAL_MERC_TRIAL：嵌套跨幕雇佣事务，拒绝继续");
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：嵌套跨幕雇佣事务，拒绝继续");
             g_dm_dualmerc_add=(dm_dualmerc_add_intent){
                 .G=g_lastG,.player=g_player_unit,
                 .original_id=old_id,.candidate_id=UINT32_MAX,
@@ -1651,7 +1661,7 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
             /* The native transaction already ran without proving that it
              * selected the requested hireling. Do not permit a subsequent
              * unverified save in this disposable-only experiment. */
-            die("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询，终止实验以保护上一份存档");
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询，终止实验以保护上一份存档");
             return;
         } else {
             dm_dualmerc_roster after;
@@ -1670,7 +1680,7 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
             if (!correct) {
-                die("DM_DUAL_MERC_TRIAL：替换后身份未通过校验，停止实验，不允许继续存档");
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：替换后身份未通过校验，停止实验，不允许继续存档");
                 return;
             }
             dm_dualmerc_track_client_pair(G,peer_id,p->candidate_id);
@@ -1730,7 +1740,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
                 if (g_dm_dualmerc_pending.native_override_seen &&
                     (g_dm_dualmerc_pending.candidate_id != candidate_id ||
                      g_dm_dualmerc_pending.candidate_class != candidate_cls))
-                    die("DM_DUAL_MERC_TRIAL：同一事务候选佣兵ID/类别改变，终止实验");
+                    dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：同一事务候选佣兵ID/类别改变，终止实验");
                 g_dm_dualmerc_pending.candidate_id = candidate_id;
                 g_dm_dualmerc_pending.candidate_class = candidate_cls;
                 regs[0] = target;
@@ -1746,7 +1756,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
          * There is no validated native transaction abort ABI yet. A
          * disposable offline trial must fail-stop here, BEFORE unlinking
          * an unrelated mercenary. Never claim this is an in-game rollback. */
-        die("DM_DUAL_MERC_TRIAL：原生替换目标或另一佣兵ID校验失败，停止实验以避免误替换");
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生替换目标或另一佣兵ID校验失败，停止实验以避免误替换");
         return;
     }
     /* A native keep-first override without a preflight-authorized ADD
@@ -1759,11 +1769,11 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         player != g_dm_dualmerc_add.player ||
         G != regs[21] || player != regs[20] || !regs[19] ||
         (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1)
-        die("DM_DUAL_MERC_TRIAL：跨幕新增的原生查询参数无效，阻止旧佣兵被默认替换");
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增的原生查询参数无效，阻止旧佣兵被默认替换");
     uint64_t first_pet_node = 0;
     int count = dm_dualmerc_trial_pet_nodes(player, &first_pet_node);
     if (count != 1 || !first_pet_node)
-        die("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵数量改变，阻止原生默认替换");
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵数量改变，阻止原生默认替换");
     uint32_t old_id = UINT32_MAX, listed_id = UINT32_MAX;
     uint32_t old_class = 0, old_mode = UINT32_MAX, new_type = UINT32_MAX;
     uint32_t new_id = UINT32_MAX, new_cls = 0;
@@ -1776,12 +1786,12 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         !tk_rd(regs[19] + 8, &new_id, 4) ||
         new_id == UINT32_MAX || new_id == old_id ||
         !tk_rd(regs[19] + 4, &new_cls, 4))
-        die("DM_DUAL_MERC_TRIAL：跨幕新增时原生单位信息不完整，禁止删除旧佣兵");
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增时原生单位信息不完整，禁止删除旧佣兵");
     dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
     /* The independent game-unit table must resolve to the same unit,
      * class and mode before suppressing the old-mercenary lookup. */
     if (old.mode != old_mode || old.cls != old_class)
-        die("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵身份/状态改变");
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵身份/状态改变");
     dm_merc_trace_gear fresh = {0};
     dm_merc_probe_inventory(regs[19], &fresh);
     dm_dualmerc_trial_conditions c = {
@@ -1807,7 +1817,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         g_dm_dualmerc_add.original_dead !=
             (unsigned)!dm_dualmerc_trial_mode_live(old.mode) ||
         g_dm_dualmerc_add.keep_seen)
-        die("DM_DUAL_MERC_TRIAL：跨幕新增的原生身份/空装备校验失败，禁止回落原版替换");
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增的原生身份/空装备校验失败，禁止回落原版替换");
     g_dm_dualmerc_add.keep_seen=1;
     g_dm_dualmerc_add.candidate_id=new_id;
     g_dm_dualmerc_add.candidate_class=new_cls;
@@ -1924,12 +1934,12 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
                     g_dm_dualmerc_add.original_class,
                     g_dm_dualmerc_add.candidate_id,
                     g_dm_dualmerc_add.candidate_class))
-                die("DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误，终止实验避免错误存档");
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误，终止实验避免错误存档");
             g_dm_dualmerc_add.link_verified=1;
         } else if (!both) {
             /* This trace is only a diagnostic for non-ADD packets. No
              * authorized second-hire mutation should reach here. */
-            die("DM_DUAL_MERC_TRIAL：未授权的第二佣兵绑定结果不一致");
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：未授权的第二佣兵绑定结果不一致");
         }
         if (both) atomic_store(&g_dm_trial_verified_two_G, G);
         LOG("DM_DUAL_MERC_TRIAL：新佣兵绑定返回；旧ID%u 新ID%u，服务器宠物列表%u/%u（完整双人ID核对：%s）",
@@ -2715,13 +2725,13 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
                 !dm_dualmerc_trial_classes_preserved(
                     &after,intent.original_id,intent.original_class,
                     intent.candidate_id,intent.candidate_class))
-                die("DM_DUAL_MERC_TRIAL：跨幕新增未完成精确双佣兵绑定，停止实验避免覆盖旧佣兵");
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增未完成精确双佣兵绑定，停止实验避免覆盖旧佣兵");
         } else if (count != 1 || !after.slot[0].occupied ||
                    after.slot[0].runtime_unit_id != intent.original_id ||
                    after.slot[0].act != intent.original_act ||
                    after.slot[0].monster_class != intent.original_class ||
                    after.slot[0].dead != intent.original_dead) {
-            die("DM_DUAL_MERC_TRIAL：原生未执行保留Hook但佣兵已变化，禁止保存异常事务");
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生未执行保留Hook但佣兵已变化，禁止保存异常事务");
         }
         memset(&g_dm_dualmerc_add,0,sizeof g_dm_dualmerc_add);
     }
@@ -2750,7 +2760,7 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
         LOG("DM_DUAL_MERC_TRIAL：同幕原生替换，旧佣兵消失、其他幕佣兵保留和新佣兵加入：%s",
             correct ? "通过（服务器状态）" : "未通过，不能视作双佣兵功能完成");
         if (!correct) {
-            die("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配，终止实验");
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配，终止实验");
             return;
         }
         dm_dualmerc_track_client_pair(g_lastG,

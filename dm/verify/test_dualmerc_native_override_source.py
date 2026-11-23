@@ -27,12 +27,27 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         code = self.selected
         self.assertIn("g_dm_dualmerc_pending.target_id ==", code)
         self.assertIn("g_dm_dualmerc_pending.peer_id", code)
-        self.assertIn("roster.slot[j].runtime_unit_id", code)
-        self.assertIn("if (count == 2 && peer_present && regs[19]", code)
+        self.assertIn("dm_dualmerc_trial_selected_target(", code)
+        self.assertIn("g_dm_dualmerc_selected_id", code)
+        self.assertIn("g_dm_dualmerc_pending.peer_id", code)
+        self.assertIn("&roster,gear", code)
         self.assertLess(
-            code.index("if (count == 2 && peer_present && regs[19]"),
+            code.index("dm_dualmerc_trial_selected_target("),
             code.index("regs[0] = target;")
         )
+
+    def test_truncated_native_hire_never_bypasses_trial_preflight(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        preflight = source.split(
+            "static int dm_dualmerc_hire_preflight(", 1)[1].split(
+            "static void dm_dualmerc_pending_tick(", 1)[0]
+        self.assertLess(
+            preflight.index("if (!tk_rd(regs[0]+4, &opcode, 1)"),
+            preflight.index("if (regs[1] != DM_DUALMERC_NATIVE_PACKET_BYTES)"))
+        self.assertNotIn(
+            "regs[1] < DM_DUALMERC_NATIVE_PACKET_BYTES", preflight
+        )
+
 
     def test_dead_mercanary_fails_before_native_replacement(self):
         source = SOURCE.read_text(encoding="utf-8")

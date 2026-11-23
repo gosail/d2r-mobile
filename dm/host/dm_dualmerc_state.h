@@ -213,6 +213,7 @@ static inline int dm_dualmerc_state_gears_apply_verified(
     if (!s || !next || !native_inventory_and_ownership_confirmed ||
         !dm_dualmerc_state_valid(s) || s->generation == UINT64_MAX)
         return 0;
+    unsigned changed=0;
     for (unsigned k=0; k<DM_DUALMERC_SLOTS; ++k) {
         const dm_dualmerc_saved_slot *old=&s->slot[k], *new_slot=&next[k];
         if (old->occupied != new_slot->occupied ||
@@ -227,7 +228,13 @@ static inline int dm_dualmerc_state_gears_apply_verified(
             old->skill_profile != new_slot->skill_profile ||
             new_slot->gear_count > DM_DUALMERC_GEAR_MAX)
             return 0;
+        if (old->gear_count != new_slot->gear_count ||
+            memcmp(old->gear,new_slot->gear,sizeof old->gear))
+            changed=1;
     }
+    /* A no-op native snapshot must neither bump the sidecar generation nor
+     * invalidate a binding that still matches the exact vanilla .d2s. */
+    if (!changed) return 1;
     /* Snapshot the complete proposed state before modifying the caller.
      * This also protects against next pointing directly at s->slot[0]. */
     dm_dualmerc_saved_state proposed=*s;

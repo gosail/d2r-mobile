@@ -24,6 +24,11 @@ typedef uint32_t Result;   // nn::Result：w0，0 = 成功 | nn::Result: w0, 0 =
  * Return 0 for success or a positive errno for failure, which rejects the
  * entire native save transaction instead of committing a partial sidecar. */
 extern int (*g_dm_dualmerc_pre_commit_hook)(const char *workdir);
+/* Mark the current HLE native file transaction unsaveable after any
+ * experimental dual-mercenary native mutation whose identity cannot be
+ * verified. This prevents a later commit from publishing partial state;
+ * it does not undo native gold, items or unit deletion. */
+void dm_fs_save_poison(int error_code);
 
 // 客体地址 → 宿主对象 旁表
 // Guest address → host object side table

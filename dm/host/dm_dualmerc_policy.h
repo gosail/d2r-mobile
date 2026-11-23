@@ -8,6 +8,10 @@
 #define DM_DUALMERC_POLICY_H
 #include <stdint.h>
 #define DM_DUALMERC_SLOTS 2
+/* Live pet nodes expose the mercenary Act and runtime ID but not a
+ * validated HIRE-ORIGIN difficulty. 3 is UNKNOWN in runtime snapshots,
+ * never a game difficulty and never legal in persisted SWM2 records. */
+#define DM_DUALMERC_DIFFICULTY_UNKNOWN 3u
 
 /* These are acts which actually offer mercenaries in D2R; Act IV has none. */
 static inline int dm_dualmerc_valid_act(unsigned act) {
@@ -57,7 +61,7 @@ static inline int dm_dualmerc_bl_target(uint32_t insn, uint64_t at_rva,
 typedef struct {
     uint8_t occupied;          /* Occupied even when the hireling is dead. */
     uint8_t act;               /* Act of origin, independent of difficulty. */
-    uint8_t difficulty;        /* 0 normal, 1 nightmare, 2 hell. */
+    uint8_t difficulty;        /* 0/1/2 verified origin, 3 unknown live origin. */
     uint8_t dead;
     uint32_t runtime_unit_id;  /* Diagnostic only: changes across sessions. */
 } dm_dualmerc_slot;
@@ -81,7 +85,8 @@ static inline int dm_dualmerc_roster_valid(const dm_dualmerc_roster *r) {
     for (unsigned i = 0; i < DM_DUALMERC_SLOTS; ++i) {
         const dm_dualmerc_slot *s = &r->slot[i];
         if (!s->occupied) continue;
-        if (!dm_dualmerc_valid_act(s->act) || s->difficulty > 2) return 0;
+        if (!dm_dualmerc_valid_act(s->act) ||
+            s->difficulty > DM_DUALMERC_DIFFICULTY_UNKNOWN) return 0;
         for (unsigned j = 0; j < i; ++j)
             if (r->slot[j].occupied && r->slot[j].act == s->act) return 0;
     }

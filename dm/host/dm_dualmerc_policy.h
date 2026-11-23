@@ -64,6 +64,7 @@ typedef struct {
     uint8_t difficulty;        /* 0/1/2 verified origin, 3 unknown live origin. */
     uint8_t dead;
     uint32_t runtime_unit_id;  /* Diagnostic only: changes across sessions. */
+    uint32_t monster_class;    /* Verified live UNIT+4; not a stable hire ID. */
 } dm_dualmerc_slot;
 
 typedef struct { dm_dualmerc_slot slot[DM_DUALMERC_SLOTS]; } dm_dualmerc_roster;
@@ -87,7 +88,10 @@ static inline int dm_dualmerc_roster_valid(const dm_dualmerc_roster *r) {
         if (!s->occupied) continue;
         if (!dm_dualmerc_valid_act(s->act) ||
             s->difficulty > DM_DUALMERC_DIFFICULTY_UNKNOWN ||
-            s->dead > 1) return 0;
+            s->dead > 1 ||
+            (s->monster_class &&
+             dm_dualmerc_act_for_class(s->monster_class) != s->act))
+            return 0;
         for (unsigned j = 0; j < i; ++j)
             if (r->slot[j].occupied && r->slot[j].act == s->act) return 0;
     }

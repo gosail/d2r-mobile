@@ -1223,6 +1223,7 @@ static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
         slot->difficulty = DM_DUALMERC_DIFFICULTY_UNKNOWN;
         slot->dead = !dm_dualmerc_trial_mode_live(mode);
         slot->runtime_unit_id = id;
+        slot->monster_class = cls;
         dm_merc_probe_inventory(unit, &gear[i]);
         node = next;
     }

@@ -88,6 +88,19 @@ static inline int dm_dualmerc_trial_post_gear_empty(
     return 1;
 }
 
+/* Native candidates may not have an allocated inventory before they
+ * are linked. Only an absent or fully readable EMPTY inventory can be
+ * accepted; invalid/truncated or any equipped item must stop the hire
+ * before the selected original mercenary is unlinked. */
+static inline int dm_dualmerc_trial_candidate_empty(
+    const dm_merc_trace_gear *candidate)
+{
+    return candidate &&
+        (candidate->status == DM_MERC_GEAR_ABSENT ||
+         candidate->status == DM_MERC_GEAR_OK) &&
+        candidate->count == 0;
+}
+
 /* Verify a completed replacement by exact runtime IDs, independently of
  * native pet linked-list order. Count alone is insufficient: the original
  * selected ID must be gone, the other merc must still be present, and a

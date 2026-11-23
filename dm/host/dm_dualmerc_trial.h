@@ -18,8 +18,10 @@ typedef struct {
     unsigned new_act;            /* Native candidate's monster class. */
     unsigned old_gear_status;    /* Require a valid complete empty inventory. */
     unsigned old_gear_count;
+    uint32_t old_gear_fingerprint;
     unsigned new_gear_status;    /* Pre-registration candidate may have no inventory. */
     unsigned new_gear_count;
+    uint32_t new_gear_fingerprint;
     unsigned old_alive;          /* Must be a live unit, not a corpse/dead flag. */
     unsigned native_result_matches_roster;
     unsigned guest_classes_valid;
@@ -45,9 +47,10 @@ static inline int dm_dualmerc_trial_keep_one(const dm_dualmerc_trial_conditions 
         !c->old_alive || !dm_dualmerc_valid_act(c->old_act) ||
         !dm_dualmerc_valid_act(c->new_act) || c->old_act == c->new_act ||
         c->old_gear_status != DM_MERC_GEAR_OK || c->old_gear_count ||
+        c->old_gear_fingerprint ||
         (c->new_gear_status != DM_MERC_GEAR_OK &&
          c->new_gear_status != DM_MERC_GEAR_ABSENT) ||
-        c->new_gear_count) return 0;
+        c->new_gear_count || c->new_gear_fingerprint) return 0;
     return 1;
 }
 

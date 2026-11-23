@@ -1685,6 +1685,11 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         uint32_t candidate_cls = 0, candidate_type = UINT32_MAX;
         uint32_t candidate_id = UINT32_MAX;
         unsigned selected_slot = DM_DUALMERC_SLOTS;
+        dm_merc_trace_gear candidate_gear={0};
+        /* A pre-registration candidate may expose no inventory. Inspect
+         * it anyway before the native deletion path: refusing a populated
+         * candidate prevents item loss that post-hire checks cannot undo. */
+        if (regs[19]) dm_merc_probe_inventory(regs[19],&candidate_gear);
         /* The native pet list can be reordered. Verify both exact IDs and
          * BOTH gear snapshots immediately before unlink, not only the
          * selected target. An equipped peer must never be ignored. */
@@ -1693,6 +1698,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
             tk_rd(regs[19], &candidate_type, 4) && candidate_type == 1 &&
             tk_rd(regs[19] + 4, &candidate_cls, 4) &&
             tk_rd(regs[19] + 8, &candidate_id, 4) &&
+            dm_dualmerc_trial_candidate_empty(&candidate_gear) &&
             dm_dualmerc_trial_selected_target(
                 &roster,gear,g_dm_dualmerc_selected_id,
                 g_dm_dualmerc_pending.peer_id,g_dm_dualmerc_selected_act,

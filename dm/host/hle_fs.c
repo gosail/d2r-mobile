@@ -447,6 +447,17 @@ HLE_FORCE("_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE", "fsp-srv；存档 �
     return mount_ex(name, dd, 0, 1);
 }
 void (*g_dm_pre_commit_hook[5])(const char *workdir);   // 提交前调（工作目录）：宿主旁路文件按工作目录里的存档内容核对后再写（[0] 个人仓库多页 dm_pages.c、[2] 百宝囊 dm_pouch.c、[1] 编年史仓库 dm_vault.c、[3] 秘境进度 dm_rift.c、[4] iCloud 收件箱并回 dm_cloudmerge.c） | Called before commit (working directory): host side files are checked against the save content in the working directory before being written ([0] personal stash multi-page dm_pages.c, [2] pouch dm_pouch.c, [1] Chronicle stash dm_vault.c, [3] Rift progress dm_rift.c, [4] iCloud inbox merge dm_cloudmerge.c)
+/* Dedicated future dual-mercenary pre-commit extension. The five existing
+ * module hook slots retain their original indices and semantics.
+ * Called with PATH_LOCK + g_lock already held. The callback MUST use POSIX
+ * workdir I/O only (no recursive nn::fs calls) and may be registered only
+ * after the native engine has proved both mercenary identities, inventories
+ * and a complete .d2s save snapshot. NULL leaves vanilla saves untouched.
+ *
+ * Return 0 on success; otherwise a positive errno (or -1 with errno set).
+ * A failed callback poisons this same atomic save transaction, so the
+ * original .d2s cannot commit while its verified SWM2 sidecar fails. */
+int (*g_dm_dualmerc_pre_commit_hook)(const char *workdir);
 void (*g_dm_save_commit_hook)(const char *commit_dir);   // 存档提交成功后调（已提交目录）；iOS 的 iCloud 同步设它，宿主为空 | called after a save commit succeeds (committed directory); the iOS iCloud sync sets it, NULL on the host
 static _Atomic uint64_t g_save_commits;   // 成功提交过几次（前端进后台时等「游戏这次存盘已提交」用） | number of successful commits (used by the front end when going to background to wait for "the game's current save has been committed")
 uint64_t dm_fs_commit_count(void) { return atomic_load(&g_save_commits); }
@@ -456,6 +467,15 @@ HLE_FORCE("_ZN2nn2fs6CommitEPKc", "fsp-srv；事务式存档：工作目录整�
     if (i == g_nmnt || !g_mnt[i].commit[0]) { pthread_mutex_unlock(&g_lock); return RES_OK; }   // 非事务挂载：无可提交 | non-transactional mount: nothing to commit
     uint64_t tc0 = clock_gettime_nsec_np(CLOCK_MONOTONIC), tw0 = atomic_exchange(&g_txn_first_ns, 0);
     for (int k = 0; k < 5; k++) if (g_dm_pre_commit_hook[k]) g_dm_pre_commit_hook[k](g_mnt[i].dir);
+    if (g_dm_dualmerc_pre_commit_hook) {
+        errno=0;
+        int rc=g_dm_dualmerc_pre_commit_hook(g_mnt[i].dir);
+        if (rc) {
+            int err=rc>0 ? rc : (errno ? errno : EIO);
+            save_poison(err);
+            LOG("【红】双佣兵扩展档提交前检查失败 errno=%d，拒绝整次原子存盘",err);
+        }
+    }
     uint64_t tc1 = clock_gettime_nsec_np(CLOCK_MONOTONIC);   // 写进工作目录的旁路文件随这次提交一起原子换入 | side files written into the working directory are swapped in atomically together with this commit
     int perr = atomic_exchange(&g_save_poison, 0);
     if (perr) {                                                         // 本事务有写失败：拒绝提交、丢弃工作目录 | a write failed in this transaction: refuse the commit, discard the working directory

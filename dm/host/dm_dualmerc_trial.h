@@ -51,9 +51,9 @@ static inline int dm_dualmerc_trial_keep_one(const dm_dualmerc_trial_conditions 
     return 1;
 }
 
-/* Until the two-slot native UI picker is implemented, refuse ALL further
- * hires rather than silently replacing the wrong hireling or losing gear.
- * The original game does not support selecting which of two gets replaced.
+/* The native singleton equipment and persistent-save paths are still unsafe
+ * even though an iPad-only replacement-choice UI exists. Preserve the
+ * equipped-merc rejection guard until the actual engine item bridge exists.
  */
 static inline int dm_dualmerc_trial_block_equipped(
     unsigned count, unsigned inventory_verified, unsigned equipped_items) {

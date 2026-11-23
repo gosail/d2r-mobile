@@ -1245,11 +1245,13 @@ static int dm_dualmerc_native_hire_rows_match(uint64_t G,
     if (!G || !mm || !mm->base ||
         !dm_dualmerc_hire_request_valid(want) ||
         !tk_rd(G+0x106,&table_version,1) ||
-        /* The existing game table resolver indexes by this native byte
-         * without excluding zero. A zero version must not be rejected
-         * solely by an assumed lower bound; the actual table pointer,
-         * row count, prefix and vendor identity remain fail-closed. */
-        table_version>3 ||
+        /* Historical owner-prepared Switch 3.3 disassembly confirms the
+         * native getpet resolver at main+0x6c3130 tests (version-1)<3
+         * BEFORE indexing main+0x2d64a18 by version*16 (RVA 0x6c3158
+         * through 0x6c3174). Version zero is NOT a valid table index.
+         * Keep the Hireling table version range 1..3, as in that native
+         * source. Prefix and NPC/row checks still fail closed. */
+        table_version<1 || table_version>3 ||
         !tk_rd((uint64_t)(uintptr_t)mm->base+0x2d64a18+
                 (uint64_t)table_version*16, &table, 8) || !table ||
         !tk_rd(table+0x558,&rows,8) || !rows ||

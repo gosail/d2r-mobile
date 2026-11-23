@@ -51,7 +51,7 @@ static inline dm_dualmerc_restore_result dm_dualmerc_restore_plan_for_live(
     unsigned *other_slot)
 {
     if (!state || !native || !live || !other_slot ||
-        !dm_dualmerc_roster_valid(live) ||
+        !dm_dualmerc_live_ids_valid(live) ||
         !dm_dualmerc_state_valid(state) ||
         state->native_slot >= DM_DUALMERC_SLOTS)
         return DM_DUALMERC_RESTORE_REJECT;

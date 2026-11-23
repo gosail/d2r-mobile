@@ -1208,7 +1208,11 @@ static int dm_dualmerc_native_hire_rows_match(uint64_t G,
     if (!G || !mm || !mm->base ||
         !dm_dualmerc_hire_request_valid(want) ||
         !tk_rd(G+0x106,&table_version,1) ||
-        table_version<1 || table_version>3 ||
+        /* The existing game table resolver indexes by this native byte
+         * without excluding zero. A zero version must not be rejected
+         * solely by an assumed lower bound; the actual table pointer,
+         * row count, prefix and vendor identity remain fail-closed. */
+        table_version>3 ||
         !tk_rd((uint64_t)(uintptr_t)mm->base+0x2d64a18+
                 (uint64_t)table_version*16, &table, 8) || !table ||
         !tk_rd(table+0x558,&rows,8) || !rows ||

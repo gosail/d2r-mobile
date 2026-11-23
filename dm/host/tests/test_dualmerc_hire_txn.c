@@ -88,6 +88,11 @@ int main(void) {
 
     r.slot[1] = merc(2,1,102,1); /* dead occupies a second Act slot */
     o.offered_act = 5;
+    r.slot[1].runtime_unit_id=r.slot[0].runtime_unit_id;
+    assert(dm_merc_txn_begin(&txn,o,&r,100)==DM_MERC_TXN_REJECT);
+    r.slot[1].runtime_unit_id=UINT32_MAX;
+    assert(dm_merc_txn_begin(&txn,o,&r,100)==DM_MERC_TXN_REJECT);
+    r.slot[1].runtime_unit_id=102;
     assert(dm_merc_txn_begin(&txn,o,&r,100)==DM_MERC_TXN_CHOOSE);
     assert(!dm_merc_txn_authorize(&txn,&o,&r,110,&chosen));
     assert(!dm_merc_txn_choose(&txn,2));

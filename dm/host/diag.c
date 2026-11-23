@@ -1152,6 +1152,7 @@ typedef struct {
     uint8_t packet[DM_DUALMERC_PACKET_BYTES];
     dm_merc_txn lease;
     uint32_t target_id, peer_id, candidate_id;
+    uint32_t peer_class, candidate_class;
     unsigned expected_act, peer_act, peer_dead;
     int active, native_override_seen;
 } dm_dualmerc_pending;
@@ -1168,6 +1169,7 @@ static unsigned g_dm_dualmerc_selected_act;
 typedef struct {
     uint64_t G, player;
     uint32_t original_id, candidate_id;
+    uint32_t original_class, candidate_class;
     unsigned original_act, original_dead, candidate_act;
     int active, keep_seen, link_verified;
 } dm_dualmerc_add_intent;
@@ -1509,6 +1511,8 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
             g_dm_dualmerc_add=(dm_dualmerc_add_intent){
                 .G=g_lastG,.player=g_player_unit,
                 .original_id=old_id,.candidate_id=UINT32_MAX,
+                .original_class=roster.slot[0].monster_class,
+                .candidate_class=0,
                 .original_act=roster.slot[0].act,
                 .original_dead=roster.slot[0].dead,
                 .candidate_act=offer.offered_act,.active=1
@@ -1539,7 +1543,9 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         g_dm_dualmerc_pending.peer_id=roster.slot[1-choice].runtime_unit_id;
         g_dm_dualmerc_pending.peer_act=roster.slot[1-choice].act;
         g_dm_dualmerc_pending.peer_dead=roster.slot[1-choice].dead;
+        g_dm_dualmerc_pending.peer_class=roster.slot[1-choice].monster_class;
         g_dm_dualmerc_pending.candidate_id=UINT32_MAX;
+        g_dm_dualmerc_pending.candidate_class=0;
         g_dm_dualmerc_pending.native_override_seen=0;
         LOG("DM_DUAL_MERC_TRIAL：同幕雇佣，只允许替换第%u名幕%u佣兵ID%u",
             choice+1,offer.offered_act,g_dm_dualmerc_selected_id);
@@ -1624,11 +1630,13 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
     p->target_id=target_id; p->peer_id=peer_id;
     p->peer_act=roster.slot[1-target].act;
     p->peer_dead=roster.slot[1-target].dead;
+    p->peer_class=roster.slot[1-target].monster_class;
     g_dm_dualmerc_selected_G=G;
     g_dm_dualmerc_selected_player=player;
     g_dm_dualmerc_selected_id=target_id;
     g_dm_dualmerc_selected_act=live.offered_act;
     p->candidate_id=UINT32_MAX;
+    p->candidate_class=0;
     p->native_override_seen=0;
     module_t *mm=main_mod();
     if (mm && mm->base) {
@@ -1715,9 +1723,11 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
                 G,g_dm_dualmerc_selected_id);
             if (target) {
                 if (g_dm_dualmerc_pending.native_override_seen &&
-                    g_dm_dualmerc_pending.candidate_id != candidate_id)
-                    die("DM_DUAL_MERC_TRIAL：同一事务候选佣兵ID改变，终止实验");
+                    (g_dm_dualmerc_pending.candidate_id != candidate_id ||
+                     g_dm_dualmerc_pending.candidate_class != candidate_cls))
+                    die("DM_DUAL_MERC_TRIAL：同一事务候选佣兵ID/类别改变，终止实验");
                 g_dm_dualmerc_pending.candidate_id = candidate_id;
+                g_dm_dualmerc_pending.candidate_class = candidate_cls;
                 regs[0] = target;
                 g_dm_dualmerc_pending.native_override_seen = 1;
                 LOG("DM_DUAL_MERC_TRIAL：已验证两名单位ID与空装备，替换第%u位幕%u佣兵ID%u；另一名保留",
@@ -1786,6 +1796,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
     };
     if (!dm_dualmerc_trial_keep_one(&c) ||
         old_id != g_dm_dualmerc_add.original_id ||
+        old_class != g_dm_dualmerc_add.original_class ||
         c.old_act != g_dm_dualmerc_add.original_act ||
         c.new_act != g_dm_dualmerc_add.candidate_act ||
         g_dm_dualmerc_add.original_dead !=
@@ -1794,6 +1805,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         die("DM_DUAL_MERC_TRIAL：跨幕新增的原生身份/空装备校验失败，禁止回落原版替换");
     g_dm_dualmerc_add.keep_seen=1;
     g_dm_dualmerc_add.candidate_id=new_id;
+    g_dm_dualmerc_add.candidate_class=new_cls;
     atomic_store(&g_dm_trial_verified_two_G, 0);
     atomic_store(&g_dm_trial_verified_client, 0);
     atomic_store(&g_dm_trial_hire_old, old_id);

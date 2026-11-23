@@ -83,7 +83,7 @@ static inline int dm_dualmerc_trial_block_full(unsigned count) {
  * neither gold/item rollback nor persistence beyond this game session. */
 static inline int dm_dualmerc_trial_replacement_complete(
     const dm_dualmerc_roster *after,
-    uint32_t removed_id, uint32_t retained_id,
+    uint32_t removed_id, uint32_t retained_id, uint32_t expected_new_id,
     unsigned retained_act, unsigned retained_dead, unsigned new_act)
 {
     if (!after || !dm_dualmerc_roster_valid(after) ||
@@ -91,7 +91,9 @@ static inline int dm_dualmerc_trial_replacement_complete(
         !dm_dualmerc_valid_act(retained_act) ||
         retained_act == new_act || retained_dead > 1 ||
         removed_id == UINT32_MAX || retained_id == UINT32_MAX ||
-        removed_id == retained_id) return 0;
+        expected_new_id == UINT32_MAX ||
+        removed_id == retained_id || expected_new_id == removed_id ||
+        expected_new_id == retained_id) return 0;
     unsigned retained=0, inserted=0;
     for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i) {
         const dm_dualmerc_slot *slot=&after->slot[i];
@@ -106,11 +108,43 @@ static inline int dm_dualmerc_trial_replacement_complete(
             ++retained;
         } else {
             /* The new hire must be a fresh, living native unit. */
-            if (slot->act != new_act || slot->dead) return 0;
+            if (slot->runtime_unit_id != expected_new_id ||
+                slot->act != new_act || slot->dead) return 0;
             ++inserted;
         }
     }
     return retained == 1 && inserted == 1;
+}
+
+/* The native singleton hire is allowed to KEEP the first hireling only
+ * if the post-link server roster contains the exact original unit and exact
+ * new candidate, of distinct Acts, with unchanged original death state.
+ * The count may be reordered. This is a server-only in-session identity
+ * check, not a durable save or ownership transfer. */
+static inline int dm_dualmerc_trial_add_complete(
+    const dm_dualmerc_roster *after,
+    uint32_t original_id, unsigned original_act, unsigned original_dead,
+    uint32_t candidate_id, unsigned candidate_act)
+{
+    if (!after || !dm_dualmerc_roster_valid(after) ||
+        original_id == UINT32_MAX || candidate_id == UINT32_MAX ||
+        original_id == candidate_id ||
+        !dm_dualmerc_valid_act(original_act) ||
+        !dm_dualmerc_valid_act(candidate_act) ||
+        original_act == candidate_act || original_dead > 1) return 0;
+    unsigned have_old=0, have_new=0;
+    for (unsigned i=0;i<DM_DUALMERC_SLOTS;i++) {
+        const dm_dualmerc_slot *slot=&after->slot[i];
+        if (!slot->occupied || slot->runtime_unit_id == UINT32_MAX)
+            return 0;
+        if (slot->runtime_unit_id == original_id &&
+            slot->act == original_act &&
+            slot->dead == original_dead) ++have_old;
+        else if (slot->runtime_unit_id == candidate_id &&
+                 slot->act == candidate_act && !slot->dead) ++have_new;
+        else return 0;
+    }
+    return have_old == 1 && have_new == 1;
 }
 
 /* A native singleton getpet call is about to unlink ONE of the two units.

@@ -43,7 +43,10 @@ int main(void) {
     assert(dm_dualmerc_equip_block_unpersisted(2,0x5b));
     assert(dm_dualmerc_equip_block_unpersisted(2,0x51));
     assert(!dm_dualmerc_equip_block_unpersisted(2,0x36));
-    assert(!dm_dualmerc_equip_block_unpersisted(3,0x5b));
+    /* A corrupt/native-over-cap roster may never reopen equip writes. */
+    assert(dm_dualmerc_equip_block_unpersisted(3,0x5b));
+    assert(dm_dualmerc_equip_block_unpersisted(3,0x51));
+    assert(!dm_dualmerc_equip_block_unpersisted(1,0x51));
     puts("two-merc equip packet identity and no-unsafe-gear gate: passed");
     return 0;
 }

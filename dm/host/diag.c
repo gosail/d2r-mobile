@@ -1911,6 +1911,26 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
         }
     }
     dm_dual_merc_probe_tick(G, player, 0);
+    /* Server identity may change on death, area transition, replacement or
+     * a reused native game pointer. Do not reuse a historical client
+     * confirmed flag unless the authoritative two exact unit IDs STILL
+     * exist now. A failed read revokes the prior confirmation. */
+    if (player && atomic_load(&g_dm_trial_verified_two_G) == G &&
+        !atomic_load(&g_dm_trial_hire_G)) {
+        dm_dualmerc_roster current;
+        dm_merc_trace_gear current_gear[DM_DUALMERC_SLOTS];
+        int n=dm_dualmerc_runtime_roster(G,player,&current,current_gear);
+        if (n != DM_DUALMERC_SLOTS ||
+            !dm_dualmerc_trial_both_present(
+                (unsigned)n,current.slot[0].runtime_unit_id,
+                current.slot[1].runtime_unit_id,
+                atomic_load(&g_dm_trial_hire_old),
+                atomic_load(&g_dm_trial_hire_new))) {
+            atomic_store(&g_dm_trial_verified_two_G,0);
+            atomic_store(&g_dm_trial_verified_client,0);
+            LOG("DM_DUAL_MERC_TRIAL：服务端双佣兵单位身份已变化，撤销此前客户端验证");
+        }
+    }
     /* A running simulation frame MUST NOT execute an NPC C2S transaction:
      * the native receive pump is the only place allowed to mutate gold/pets.
      * Ticks only expire a stale choice; completed UI choices are delivered

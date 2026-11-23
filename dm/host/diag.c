@@ -1361,7 +1361,9 @@ static int dm_dualmerc_replay_callback_stable(uint64_t fn) {
 }
 static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
     if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
-        !regs[0] || regs[1] < DM_DUALMERC_NATIVE_PACKET_BYTES) return 0;
+        !regs[0]) return 0;
+    /* Inspect the opcode before the length guard. A truncated 0x36 request
+     * must not bypass this trial preflight and reach the native handler. */
     uint8_t opcode=0;
     if (!tk_rd(regs[0]+4, &opcode, 1) || opcode != 0x36) return 0;
     if (g_dm_dualmerc_pending.active) {
@@ -1602,41 +1604,27 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
         int count = dm_dualmerc_runtime_roster(G, player, &roster, gear);
         uint32_t candidate_cls = 0, candidate_type = UINT32_MAX;
-        /* The other mercenary must still be the EXACT same server unit.
-         * Verifying only the selected ID can silently replace the wrong
-         * pet when the singleton native getter returns another unit. */
-        int peer_present = 0;
-        if (count == 2 &&
+        unsigned selected_slot = DM_DUALMERC_SLOTS;
+        /* The native pet list can be reordered. Verify both exact IDs and
+         * BOTH gear snapshots immediately before unlink, not only the
+         * selected target. An equipped peer must never be ignored. */
+        if (count == DM_DUALMERC_SLOTS && regs[19] &&
             g_dm_dualmerc_pending.target_id == g_dm_dualmerc_selected_id &&
-            g_dm_dualmerc_pending.peer_id != UINT32_MAX &&
-            g_dm_dualmerc_pending.peer_id != g_dm_dualmerc_selected_id) {
-            for (int j = 0; j < DM_DUALMERC_SLOTS; ++j)
-                if (roster.slot[j].runtime_unit_id ==
-                    g_dm_dualmerc_pending.peer_id)
-                    peer_present = 1;
-        }
-        if (count == 2 && peer_present && regs[19] &&
             tk_rd(regs[19], &candidate_type, 4) && candidate_type == 1 &&
             tk_rd(regs[19] + 4, &candidate_cls, 4) &&
-            dm_dualmerc_act_for_class(candidate_cls) ==
-                 g_dm_dualmerc_selected_act) {
-            dm_dualmerc_decision plan = dm_dualmerc_plan(
-                 &roster,g_dm_dualmerc_selected_act,0);
-            for (int i=0;i<DM_DUALMERC_SLOTS;i++) {
-                if (roster.slot[i].runtime_unit_id !=
-                         g_dm_dualmerc_selected_id ||
-                    !dm_dualmerc_choice_allowed(&plan,(unsigned)i) ||
-                    gear[i].status != DM_MERC_GEAR_OK ||
-                    gear[i].count) continue;
-                uint64_t target = dm_dualmerc_server_monster(
-                     G, g_dm_dualmerc_selected_id);
-                if (target) {
-                    regs[0] = target;
-                    g_dm_dualmerc_pending.native_override_seen = 1;
-                    LOG("DM_DUAL_MERC_TRIAL：按选择替换幕%u佣兵，旧单位ID%u；另一名保留",
-                        roster.slot[i].act, g_dm_dualmerc_selected_id);
-                    return;
-                }
+            dm_dualmerc_trial_selected_target(
+                &roster,gear,g_dm_dualmerc_selected_id,
+                g_dm_dualmerc_pending.peer_id,g_dm_dualmerc_selected_act,
+                candidate_cls,&selected_slot)) {
+            uint64_t target = dm_dualmerc_server_monster(
+                G,g_dm_dualmerc_selected_id);
+            if (target) {
+                regs[0] = target;
+                g_dm_dualmerc_pending.native_override_seen = 1;
+                LOG("DM_DUAL_MERC_TRIAL：已验证两名单位ID与空装备，替换第%u位幕%u佣兵ID%u；另一名保留",
+                    selected_slot+1,roster.slot[selected_slot].act,
+                    g_dm_dualmerc_selected_id);
+                return;
             }
         }
         /* The native caller will otherwise continue with the singleton

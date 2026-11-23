@@ -12,6 +12,15 @@ int main(void) {
     dm_dualmerc_decision d = dm_dualmerc_plan(&r, 1, 0);
     assert(d.action == DM_DUALMERC_ADD && d.slot == 0);
     r.slot[0] = merc(1, 0, 0);
+    /* A live pet list cannot prove the original hire difficulty. Unknown
+     * must still occupy the same Act slot, never grant another Act I merc. */
+    r.slot[0].difficulty = DM_DUALMERC_DIFFICULTY_UNKNOWN;
+    assert(dm_dualmerc_roster_valid(&r));
+    d = dm_dualmerc_plan(&r, 1, 2);
+    assert(d.action == DM_DUALMERC_REPLACE_SAME_ACT && d.slot == 0);
+    r.slot[0].difficulty = 4; /* Outside 0..2 and UNKNOWN is invalid. */
+    assert(!dm_dualmerc_roster_valid(&r));
+    r.slot[0].difficulty = 0;
     d = dm_dualmerc_plan(&r, 2, 2);
     assert(d.action == DM_DUALMERC_ADD && d.slot == 1);
     assert(dm_dualmerc_choice_allowed(&d, 1));

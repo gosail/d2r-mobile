@@ -252,6 +252,44 @@ static inline int dm_dualmerc_state_gears_apply_verified(
     return 1;
 }
 
+/* Per-mercenary lifecycle ledger for a separately VERIFIED native death,
+ * revival or XP/level update. Death never frees an Act slot or any equipped
+ * item. Neither a client display packet nor a guessed Act is evidence that
+ * the native action took place; caller must prove the original UNIT/owner.
+ *
+ * An explicit flag is intentionally required even for a death. This
+ * routine ONLY updates a saved snapshot and is NOT connected to an
+ * unverified revival opcode or a monster-spawn function.
+ */
+static inline int dm_dualmerc_state_lifecycle_apply_verified(
+    dm_dualmerc_saved_state *s, unsigned slot_index,
+    unsigned dead, uint32_t level, uint32_t experience,
+    int native_unit_lifecycle_confirmed)
+{
+    if (!s || !native_unit_lifecycle_confirmed ||
+        !dm_dualmerc_state_valid(s) ||
+        slot_index >= DM_DUALMERC_SLOTS ||
+        !s->slot[slot_index].occupied ||
+        dead > 1 || !level || level < s->slot[slot_index].level ||
+        experience < s->slot[slot_index].experience ||
+        s->generation == UINT64_MAX)
+        return 0;
+    const dm_dualmerc_saved_slot *old=&s->slot[slot_index];
+    if (old->dead == dead && old->level == level &&
+        old->experience == experience) return 1; /* No-op. */
+    dm_dualmerc_saved_state proposed=*s;
+    dm_dualmerc_saved_slot *dst=&proposed.slot[slot_index];
+    dst->dead=(uint8_t)dead;
+    dst->level=level;
+    dst->experience=experience;
+    proposed.native_seed=0;
+    proposed.native_d2s_checksum=0;
+    if (!dm_dualmerc_state_valid(&proposed)) return 0;
+    ++proposed.generation;
+    *s=proposed;
+    return 1;
+}
+
 /* Canonical format: magic SWM2, v3, two slots, generation, total size,
  * 32-byte header including native-slot index, native vanilla .d2s
  * checksum and merc seed, then one 32-byte record per slot and up to

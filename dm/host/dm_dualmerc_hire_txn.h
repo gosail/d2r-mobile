@@ -116,6 +116,7 @@ static inline int dm_merc_txn_authorize(
             if (live_for_saved[i] != DM_DUALMERC_SLOTS ||
                 (matched_mask & (1u << j)) ||
                 old->act != now->act ||
+                old->monster_class != now->monster_class ||
                 old->difficulty != now->difficulty ||
                 old->dead != now->dead) {
                 dm_merc_txn_cancel(t); return 0;

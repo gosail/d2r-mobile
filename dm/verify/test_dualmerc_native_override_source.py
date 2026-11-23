@@ -49,6 +49,37 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         )
 
 
+    def test_zero_length_packet_has_no_readable_hire_opcode(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        preflight = source.split(
+            "static int dm_dualmerc_hire_preflight(", 1)[1].split(
+            "static void dm_dualmerc_pending_tick(", 1)[0]
+        self.assertIn("!regs[1] || regs[0] > UINT64_MAX-5u", preflight)
+        self.assertLess(
+            preflight.index("!regs[1] ||"),
+            preflight.index("tk_rd(regs[0]+4, &opcode, 1)")
+        )
+
+    def test_native_candidate_gear_checked_before_selected_unlink(self):
+        code = self.selected
+        self.assertIn("dm_merc_trace_gear candidate_gear={0};", code)
+        self.assertIn("dm_merc_probe_inventory(regs[19],&candidate_gear);", code)
+        self.assertIn("dm_dualmerc_trial_candidate_empty(&candidate_gear)", code)
+        self.assertLess(
+            code.index("dm_dualmerc_trial_candidate_empty(&candidate_gear)"),
+            code.index("regs[0] = target;")
+        )
+
+    def test_unverified_revive_candidates_are_only_observed(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        obs = source.split("static void c2s_obs(", 1)[1].split(
+            "    if (n >= 1 && b[0] == 0x20)", 1)[0]
+        self.assertIn(
+            "(b[0] == 0x36 || b[0] == 0x38 || b[0] == 0x62)", obs)
+        self.assertIn("dm_dual_merc_probe_tick(", obs)
+        self.assertNotIn("die(", obs)
+        self.assertNotIn("return 1;", obs)
+
     def test_candidate_unit_id_is_unique_before_unlink(self):
         code = self.selected
         self.assertIn("tk_rd(regs[19] + 8, &candidate_id, 4)", code)

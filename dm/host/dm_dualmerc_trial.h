@@ -1,7 +1,8 @@
 /*
  * Strictly disposable-save-only server hire experiment. Pure logic.
  * Only the special offline trial Guest (SVC 0x94) may enable this code.
- * No persistence and no replacement-choice UI exist yet.
+ * No second-merc persistence/equipment UI exists; iPad has an experimental
+ * replacement-choice alert, but it only chooses the native target.
  * In the game's native 0x687648 get-existing-pet call, a valid "keep" result
  * substitutes a NULL *only to that one caller*, preserving the original pet.
  * Game creation of a second pet still requires live engine validation.

@@ -58,67 +58,87 @@ static void selected_native_replacement(void) {
 /* The server can reorder its pet list during native replacement;
  * validate by runtime identity, not node position. */
 static void completed_native_replacement(void) {
+    dm_merc_trace_gear gear[DM_DUALMERC_SLOTS]={
+        {0,0,DM_MERC_GEAR_OK},{0,0,DM_MERC_GEAR_OK}
+    };
     dm_dualmerc_roster r={0};
     r.slot[0]=(dm_dualmerc_slot){.occupied=1,.act=1,
         .runtime_unit_id=101,.dead=1};
     r.slot[1]=(dm_dualmerc_slot){.occupied=1,.act=5,
         .runtime_unit_id=303,.dead=0};
-    assert(dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,304,1,1,5));
+    assert(dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,304,1,1,5));
+    gear[0].count=1;
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
+    gear[0].count=0;
+    gear[1].status=DM_MERC_GEAR_TRUNCATED;
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
+    gear[1].status=DM_MERC_GEAR_OK;
+    assert(!dm_dualmerc_trial_replacement_complete(&r,NULL,202,101,303,1,1,5));
     dm_dualmerc_slot first=r.slot[0];
     r.slot[0]=r.slot[1]; r.slot[1]=first;
-    assert(dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,303,101,303,1,1,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,303,303,1,1,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,2));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,101,101,303,1,1,5));
-    assert(!dm_dualmerc_trial_replacement_complete(&r,UINT32_MAX,101,303,1,1,5));
+    assert(dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,303,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,303,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,2));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,101,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,UINT32_MAX,101,303,1,1,5));
     r.slot[0].dead=1; /* Newly hired unit must be living. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     r.slot[0].dead=0;
     r.slot[1].dead=0; /* Survivor became alive without being replaced. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     r.slot[1].dead=1;
     r.slot[1].act=3; /* Survivor unexpectedly changed its class/Act. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     r.slot[1].act=1;
     r.slot[0].runtime_unit_id=202; /* Old target was never removed. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     r.slot[0].runtime_unit_id=101; /* Duplicate IDs, no new unit. */
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     r.slot[0].runtime_unit_id=303;
     r.slot[1].occupied=0;
-    assert(!dm_dualmerc_trial_replacement_complete(&r,202,101,303,1,1,5));
-    assert(!dm_dualmerc_trial_replacement_complete(NULL,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
+    assert(!dm_dualmerc_trial_replacement_complete(NULL,gear,202,101,303,1,1,5));
 }
 
 /* A second hire may not destroy the original Act slot even if the native
  * pet list order changes, or if a different unit of the same Act appears. */
 static void completed_second_hire(void) {
+    dm_merc_trace_gear gear[DM_DUALMERC_SLOTS]={
+        {0,0,DM_MERC_GEAR_OK},{0,0,DM_MERC_GEAR_OK}
+    };
     dm_dualmerc_roster r={0};
     r.slot[0]=(dm_dualmerc_slot){.occupied=1,.act=1,.dead=0,.runtime_unit_id=101};
     r.slot[1]=(dm_dualmerc_slot){.occupied=1,.act=2,.dead=0,.runtime_unit_id=202};
-    assert(dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,203,2));
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,202,5));
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,101,2));
+    assert(dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
+    gear[1].count=1;
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
+    gear[1].count=0;
+    gear[0].status=DM_MERC_GEAR_ABSENT;
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
+    gear[0].status=DM_MERC_GEAR_OK;
+    assert(!dm_dualmerc_trial_add_complete(&r,NULL,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,203,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,5));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,101,2));
     dm_dualmerc_slot tmp=r.slot[0];r.slot[0]=r.slot[1];r.slot[1]=tmp;
-    assert(dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
+    assert(dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
     r.slot[1].dead=1; /* Original merc mysteriously died. */
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
     r.slot[1].dead=0;
     r.slot[0].dead=1; /* New merc cannot be a dead unit. */
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
     r.slot[0].dead=0;
     r.slot[0].runtime_unit_id=303; /* Replacement was NOT the candidate. */
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
     r.slot[0].runtime_unit_id=202;
     r.slot[1].act=3; /* Original's Act cannot change. */
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
     r.slot[1].act=1;
     r.slot[0].occupied=0;
-    assert(!dm_dualmerc_trial_add_complete(&r,101,1,0,202,2));
-    assert(!dm_dualmerc_trial_add_complete(NULL,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(&r,gear,101,1,0,202,2));
+    assert(!dm_dualmerc_trial_add_complete(NULL,gear,101,1,0,202,2));
 }
 
 int main(void) {

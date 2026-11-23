@@ -101,7 +101,7 @@ static inline int dm_dualmerc_trial_replacement_complete(
     uint32_t removed_id, uint32_t retained_id, uint32_t expected_new_id,
     unsigned retained_act, unsigned retained_dead, unsigned new_act)
 {
-    if (!after || !dm_dualmerc_roster_valid(after) ||
+    if (!after || !dm_dualmerc_live_ids_valid(after) ||
         !dm_dualmerc_trial_post_gear_empty(gear) ||
         !dm_dualmerc_valid_act(new_act) ||
         !dm_dualmerc_valid_act(retained_act) ||
@@ -143,7 +143,7 @@ static inline int dm_dualmerc_trial_add_complete(
     uint32_t original_id, unsigned original_act, unsigned original_dead,
     uint32_t candidate_id, unsigned candidate_act)
 {
-    if (!after || !dm_dualmerc_roster_valid(after) ||
+    if (!after || !dm_dualmerc_live_ids_valid(after) ||
         !dm_dualmerc_trial_post_gear_empty(gear) ||
         original_id == UINT32_MAX || candidate_id == UINT32_MAX ||
         original_id == candidate_id ||
@@ -182,7 +182,7 @@ static inline int dm_dualmerc_trial_selected_target(
     unsigned *selected_slot)
 {
     if (!roster || !gear || !selected_slot ||
-        !dm_dualmerc_roster_valid(roster) ||
+        !dm_dualmerc_live_ids_valid(roster) ||
         !dm_dualmerc_valid_act(offered_act) ||
         dm_dualmerc_act_for_class(candidate_class) != offered_act ||
         selected_id == UINT32_MAX || peer_id == UINT32_MAX ||

@@ -221,8 +221,7 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
             "static void dm_dualmerc_pending_reset(", 1)[0]
         self.assertIn("DM_DUALMERC_HIRE_STRIDE", verify)
         self.assertIn("dm_dualmerc_hire_check_ok(&result)", verify)
-        self.assertIn("table_version>3", verify)
-        self.assertNotIn("table_version<1", verify)
+        self.assertIn("table_version<1 || table_version>3", verify)
         self.assertIn("!dm_dualmerc_native_hire_rows_match(G,&wanted)", offer)
         self.assertLess(
             offer.index("!dm_dualmerc_native_hire_rows_match(G,&wanted)"),

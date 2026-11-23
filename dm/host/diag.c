@@ -1454,7 +1454,7 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
          * the keep-first contract cannot be satisfied. */
         if (lease.plan.action == DM_DUALMERC_ADD) {
             uint32_t old_id=roster.slot[0].runtime_unit_id;
-            if (old_id == UINT32_MAX || !old_id ||
+            if (old_id == UINT32_MAX ||
                 !dm_dualmerc_trial_mode_live(
                     dm_merc_probe_unit_read(g_lastG,old_id,0).mode)) {
                 atomic_store(&g_dm_trial_full_notice,3);

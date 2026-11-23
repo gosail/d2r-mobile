@@ -62,6 +62,7 @@ static inline dm_dualmerc_restore_result dm_dualmerc_restore_plan_for_live(
         ++seen;
         if (live->slot[i].runtime_unit_id == UINT32_MAX ||
             live->slot[i].act != owned->act ||
+            live->slot[i].monster_class != owned->monster_class ||
             live->slot[i].dead != owned->dead)
             return DM_DUALMERC_RESTORE_REJECT;
     }

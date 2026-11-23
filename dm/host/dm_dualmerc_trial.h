@@ -73,6 +73,40 @@ static inline int dm_dualmerc_trial_block_full(unsigned count) {
     return count >= DM_DUALMERC_SLOTS;
 }
 
+/* Verify a completed replacement by exact runtime IDs, independently of
+ * native pet linked-list order. Count alone is insufficient: the original
+ * selected ID must be gone, the other merc must still be present, and a
+ * different live unit with the requested Act must have appeared.
+ *
+ * Call only after a synchronous native packet returned. This verifies
+ * neither gold/item rollback nor persistence beyond this game session. */
+static inline int dm_dualmerc_trial_replacement_complete(
+    const dm_dualmerc_roster *after,
+    uint32_t removed_id, uint32_t retained_id, unsigned new_act)
+{
+    if (!after || !dm_dualmerc_roster_valid(after) ||
+        !dm_dualmerc_valid_act(new_act) ||
+        removed_id == UINT32_MAX || retained_id == UINT32_MAX ||
+        removed_id == retained_id) return 0;
+    unsigned retained=0, inserted=0;
+    for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i) {
+        const dm_dualmerc_slot *slot=&after->slot[i];
+        if (!slot->occupied || slot->runtime_unit_id == UINT32_MAX ||
+            slot->runtime_unit_id == removed_id) return 0;
+        if (slot->runtime_unit_id == retained_id) {
+            /* An unrelated dead peer is allowed to remain registered,
+             * but it cannot silently become the new hire. */
+            if (slot->act == new_act) return 0;
+            ++retained;
+        } else {
+            /* The new hire must be a fresh, living native unit. */
+            if (slot->act != new_act || slot->dead) return 0;
+            ++inserted;
+        }
+    }
+    return retained == 1 && inserted == 1;
+}
+
 /* A native singleton getpet call is about to unlink ONE of the two units.
  * Before overriding that result, establish exact target AND surviving peer
  * identities, both inventories' empty/verified status, target liveness and

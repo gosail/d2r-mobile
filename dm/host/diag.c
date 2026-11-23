@@ -1226,7 +1226,7 @@ static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
         dm_merc_probe_inventory(unit, &gear[i]);
         node = next;
     }
-    return !dm_dualmerc_roster_valid(out) || node ? -1 : count;
+    return !dm_dualmerc_live_ids_valid(out) || node ? -1 : count;
 }
 
 /* The engine already exposes this exact Hireling table base and stride to

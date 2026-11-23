@@ -1642,7 +1642,7 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
              * LIVE unit of the expected Act present, any list order. */
             int correct=n==DM_DUALMERC_SLOTS &&
                 dm_dualmerc_trial_replacement_complete(
-                    &after,target_id,peer_id,p->candidate_id,
+                    &after,ag,target_id,peer_id,p->candidate_id,
                     p->peer_act,p->peer_dead,live.offered_act);
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
@@ -1879,7 +1879,7 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
                     atomic_load(&g_dm_trial_hire_new) ||
                 !both || n != DM_DUALMERC_SLOTS ||
                 !dm_dualmerc_trial_add_complete(
-                    &after,g_dm_dualmerc_add.original_id,
+                    &after,gear,g_dm_dualmerc_add.original_id,
                     g_dm_dualmerc_add.original_act,
                     g_dm_dualmerc_add.original_dead,
                     g_dm_dualmerc_add.candidate_id,
@@ -2665,7 +2665,7 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
         if (intent.keep_seen) {
             if (!intent.link_verified || count != DM_DUALMERC_SLOTS ||
                 !dm_dualmerc_trial_add_complete(
-                    &after,intent.original_id,intent.original_act,
+                    &after,gear,intent.original_id,intent.original_act,
                     intent.original_dead,intent.candidate_id,
                     intent.candidate_act))
                 die("DM_DUAL_MERC_TRIAL：跨幕新增未完成精确双佣兵绑定，停止实验避免覆盖旧佣兵");
@@ -2688,7 +2688,7 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
         int correct=count==DM_DUALMERC_SLOTS &&
                     g_dm_dualmerc_pending.native_override_seen &&
                     dm_dualmerc_trial_replacement_complete(
-                        &after,g_dm_dualmerc_pending.target_id,
+                        &after,gear,g_dm_dualmerc_pending.target_id,
                         g_dm_dualmerc_pending.peer_id,
                         g_dm_dualmerc_pending.candidate_id,
                         g_dm_dualmerc_pending.peer_act,

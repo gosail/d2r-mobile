@@ -191,6 +191,60 @@ static inline int dm_dualmerc_state_apply_verified(
     return 1;
 }
 
+/* Atomically update BOTH independently-owned item inventories after an
+ * engine-confirmed equipment transaction. Callers must first read native
+ * authoritative per-merc item containers and serialize the real saved item
+ * bytes; this routine cannot prove that a reported game operation happened.
+ *
+ * Taking both complete slot snapshots avoids the intermediate "item in
+ * both mercenaries" state during a same-transaction equipment transfer.
+ * Identity/progression/Act are immutable here. No change (including to
+ * generation or vanilla .d2s binding) occurs on any validation failure.
+ * On success the binding is made provisional: save both native and sidecar
+ * together, and rebind only AFTER byte-verifying the native .d2s.
+ *
+ * This is NOT wired to a live 0x51/0x5b packet or the native inventory UI.
+ */
+static inline int dm_dualmerc_state_gears_apply_verified(
+    dm_dualmerc_saved_state *s,
+    const dm_dualmerc_saved_slot next[DM_DUALMERC_SLOTS],
+    int native_inventory_and_ownership_confirmed)
+{
+    if (!s || !next || !native_inventory_and_ownership_confirmed ||
+        !dm_dualmerc_state_valid(s) || s->generation == UINT64_MAX)
+        return 0;
+    for (unsigned k=0; k<DM_DUALMERC_SLOTS; ++k) {
+        const dm_dualmerc_saved_slot *old=&s->slot[k], *new_slot=&next[k];
+        if (old->occupied != new_slot->occupied ||
+            old->act != new_slot->act ||
+            old->difficulty != new_slot->difficulty ||
+            old->dead != new_slot->dead ||
+            old->hireling_row != new_slot->hireling_row ||
+            old->monster_class != new_slot->monster_class ||
+            old->name_id != new_slot->name_id ||
+            old->level != new_slot->level ||
+            old->experience != new_slot->experience ||
+            old->skill_profile != new_slot->skill_profile ||
+            new_slot->gear_count > DM_DUALMERC_GEAR_MAX)
+            return 0;
+    }
+    /* Snapshot the complete proposed state before modifying the caller.
+     * This also protects against next pointing directly at s->slot[0]. */
+    dm_dualmerc_saved_state proposed=*s;
+    for (unsigned k=0; k<DM_DUALMERC_SLOTS; ++k) {
+        proposed.slot[k].gear_count=next[k].gear_count;
+        memcpy(proposed.slot[k].gear,next[k].gear,
+               sizeof proposed.slot[k].gear);
+    }
+    proposed.native_seed=0;
+    proposed.native_d2s_checksum=0;
+    if (!dm_dualmerc_state_valid(&proposed))
+        return 0;
+    ++proposed.generation;
+    *s=proposed;
+    return 1;
+}
+
 /* Canonical format: magic SWM2, v3, two slots, generation, total size,
  * 32-byte header including native-slot index, native vanilla .d2s
  * checksum and merc seed, then one 32-byte record per slot and up to

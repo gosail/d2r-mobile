@@ -1415,9 +1415,11 @@ static int dm_dualmerc_replay_callback_stable(uint64_t fn) {
 }
 static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
     if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
-        !regs[0]) return 0;
-    /* Inspect the opcode before the length guard. A truncated 0x36 request
-     * must not bypass this trial preflight and reach the native handler. */
+        !regs[0] || !regs[1] || regs[0] > UINT64_MAX-5u) return 0;
+    /* A zero-length native packet has no opcode: never access buffer+4.
+     * For positive lengths, inspect the opcode before the full-size guard,
+     * so 0x36 truncated to 1..16 bytes is consumed rather than dispatched.
+     * The fixed four-byte transport prefix is not part of regs[1]. */
     uint8_t opcode=0;
     if (!tk_rd(regs[0]+4, &opcode, 1) || opcode != 0x36) return 0;
     if (g_dm_dualmerc_pending.active) {

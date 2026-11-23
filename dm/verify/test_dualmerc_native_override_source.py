@@ -49,6 +49,28 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         )
 
 
+    def test_candidate_unit_id_is_unique_before_unlink(self):
+        code = self.selected
+        self.assertIn("tk_rd(regs[19] + 8, &candidate_id, 4)", code)
+        self.assertIn("candidate_id,candidate_cls,&selected_slot)", code)
+        self.assertLess(
+            code.index("tk_rd(regs[19] + 8, &candidate_id, 4)"),
+            code.index("regs[0] = target;")
+        )
+
+    def test_both_native_replacement_paths_preserve_peer_state(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertEqual(
+            source.count("dm_dualmerc_trial_replacement_complete("), 2
+        )
+        pending = source.split("static void dm_dualmerc_pending_tick(", 1)[1].split(
+            "static void dm_dualmerc_native_lookup(", 1)[0]
+        self.assertIn("p->peer_act=roster.slot[1-target].act;", pending)
+        self.assertIn("p->peer_dead=roster.slot[1-target].dead;", pending)
+        self.assertIn("p->peer_dead,live.offered_act", pending)
+        self.assertIn("g_dm_dualmerc_pending.peer_act,", source)
+        self.assertIn("g_dm_dualmerc_pending.peer_dead,", source)
+
     def test_dead_mercanary_fails_before_native_replacement(self):
         source = SOURCE.read_text(encoding="utf-8")
         hire = source.split(

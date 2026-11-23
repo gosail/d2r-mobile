@@ -29,6 +29,34 @@ int main(void) {
     s->slot[1].level=10;
     assert(dm_dualmerc_restore_plan(s,&a,&chosen)==DM_DUALMERC_RESTORE_SECOND);
     assert(chosen==1);
+    /* The original mercenary MUST already have been loaded by vanilla.
+     * Two live units or an unexpected Act/death state must never cause
+     * the sidecar loader to duplicate a second native mercenary. */
+    dm_dualmerc_roster live={0};
+    live.slot[0]=(dm_dualmerc_slot){.occupied=1,.act=1,
+        .difficulty=DM_DUALMERC_DIFFICULTY_UNKNOWN,
+        .runtime_unit_id=77,.dead=0};
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
+           ==DM_DUALMERC_RESTORE_SECOND && chosen==1);
+    live.slot[1]=(dm_dualmerc_slot){.occupied=1,.act=2,
+        .runtime_unit_id=88};
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
+           ==DM_DUALMERC_RESTORE_REJECT);
+    live.slot[1]=(dm_dualmerc_slot){0};
+    live.slot[0].act=3;
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
+           ==DM_DUALMERC_RESTORE_REJECT);
+    live.slot[0].act=1;
+    live.slot[0].dead=1;
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
+           ==DM_DUALMERC_RESTORE_REJECT);
+    live.slot[0].dead=0;
+    live.slot[0].runtime_unit_id=UINT32_MAX;
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
+           ==DM_DUALMERC_RESTORE_REJECT);
+    live.slot[0].runtime_unit_id=77;
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,NULL)
+           ==DM_DUALMERC_RESTORE_REJECT);
     chosen=99;
     s->slot[0].gear_count=1;
     s->slot[0].gear[0].size=3;

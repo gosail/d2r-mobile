@@ -86,9 +86,26 @@ static inline int dm_dualmerc_roster_valid(const dm_dualmerc_roster *r) {
         const dm_dualmerc_slot *s = &r->slot[i];
         if (!s->occupied) continue;
         if (!dm_dualmerc_valid_act(s->act) ||
-            s->difficulty > DM_DUALMERC_DIFFICULTY_UNKNOWN) return 0;
+            s->difficulty > DM_DUALMERC_DIFFICULTY_UNKNOWN ||
+            s->dead > 1) return 0;
         for (unsigned j = 0; j < i; ++j)
             if (r->slot[j].occupied && r->slot[j].act == s->act) return 0;
+    }
+    return 1;
+}
+
+/* Persisted SWM2 rosters deliberately have no runtime IDs. Call this
+ * stricter helper ONLY for an actual live server pet list, before granting
+ * any native hire/gear mutation or claiming two distinct native units. */
+static inline int dm_dualmerc_live_ids_valid(const dm_dualmerc_roster *r) {
+    if (!dm_dualmerc_roster_valid(r)) return 0;
+    for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i) {
+        if (!r->slot[i].occupied) continue;
+        if (r->slot[i].runtime_unit_id == UINT32_MAX) return 0;
+        for (unsigned j=0; j<i; ++j)
+            if (r->slot[j].occupied &&
+                r->slot[j].runtime_unit_id == r->slot[i].runtime_unit_id)
+                return 0;
     }
     return 1;
 }

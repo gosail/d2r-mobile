@@ -11,6 +11,18 @@ static void selected_native_replacement(void) {
     dm_merc_trace_gear gear[DM_DUALMERC_SLOTS]={
         {0,0,DM_MERC_GEAR_OK}, {0,0,DM_MERC_GEAR_OK}
     };
+    dm_merc_trace_gear candidate={0};
+    assert(dm_dualmerc_trial_candidate_empty(&candidate));
+    candidate.status=DM_MERC_GEAR_OK;
+    assert(dm_dualmerc_trial_candidate_empty(&candidate));
+    candidate.count=1;
+    assert(!dm_dualmerc_trial_candidate_empty(&candidate));
+    candidate.count=0;
+    candidate.status=DM_MERC_GEAR_INVALID;
+    assert(!dm_dualmerc_trial_candidate_empty(&candidate));
+    candidate.status=DM_MERC_GEAR_TRUNCATED;
+    assert(!dm_dualmerc_trial_candidate_empty(&candidate));
+    assert(!dm_dualmerc_trial_candidate_empty(NULL));
     unsigned chosen=99;
     r.slot[0]=(dm_dualmerc_slot){.occupied=1,.act=1,
         .runtime_unit_id=101,.dead=0};

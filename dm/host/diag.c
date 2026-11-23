@@ -1119,6 +1119,28 @@ static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
     return DM_DUALMERC_SLOTS + 1;
 }
 
+/* Cheap read-only exact-ID observer. Unlike dm_dualmerc_runtime_roster it
+ * never traverses both inventories, so it is suitable for recurring client
+ * identity checks in the 25Hz simulation tick. All writes/hires continue to
+ * use the complete authoritative roster and gear snapshot. */
+static int dm_dualmerc_trial_pet_pair(uint64_t player,
+                                      uint32_t *first_id,
+                                      uint32_t *second_id)
+{
+    if (!first_id || !second_id) return 0;
+    uint64_t first=0,next=0;
+    if (dm_dualmerc_trial_pet_nodes(player,&first) != DM_DUALMERC_SLOTS ||
+        !first) return 0;
+    uint32_t a=UINT32_MAX,b=UINT32_MAX;
+    if (!tk_rd(first+4,&a,4) ||
+        !tk_rd(first+0x18,&next,8) || !next ||
+        !tk_rd(next+4,&b,4) ||
+        a==UINT32_MAX || b==UINT32_MAX || a==b) return 0;
+    *first_id=a;
+    *second_id=b;
+    return 1;
+}
+
 /* The NPC picker is an optional iOS-only frontend; Mac/Android do not
  * silently replay queued packets without an implemented interface. */
 extern void dm_dualmerc_ui_request(uint64_t, unsigned, unsigned, unsigned) __attribute__((weak));
@@ -1834,17 +1856,12 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
         G == atomic_load(&g_dm_trial_hire_G) &&
         player == atomic_load(&g_dm_trial_hire_player)) {
         /* Match the exact old/new unit IDs, not just a count. */
-        uint64_t first = 0, second = 0, next = 0;
-        int count = dm_dualmerc_trial_pet_nodes(player, &first);
         uint32_t id0 = UINT32_MAX, id1 = UINT32_MAX;
-        if (first && tk_rd(first + 4, &id0, 4) &&
-            tk_rd(first + 0x18, &next, 8) && next) {
-            second = next;
-            tk_rd(second + 4, &id1, 4);
-        }
-        int both = dm_dualmerc_trial_both_present(
-            count, id0, id1, atomic_load(&g_dm_trial_hire_old),
-            atomic_load(&g_dm_trial_hire_new));
+        int both = dm_dualmerc_trial_pet_pair(player,&id0,&id1) &&
+            dm_dualmerc_trial_both_present(
+                DM_DUALMERC_SLOTS,id0,id1,
+                atomic_load(&g_dm_trial_hire_old),
+                atomic_load(&g_dm_trial_hire_new));
         /* A count+ID match alone can still contain the wrong Act or
          * a dead candidate. Match the authorized preflight identity and
          * exact native UNIT classes immediately after the link returns.
@@ -1917,13 +1934,10 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
      * exist now. A failed read revokes the prior confirmation. */
     if (player && atomic_load(&g_dm_trial_verified_two_G) == G &&
         !atomic_load(&g_dm_trial_hire_G)) {
-        dm_dualmerc_roster current;
-        dm_merc_trace_gear current_gear[DM_DUALMERC_SLOTS];
-        int n=dm_dualmerc_runtime_roster(G,player,&current,current_gear);
-        if (n != DM_DUALMERC_SLOTS ||
+        uint32_t id0=UINT32_MAX,id1=UINT32_MAX;
+        if (!dm_dualmerc_trial_pet_pair(player,&id0,&id1) ||
             !dm_dualmerc_trial_both_present(
-                (unsigned)n,current.slot[0].runtime_unit_id,
-                current.slot[1].runtime_unit_id,
+                DM_DUALMERC_SLOTS,id0,id1,
                 atomic_load(&g_dm_trial_hire_old),
                 atomic_load(&g_dm_trial_hire_new))) {
             atomic_store(&g_dm_trial_verified_two_G,0);

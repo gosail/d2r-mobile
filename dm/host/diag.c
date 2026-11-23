@@ -1607,6 +1607,7 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
         int count = dm_dualmerc_runtime_roster(G, player, &roster, gear);
         uint32_t candidate_cls = 0, candidate_type = UINT32_MAX;
+        uint32_t candidate_id = UINT32_MAX;
         unsigned selected_slot = DM_DUALMERC_SLOTS;
         /* The native pet list can be reordered. Verify both exact IDs and
          * BOTH gear snapshots immediately before unlink, not only the
@@ -1615,10 +1616,11 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
             g_dm_dualmerc_pending.target_id == g_dm_dualmerc_selected_id &&
             tk_rd(regs[19], &candidate_type, 4) && candidate_type == 1 &&
             tk_rd(regs[19] + 4, &candidate_cls, 4) &&
+            tk_rd(regs[19] + 8, &candidate_id, 4) &&
             dm_dualmerc_trial_selected_target(
                 &roster,gear,g_dm_dualmerc_selected_id,
                 g_dm_dualmerc_pending.peer_id,g_dm_dualmerc_selected_act,
-                candidate_cls,&selected_slot)) {
+                candidate_id,candidate_cls,&selected_slot)) {
             uint64_t target = dm_dualmerc_server_monster(
                 G,g_dm_dualmerc_selected_id);
             if (target) {

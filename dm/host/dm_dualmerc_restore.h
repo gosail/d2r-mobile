@@ -34,4 +34,38 @@ static inline dm_dualmerc_restore_result dm_dualmerc_restore_plan(
     *other_slot=secondary;
     return DM_DUALMERC_RESTORE_SECOND;
 }
+/* After vanilla has loaded its own ONE hireling, cross-check the live
+ * native pet roster before even preparing to create the sidecar-only second
+ * unit. Matching the D2S bytes is NOT enough: the current game may already
+ * contain a second mercenary, may have re-used a different player's unit,
+ * or the native slot may have changed Act / alive status.
+ *
+ * A dead native hireling still consumes its Act slot. A missing dead-unit
+ * pet node is NOT proof that its slot is vacant; fail closed instead.
+ * This helper does not spawn anything, read item bits or alter game state.
+ */
+static inline dm_dualmerc_restore_result dm_dualmerc_restore_plan_for_live(
+    const dm_dualmerc_saved_state *state,
+    const dm_dualmerc_native_anchor *native,
+    const dm_dualmerc_roster *live,
+    unsigned *other_slot)
+{
+    if (!state || !native || !live || !other_slot ||
+        !dm_dualmerc_roster_valid(live) ||
+        !dm_dualmerc_state_valid(state) ||
+        state->native_slot >= DM_DUALMERC_SLOTS)
+        return DM_DUALMERC_RESTORE_REJECT;
+    unsigned seen=0;
+    const dm_dualmerc_saved_slot *owned=&state->slot[state->native_slot];
+    for (unsigned i=0;i<DM_DUALMERC_SLOTS;i++) {
+        if (!live->slot[i].occupied) continue;
+        ++seen;
+        if (live->slot[i].runtime_unit_id == UINT32_MAX ||
+            live->slot[i].act != owned->act ||
+            live->slot[i].dead != owned->dead)
+            return DM_DUALMERC_RESTORE_REJECT;
+    }
+    if (seen != 1) return DM_DUALMERC_RESTORE_REJECT;
+    return dm_dualmerc_restore_plan(state,native,other_slot);
+}
 #endif

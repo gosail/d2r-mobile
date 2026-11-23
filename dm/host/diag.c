@@ -1774,8 +1774,10 @@ static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
         .new_act = dm_dualmerc_act_for_class(new_cls),
         .old_gear_status = old.gear.status,
         .old_gear_count = old.gear.count,
+        .old_gear_fingerprint = old.gear.fingerprint,
         .new_gear_status = fresh.status,
         .new_gear_count = fresh.count,
+        .new_gear_fingerprint = fresh.fingerprint,
         .old_alive = dm_dualmerc_trial_mode_live(old.mode),
         .native_result_matches_roster =
             dm_dualmerc_trial_pet_id_matches(old_id, listed_id),

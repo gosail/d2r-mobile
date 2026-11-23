@@ -1,0 +1,74 @@
+name: Offline dual-merc safe policy and persistence tests
+on:
+  push:
+    branches:
+      - "feat/offline-dual-merc-probe-*"
+  pull_request:
+    paths:
+      - "dm/host/diag.c"
+      - "dm/host/dm_dualmerc_policy.h"
+      - "dm/host/dm_dualmerc_state.h"
+      - "dm/host/dm_dualmerc_trial.h"
+      - "dm/host/dm_dualmerc_hire_txn.h"
+      - "dm/host/dm_dualmerc_hire_rows.h"
+      - "dm/host/dm_dualmerc_ui_channel.h"
+      - "dm/host/dm_dualmerc_packet.h"
+      - "dm/host/dm_dualmerc_disk.h"
+      - "dm/host/dm_dualmerc_d2s.h"
+      - "dm/host/dm_dualmerc_restore.h"
+      - "dm/host/dm_dualmerc_equip.h"
+      - "dm/host/dm_merc_trace.h"
+      - "dm/host/tests/test_dualmerc_policy.c"
+      - "dm/host/tests/test_dualmerc_state.c"
+      - "dm/host/tests/test_dualmerc_trial.c"
+      - "dm/host/tests/test_dualmerc_hire_txn.c"
+      - "dm/host/tests/test_dualmerc_hire_rows.c"
+      - "dm/host/tests/test_dualmerc_ui_channel.c"
+      - "dm/host/tests/test_dualmerc_packet.c"
+      - "dm/host/tests/test_dualmerc_disk.c"
+      - "dm/host/tests/test_dualmerc_d2s.c"
+      - "dm/host/tests/test_dualmerc_restore.c"
+      - "dm/host/tests/test_dualmerc_equip.c"
+      - "dm/host/tests/test_merc_trace.c"
+      - "dm/tools/dualmerc_native_cuts.py"
+      - "dm/ios/tools/retrofit_dualmerc_guest.py"
+      - "dm/ios/tests/test_retrofit_dualmerc_guest.py"
+      - "dm/ios/tests/test_dualmerc_chooser_source.py"
+      - "dm/ios/Sources/front_ios.m"
+      - "dm/verify/hire_handler.py"
+      - "dm/verify/hire_handler_guest.py"
+      - "dm/verify/hire_chain_contract.py"
+      - "dm/verify/merc_probe_report.py"
+      - "dm/verify/test_merc_probe_report.py"
+      - "dm/verify/test_hire_handler.py"
+      - "dm/verify/test_hire_handler_guest.py"
+      - "dm/verify/test_hire_chain_contract.py"
+      - "dm/verify/test_dualmerc_native_cuts.py"
+      - "dm/verify/test_dualmerc_native_override_source.py"
+      - ".github/workflows/offline-dualmerc-tests.yml"
+jobs:
+  policy-and-readonly-analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify two-slot roster, item isolation and persistence
+        run: |
+          set -eu
+          for name in test_dualmerc_policy test_dualmerc_state test_dualmerc_trial test_dualmerc_hire_txn test_dualmerc_hire_rows test_dualmerc_ui_channel test_dualmerc_packet test_dualmerc_d2s test_dualmerc_restore test_dualmerc_equip test_dualmerc_disk test_merc_trace; do
+            cc -std=c11 -Wall -Wextra -Werror -pedantic -pthread \
+              "dm/host/tests/$name.c" -o "/tmp/$name"
+            "/tmp/$name"
+          done
+      - name: Verify game-native call-sites and unsigned Guest rewrite
+        run: |
+          set -eu
+          python3 -m unittest discover -s dm/verify -p 'test_hire_handler.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_hire_handler_guest.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_merc_probe_report.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_hire_chain_contract.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_dualmerc_native_cuts.py' -v
+          python3 -m unittest discover -s dm/verify -p 'test_dualmerc_native_override_source.py' -v
+          python3 -m unittest discover -s dm/ios/tests -p 'test_retrofit_dualmerc_guest.py' -v
+          python3 -m unittest discover -s dm/ios/tests -p 'test_dualmerc_chooser_source.py' -v

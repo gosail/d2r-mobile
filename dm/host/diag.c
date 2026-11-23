@@ -8,8 +8,17 @@
 #include "dm_hud_exp.h"
 #include "dm_elysium.h"
 #include "dm_bossrush.h"
+#include "dm_dualmerc_policy.h"
+#include "dm_dualmerc_trial.h"
+#include "dm_dualmerc_hire_txn.h"
+#include "dm_dualmerc_hire_rows.h"
+#include "dm_dualmerc_packet.h"
+#include "dm_dualmerc_equip.h"
+#include "hle.h"
+#include "dm_merc_trace.h"
 #include <TargetConditionals.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <dirent.h>
 #include <stdatomic.h>
 #include "dm_i18n.h"
@@ -699,6 +708,7 @@ static int state_read_item(uint64_t u, state_item *it, size_t ord, uint64_t *nex
     return 1;
 }
 enum { CLS_TBK = 533, CLS_TSC = 544 };   // 回城书 / 回城卷轴（原版 misc.txt 行序 + 武器 306 + 护甲 217，跳过 Expansion 分隔行；与手机存档 tsc=544 对上） | Tome of Town Portal / Scroll of Town Portal (the original game's misc.txt row order + weapons 306 + armor 217, skipping the Expansion separator row; matches tsc=544 in the phone save)
+static uint64_t g_lastG;   // 服务端本局地址：供事务前置校验的共享上下文
 static uint64_t g_player_unit;   // 最近一拍找到的受控玩家单位（0 = 没读到） | Controlled player unit found on the most recent tick (0 = not read)
 // 测试开关 DM_TEST_WORLD_SEEK（造现场用，客户端一侧在 dm_world.c w_test_seek_step）的服务端一半：探路不走路，用游戏服务端自己的传送 main+0x7cc530(游戏, 单位, 房间, x, y, 0, 0)
 // ——传送技能、传送阵、任务挪人都调它（D2MOO sub_6FCBDFE0）：房间给 0 时它在单位当前房间与相邻房间里按坐标找，在落点旁找空位，给客户端发重定位包。
@@ -793,6 +803,1158 @@ static void cube_diag_tick(uint64_t G, uint64_t player) {   // 合成请求后 2
 // All three "who is the controlled player" sites go by it: the per-tick feature entry hud_tick, the state dump state_dump, the position check poschk. A corpse left in the player table after the character dies is also a player-type unit with "mode ≠ 0 and coordinates",
 // so counting units present reports "living player + own corpse" as non-unique. That is a stale measuring criterion, not two players on the field
 static uint32_t local_player_id(void) { uint32_t slot = 8, lid = 0xffffffffu; module_t *mm = main_mod(); if (mm && tk_rd((uint64_t)mm->base + 0x2d20e4c, &slot, 4) && slot < 8) tk_rd((uint64_t)mm->base + 0x2d60380 + 4 * slot, &lid, 4); return lid; }
+// ---- DM_DUAL_MERC_PROBE=1: passive, offline-only dual-hireling feasibility trace ----
+// This observes the original pet type 7 list on the server and the owner's
+// client pet list. It MUST NOT create units, reassign owner IDs, change hire
+// logic, mutate saves, or interfere with regular mercenary management.
+// It establishes whether the current engine retains one or two tracked units
+// across a player-initiated hire, travel, death, and save/exit/reload.
+/* The next 100 server ticks after a candidate hire request are sampled
+ * every tick, catching short-lived simultaneous mercenaries that the usual
+ * 25-tick observation interval might otherwise miss. Read only. */
+static _Atomic uint64_t g_dm_merc_probe_event_G;
+static _Atomic uint32_t g_dm_merc_probe_event_tick;
+typedef struct {
+    uint32_t id, cls, mode, flags;
+    dm_merc_trace_gear gear; /* server only, client inventory is not authoritative */
+} dm_merc_probe_unit;
+typedef struct {
+    uint32_t server_n, client_n;
+    dm_merc_probe_unit server[8], client[8];
+} dm_merc_probe_snapshot;
+
+static void dm_merc_probe_sort(dm_merc_probe_unit *a, unsigned n) {
+    for (unsigned i = 1; i < n; i++) {
+        dm_merc_probe_unit v = a[i]; unsigned j = i;
+        while (j && a[j-1].id > v.id) { a[j] = a[j-1]; j--; }
+        a[j] = v;
+    }
+}
+
+/* The game's original merc equipment code (dm_rift.c) selects inventory
+ * from +0x98 if unit+0xa0 metadata at +8 is set, otherwise from +0x90.
+ * Reuse this exact selector instead of assuming a player's +0x90 layout.
+ * The inventory signature 0x01020304 and entire item chain must still
+ * validate before concluding that the old merc is unequipped. */
+static void dm_merc_probe_inventory(uint64_t unit, dm_merc_trace_gear *gear) {
+    uint64_t inv = 0, it = 0, alt_meta = 0;
+    uint32_t signature = 0, use_alt = 0;
+    /* Match the existing, observed inventory selector in dm_rift.c:
+     * unit+0xa0 identifies the alternate inventory arrangement, whose
+     * active inventory is unit+0x98 rather than unit+0x90.
+     * A damaged metadata pointer is NOT treated as an empty mercenary.
+     */
+    if (!unit || !tk_rd(unit + 0xa0, &alt_meta, sizeof alt_meta)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    if (alt_meta && !tk_rd(alt_meta + 8, &use_alt, sizeof use_alt)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    uint64_t inv_offset = (alt_meta && use_alt) ? 0x98 : 0x90;
+    if (!tk_rd(unit + inv_offset, &inv, sizeof inv)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    if (!inv) {
+        gear->status = DM_MERC_GEAR_ABSENT;
+        return;
+    }
+    if (!tk_rd(inv, &signature, sizeof signature) || signature != 0x01020304 ||
+        !tk_rd(inv + 0x10, &it, sizeof it)) {
+        gear->status = DM_MERC_GEAR_INVALID;
+        return;
+    }
+    gear->status = DM_MERC_GEAR_OK;
+    for (unsigned n = 0; it && n < 64; ++n) {
+        uint64_t data = 0, next = 0;
+        uint32_t item_id = 0;
+        if (!tk_rd(it + 8, &item_id, sizeof item_id) ||
+            !tk_rd(it + 0x10, &data, sizeof data) || !data ||
+            !tk_rd(data + 0xb0, &next, sizeof next)) {
+            gear->status = DM_MERC_GEAR_INVALID;
+            return;
+        }
+        dm_merc_trace_add(gear, item_id);
+        it = next;
+    }
+    if (it) gear->status = DM_MERC_GEAR_TRUNCATED;
+}
+
+static dm_merc_probe_unit dm_merc_probe_unit_read(uint64_t G, uint32_t id, uint64_t client_base) {
+    dm_merc_probe_unit r = { .id = id, .mode = UINT32_MAX };
+    if (id == 0xffffffffu) return r;
+    uint64_t h = client_base
+        ? client_base + 0x2d603a0 + 0x400 + (uint64_t)(id & 0x7f) * 8
+        : G + 0x2630 + (uint64_t)(id & 0x7f) * 8;
+    uint64_t u = 0;
+    if (!tk_rd(h, &u, sizeof u)) return r;
+    for (int i = 0; u && i < 512; i++) {
+        uint32_t uid = 0;
+        if (!tk_rd(u + 8, &uid, 4)) break;
+        if (uid == id) {
+            tk_rd(u + 4, &r.cls, 4);
+            tk_rd(u + 0xc, &r.mode, 4);
+            if (!client_base) dm_merc_probe_inventory(u, &r.gear);
+            break;
+        }
+        if (!tk_rd(u + 0x158, &u, 8)) break;
+    }
+    return r;
+}
+
+/* Resolve runtime C2S dispatch table pointers after the engine's own RELA
+ * relocation. The original Switch 3.3 table RVA was verified by the upstream
+ * command packet replay; opcode meanings are only historic D2 candidates.
+ * This strictly reads signed guest code, and never changes a register/code.
+ * A 128-byte direct-BL scan may cross function boundaries: treat every
+ * printed target as a candidate, not a proven native replacement hook. */
+static void dm_dual_merc_native_handler_probe(void) {
+    static _Atomic int shown;
+    if (atomic_load(&shown)) return;
+    module_t *m = main_mod();
+    if (!m || !m->base || !m->text_end) return;
+    if (atomic_exchange(&shown, 1)) return;
+    const uint64_t base = (uint64_t)(uintptr_t)m->base;
+    const uint64_t table = 0x20a4190;
+    const unsigned opcodes[] = {0x36, 0x38, 0x62};
+    if (table + 0x67 * 8 > m->size) {
+        LOG("DM_DUAL_MERC_PROBE：原生命令表 0x%llx 不在已装载 main 的长度内，跳过",
+            (unsigned long long)table);
+        return;
+    }
+    for (unsigned k = 0; k < sizeof opcodes / sizeof opcodes[0]; k++) {
+        unsigned opcode = opcodes[k];
+        uint64_t address = 0;
+        if (!tk_rd(base + table + (uint64_t)opcode * 8, &address, 8)) {
+            LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 的处理函数表项不可读", opcode);
+            continue;
+        }
+        if (address < base || address - base >= m->text_end ||
+            ((address - base) & 3)) {
+            LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 表项不是有效正文函数指针（数值经校验不公布）", opcode);
+            continue;
+        }
+        uint64_t rva = address - base;
+        LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 运行时处理入口 main+0x%llx（语义待核实）",
+            opcode, (unsigned long long)rva);
+        uint64_t scan = m->text_end - rva;
+        if (scan > 128) scan = 128;
+        unsigned calls = 0;
+        for (uint64_t d = 0; d + 4 <= scan; d += 4) {
+            uint32_t insn = 0; uint64_t target = 0;
+            if (!tk_rd(address + d, &insn, 4)) break;
+            if (dm_dualmerc_bl_target(insn, rva + d, m->text_end, &target) && calls++ < 16)
+                LOG("DM_DUAL_MERC_PROBE：候选包 0x%02x 直调 main+0x%llx → main+0x%llx（首128字节内，未证明属于同函数）",
+                    opcode, (unsigned long long)(rva + d), (unsigned long long)target);
+        }
+    }
+}
+
+static void dm_dual_merc_probe_tick(uint64_t G, uint64_t player, int force) {
+    static int enabled = -1, have_last;
+    static uint64_t last_game;
+    static uint32_t last_owner, last_print;
+    static dm_merc_probe_snapshot last;
+    if (enabled < 0) {
+        const char *e = getenv("DM_DUAL_MERC_PROBE");
+        enabled = e && !strcmp(e, "1");
+        if (enabled) LOG("DM_DUAL_MERC_PROBE：只读双佣兵观测已启用；不创建佣兵、不写角色存档");
+    }
+    if (!enabled || !G) return;
+    dm_dual_merc_native_handler_probe();
+    if (!player) { have_last = 0; return; }
+    uint32_t tick = 0, owner = 0xffffffffu;
+    if (!tk_rd(G + 0x170, &tick, 4)) return;
+    uint64_t armed_G = atomic_load(&g_dm_merc_probe_event_G);
+    uint32_t armed_tick = atomic_load(&g_dm_merc_probe_event_tick);
+    int watch = armed_G == G && (uint32_t)(tick - armed_tick) <= 100;
+    if (!force && tick % 25 && !watch) return;
+    if (!tk_rd(player + 8, &owner, 4)) return;
+    if (last_game != G || (have_last && tick < last_print) ||
+        (have_last && owner != last_owner)) {
+        last_game = G; have_last = 0;
+    }
+    last_owner = owner;
+
+    dm_merc_probe_snapshot now = {0};
+    // Server: [[player+0x10]+0x98] is the pet-list header, the first
+    // pointer is the array; type 7 is an array entry at 7 * 0x20.
+    uint64_t pd = 0, lst = 0, arr = 0, nd = 0;
+    if (tk_rd(player + 0x10, &pd, 8) && pd &&
+        tk_rd(pd + 0x98, &lst, 8) && lst &&
+        tk_rd(lst, &arr, 8) && arr &&
+        tk_rd(arr + 7 * 0x20, &nd, 8)) {
+        for (unsigned i = 0; nd && i < 64; i++) {
+            uint32_t id = 0;
+            if (!tk_rd(nd + 4, &id, 4)) break;
+            if (id != 0xffffffffu) {
+                if (now.server_n < 8)
+                    now.server[now.server_n] = dm_merc_probe_unit_read(G, id, 0);
+                now.server_n++;
+            }
+            if (!tk_rd(nd + 0x18, &nd, 8)) break;
+        }
+    }
+
+    // Client: type +4 == 7, owner +0xc == local character unit ID,
+    // node +0x20 is an observed state flag, next +0x30. Do not assume
+    // any one record means a *living* mercenary until its unit mode
+    // agrees with the server-side monster unit.
+    module_t *main = main_mod();
+    uint64_t ndc = 0, base = main ? (uint64_t)main->base : 0;
+    if (base) tk_rd(base + 0x2d33528, &ndc, 8);
+    for (unsigned i = 0; ndc && i < 512; i++) {
+        uint32_t type = 0, id = 0, owner_id = 0, flags = 0;
+        if (!tk_rd(ndc + 4, &type, 4) ||
+            !tk_rd(ndc + 8, &id, 4) ||
+            !tk_rd(ndc + 0xc, &owner_id, 4)) break;
+        tk_rd(ndc + 0x20, &flags, 4);
+        if (type == 7 && owner_id == owner && id != 0xffffffffu) {
+            if (now.client_n < 8) {
+                dm_merc_probe_unit u = dm_merc_probe_unit_read(G, id, base);
+                u.flags = flags;
+                now.client[now.client_n] = u;
+            }
+            now.client_n++;
+        }
+        if (!tk_rd(ndc + 0x30, &ndc, 8)) break;
+    }
+    unsigned ns = now.server_n < 8 ? now.server_n : 8;
+    unsigned nc = now.client_n < 8 ? now.client_n : 8;
+    dm_merc_probe_sort(now.server, ns);
+    dm_merc_probe_sort(now.client, nc);
+
+    if (force || !have_last || memcmp(&now, &last, sizeof now) || tick - last_print >= 250) {
+        char srv[768] = "", cli[384] = "", part[160];
+        for (unsigned i = 0; i < ns; i++) {
+            snprintf(part, sizeof part, "%s%u:%u:%u:a%u:inv%u/%u:h%08x", i ? "," : "",
+                     now.server[i].id, now.server[i].cls, now.server[i].mode,
+                     dm_dualmerc_act_for_class(now.server[i].cls),
+                     now.server[i].gear.count, now.server[i].gear.status,
+                     now.server[i].gear.fingerprint);
+            strlcat(srv, part, sizeof srv);
+        }
+        for (unsigned i = 0; i < nc; i++) {
+            snprintf(part, sizeof part, "%s%u:%u:%u:f%u:a%u", i ? "," : "",
+                     now.client[i].id, now.client[i].cls, now.client[i].mode,
+                     now.client[i].flags, dm_dualmerc_act_for_class(now.client[i].cls));
+            strlcat(cli, part, sizeof cli);
+        }
+        LOG("DM_DUAL_MERC_PROBE：拍 %u 玩家 id %u 服务端宠物类型7=%u [%s] 客户端属主佣兵=%u [%s]%s",
+            tick, owner, now.server_n, srv, now.client_n, cli,
+            now.server_n > 8 || now.client_n > 8 ? "（仅显示前8个）" : "");
+        /* One-act-only validation includes the two Act V class variants.
+         * A dead entry remains a member until actually dismissed. */
+        if (now.server_n > DM_DUALMERC_SLOTS)
+            LOG("DM_DUAL_MERC_PROBE：异常，服务端佣兵数量 %u 超过上限 2", now.server_n);
+        for (unsigned i = 0; i < ns; i++) for (unsigned j = 0; j < i; j++) {
+            unsigned act = dm_dualmerc_act_for_class(now.server[i].cls);
+            if (act && act == dm_dualmerc_act_for_class(now.server[j].cls))
+                LOG("DM_DUAL_MERC_PROBE：异常，同幕 %u 佣兵 id %u 与 id %u 同时存在", act,
+                    now.server[j].id, now.server[i].id);
+        }
+        /* Losing a pet list entry is not proof that inventory items were lost;
+         * this line preserves the last verified inventory fingerprint so a
+         * human can correlate it with a safe throwaway-character test. */
+        if (have_last) {
+            unsigned old_n = last.server_n < 8 ? last.server_n : 8;
+            for (unsigned i = 0; i < old_n; ++i) {
+                int still_listed = 0;
+                for (unsigned j = 0; j < ns; ++j)
+                    if (last.server[i].id == now.server[j].id) still_listed = 1;
+                if (!still_listed)
+                    LOG("DM_DUAL_MERC_PROBE：拍 %u 服务端宠物表移除 id %u；先前装备快照 inv%u/%u:h%08x（不能据此判断装备已删除）",
+                        tick, last.server[i].id,
+                        last.server[i].gear.count, last.server[i].gear.status,
+                        last.server[i].gear.fingerprint);
+            }
+        }
+        last = now; have_last = 1; last_print = tick;
+    }
+}
+
+static _Atomic int g_dm_trial_full_notice;
+static _Atomic uint64_t g_dm_trial_hire_G, g_dm_trial_hire_player;
+static _Atomic uint64_t g_dm_trial_verified_two_G;
+static _Atomic int g_dm_trial_verified_client;
+
+static _Atomic uint32_t g_dm_trial_hire_old, g_dm_trial_hire_new;
+
+/* All fatal experimental native-hire failures poison the current HLE save
+ * transaction before aborting. The original committed character remains
+ * untouched when the workdir is not publishable. This does NOT reverse
+ * native gold/item changes already made in the current unsaved session. */
+static void dm_dualmerc_trial_abort(const char *reason) {
+    dm_fs_save_poison(EIO);
+    die("%s",reason);
+}
+
+/* This code is present ONLY in a deliberately marked offline experimental
+ * IPA carrying SVC #0x94. Ordinary builds never contain that native gate.
+ * Trial is on for that IPA so iPad users can test without launch arguments.
+ * DM_DUAL_MERC_KEEP_FIRST=0 disables it for debugging. This does not persist
+ * the second mercenary: use a throwaway, unequipped character only. */
+static int dm_dualmerc_trial_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *p = getenv("DM_DUAL_MERC_KEEP_FIRST");
+        enabled = gate_svc_present(SVC_HOST_DUALMERC_QUERY) &&
+                  (!p || strcmp(p, "0"));
+        if (enabled) LOG("DM_DUAL_MERC_TRIAL：仅测试空装备双佣兵；退出/重进不保留第二佣兵");
+    }
+    return enabled;
+}
+
+/* Verifies the exact owner's server-side type-7 list; -1 = unreadable. */
+static int dm_dualmerc_trial_pet_nodes(uint64_t player, uint64_t *first) {
+    uint64_t pd = 0, plist = 0, arr = 0, node = 0, next = 0;
+    if (first) *first = 0;
+    if (!player || !tk_rd(player + 0x10, &pd, 8) || !pd ||
+        !tk_rd(pd + 0x98, &plist, 8)) return -1;
+    /* Before the FIRST mercenary the native pet roster may not exist yet. */
+    if (!plist) return 0;
+    if (!tk_rd(plist, &arr, 8)) return -1;
+    if (!arr) return 0;
+    if (!tk_rd(arr + 7 * 0x20, &node, 8)) return -1;
+    if (first) *first = node;
+    for (int n = 0; n <= DM_DUALMERC_SLOTS; ++n) {
+        if (!node) return n;
+        uint32_t id = 0;
+        if (!tk_rd(node + 4, &id, 4) || id == UINT32_MAX ||
+            !tk_rd(node + 0x18, &next, 8) || next == node) return -1;
+        node = next;
+    }
+    return DM_DUALMERC_SLOTS + 1;
+}
+
+/* Cheap read-only exact-ID observer. Unlike dm_dualmerc_runtime_roster it
+ * never traverses both inventories, so it is suitable for recurring client
+ * identity checks in the 25Hz simulation tick. All writes/hires continue to
+ * use the complete authoritative roster and gear snapshot. */
+static int dm_dualmerc_trial_pet_pair(uint64_t player,
+                                      uint32_t *first_id,
+                                      uint32_t *second_id)
+{
+    if (!first_id || !second_id) return 0;
+    uint64_t first=0,next=0;
+    if (dm_dualmerc_trial_pet_nodes(player,&first) != DM_DUALMERC_SLOTS ||
+        !first) return 0;
+    uint32_t a=UINT32_MAX,b=UINT32_MAX;
+    if (!tk_rd(first+4,&a,4) ||
+        !tk_rd(first+0x18,&next,8) || !next ||
+        !tk_rd(next+4,&b,4) ||
+        a==UINT32_MAX || b==UINT32_MAX || a==b) return 0;
+    *first_id=a;
+    *second_id=b;
+    return 1;
+}
+
+/* The NPC picker is an optional iOS-only frontend; Mac/Android do not
+ * silently replay queued packets without an implemented interface. */
+extern void dm_dualmerc_ui_request(uint64_t, unsigned, unsigned, unsigned) __attribute__((weak));
+extern int dm_dualmerc_ui_poll(uint64_t, int *) __attribute__((weak));
+extern void dm_dualmerc_ui_cancel(uint64_t) __attribute__((weak));
+
+typedef struct {
+    uint64_t G, player, packet_flags, callback, nonce;
+    uint8_t packet[DM_DUALMERC_PACKET_BYTES];
+    dm_merc_txn lease;
+    uint32_t target_id, peer_id, candidate_id;
+    uint32_t peer_class, candidate_class;
+    unsigned expected_act, peer_act, peer_dead;
+    int active, native_override_seen;
+} dm_dualmerc_pending;
+static dm_dualmerc_pending g_dm_dualmerc_pending;
+static uint64_t g_dm_dualmerc_nonce_seq;
+static uint64_t g_dm_dualmerc_selected_G, g_dm_dualmerc_selected_player;
+static uint32_t g_dm_dualmerc_selected_id = UINT32_MAX;
+static unsigned g_dm_dualmerc_selected_act;
+
+/* One C2S packet lifetime only: a second cross-Act hire MUST keep the
+ * exact original mercenary or fail-stop before native unlink. The native
+ * Guest has no verified abort/rollback ABI; this is disposable-save-only.
+ * No pointer or runtime unit ID from here is persisted to a character. */
+typedef struct {
+    uint64_t G, player;
+    uint32_t original_id, candidate_id;
+    uint32_t original_class, candidate_class;
+    unsigned original_act, original_dead, candidate_act;
+    int active, keep_seen, link_verified;
+} dm_dualmerc_add_intent;
+static dm_dualmerc_add_intent g_dm_dualmerc_add;
+
+/* Verified pointer read of a live server monster UNIT by identity; never
+ * reuse the node pointer as a unit pointer. */
+static uint64_t dm_dualmerc_server_monster(uint64_t G, uint32_t id) {
+    uint64_t unit = 0;
+    if (!G || id == UINT32_MAX ||
+        !tk_rd(G + 0x2630 + (uint64_t)(id & 0x7f) * 8, &unit, 8)) return 0;
+    for (int k = 0; unit && k < 512; ++k) {
+        uint32_t actual = UINT32_MAX, type = UINT32_MAX;
+        if (!tk_rd(unit, &type, 4) ||
+            !tk_rd(unit + 8, &actual, 4)) return 0;
+        if (actual == id) return type == 1 ? unit : 0;
+        if (!tk_rd(unit + 0x158, &unit, 8)) return 0;
+    }
+    return 0;
+}
+
+/* Build actual two-slot state from the server's type-7 pet list. All pet
+ * unit IDs, classes and gear statuses are checked before authorizing gold.
+ * No difficulty assumption: a deceased Act II merc is still the Act II slot.
+ */
+static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
+                                      dm_dualmerc_roster *out,
+                                      dm_merc_trace_gear gear[DM_DUALMERC_SLOTS]) {
+    if (!out || !gear) return -1;
+    memset(out, 0, sizeof *out);
+    memset(gear, 0, sizeof(dm_merc_trace_gear) * DM_DUALMERC_SLOTS);
+    uint64_t node = 0;
+    int count = dm_dualmerc_trial_pet_nodes(player, &node);
+    if (count < 0 || count > DM_DUALMERC_SLOTS) return -1;
+    for (int i = 0; i < count; ++i) {
+        uint32_t id = UINT32_MAX, type = UINT32_MAX, cls = 0, mode = UINT32_MAX;
+        uint64_t unit = 0, next = 0;
+        if (!node || !tk_rd(node + 4, &id, 4) ||
+            !tk_rd(node + 0x18, &next, 8) ||
+            !(unit = dm_dualmerc_server_monster(G, id)) ||
+            !tk_rd(unit, &type, 4) || type != 1 ||
+            !tk_rd(unit + 4, &cls, 4) ||
+            !tk_rd(unit + 0xc, &mode, 4)) return -1;
+        unsigned act = dm_dualmerc_act_for_class(cls);
+        if (!act || mode == UINT32_MAX) return -1;
+        dm_dualmerc_slot *slot = &out->slot[i];
+        slot->occupied = 1;
+        slot->act = (uint8_t)act;
+        /* The live pet node does not expose a verified hire-origin
+         * difficulty. Never pretend it was Normal; the Act-only slot rule
+         * does not require guessing this value.  A future native Hireling
+         * identity decoder may replace UNKNOWN with an observed 0..2. */
+        slot->difficulty = DM_DUALMERC_DIFFICULTY_UNKNOWN;
+        slot->dead = !dm_dualmerc_trial_mode_live(mode);
+        slot->runtime_unit_id = id;
+        slot->monster_class = cls;
+        dm_merc_probe_inventory(unit, &gear[i]);
+        node = next;
+    }
+    return !dm_dualmerc_live_ids_valid(out) || node ? -1 : count;
+}
+
+/* The engine already exposes this exact Hireling table base and stride to
+ * dm_rift.c for its mercenary class validation. This extra prefix check
+ * refuses an unrecognized NPC/name-or-subtype/difficulty BEFORE gold debit.
+ * The native C2S candidate token has two explicitly distinct hypotheses, not
+ * proof of a reversible game-engine transaction. */
+static int dm_dualmerc_native_hire_rows_match(uint64_t G,
+                           const dm_dualmerc_hire_request *want) {
+    module_t *mm=main_mod();
+    uint8_t table_version=0;
+    uint64_t table=0, rows=0, count=0;
+    if (!G || !mm || !mm->base ||
+        !dm_dualmerc_hire_request_valid(want) ||
+        !tk_rd(G+0x106,&table_version,1) ||
+        /* Historical owner-prepared Switch 3.3 disassembly confirms the
+         * native getpet resolver at main+0x6c3130 tests (version-1)<3
+         * BEFORE indexing main+0x2d64a18 by version*16 (RVA 0x6c3158
+         * through 0x6c3174). Version zero is NOT a valid table index.
+         * Keep the Hireling table version range 1..3, as in that native
+         * source. Prefix and NPC/row checks still fail closed. */
+        table_version<1 || table_version>3 ||
+        !tk_rd((uint64_t)(uintptr_t)mm->base+0x2d64a18+
+                (uint64_t)table_version*16, &table, 8) || !table ||
+        !tk_rd(table+0x558,&rows,8) || !rows ||
+        !tk_rd(table+0x560,&count,8) ||
+        !count || count > DM_DUALMERC_HIRE_COUNT_MAX)
+        return 0;
+    dm_dualmerc_hire_check result={0};
+    for (uint64_t i=0; i<count; ++i) {
+        uint8_t prefix[DM_DUALMERC_HIRE_PREFIX_BYTES];
+        if (!tk_rd(rows+i*DM_DUALMERC_HIRE_STRIDE,
+                   prefix,sizeof prefix) ||
+            !dm_dualmerc_hire_check_add(&result,want,prefix))
+            return 0;
+    }
+    if (!dm_dualmerc_hire_check_ok(&result)) {
+        LOG("DM_DUAL_MERC_TRIAL：Hireling候选记录不一致或不唯一；Id%u NPC类号%u 幕%u 难度%u 命中%u 冲突%u",
+            want->native_hire_token,want->vendor_class,want->vendor_act,
+            want->game_difficulty,result.subtype_matches + result.name_matches,
+            result.conflicts);
+        return 0;
+    }
+    LOG("DM_DUAL_MERC_TRIAL：候选字段%u，Hireling表只读交叉核对=%s，命中%u行（Switch 3.3字段含义仍须真机证实）",
+        want->native_hire_token, result.name_matches ? "名字索引" : "类型编号",
+        result.name_matches ? result.name_matches : result.subtype_matches);
+    return 1;
+}
+static int dm_dualmerc_native_offer(uint64_t G, uint64_t player,
+                                     const uint8_t packet[DM_DUALMERC_PACKET_BYTES],
+                                     dm_merc_txn_offer *offer) {
+    dm_dualmerc_packet parsed = {0};
+    if (!offer || !dm_dualmerc_packet_parse(packet,DM_DUALMERC_PACKET_BYTES,&parsed))
+        return 0;
+    module_t *mm = main_mod();
+    if (!mm || !mm->base) return 0;
+    /* Verbatim native 0x6dadc8 call to 0x7f2320(player, npcID, 0x32);
+     * it returns the NPC unit; vendor class comes from native MonStats. */
+    typedef uint64_t (*resolve_fn)(uint64_t, uint32_t, uint32_t);
+    uint64_t npc = ((resolve_fn)(mm->base + 0x7f2320))(player,
+                                                       parsed.npc_unit_id, 0x32);
+    uint32_t type = UINT32_MAX, cls = 0, owner_id = UINT32_MAX;
+    uint8_t diff = UINT8_MAX;
+    if (!npc || !tk_rd(npc, &type, 4) || type != 1 ||
+        !tk_rd(npc + 4, &cls, 4) ||
+        !tk_rd(player + 8, &owner_id, 4) ||
+        !tk_rd(G + 0x104, &diff, 1) || diff > 2) return 0;
+    unsigned act = dm_dualmerc_act_for_vendor(cls);
+    if (!act) return 0;
+    const dm_dualmerc_hire_request wanted={
+        .native_hire_token=parsed.hire_row,
+        .vendor_class=cls,
+        .vendor_act=act,
+        .game_difficulty=diff
+    };
+    if (!dm_dualmerc_native_hire_rows_match(G,&wanted)) return 0;
+    *offer = (dm_merc_txn_offer){
+        .game_session = G, .owner_id = owner_id,
+        .npc_id = parsed.npc_unit_id, .hire_row = parsed.hire_row,
+        .offered_act = act, .difficulty = diff
+    };
+    return 1;
+}
+
+static void dm_dualmerc_pending_reset(void) {
+    if (g_dm_dualmerc_pending.active && dm_dualmerc_ui_cancel)
+        dm_dualmerc_ui_cancel(g_dm_dualmerc_pending.nonce);
+    memset(&g_dm_dualmerc_pending, 0, sizeof g_dm_dualmerc_pending);
+}
+/* Check the CLIENT-side owner/type-7 list, independently of server pets.
+ * The server may add two mercenaries without both ever reaching the render/
+ * inventory UI. Client observations are read-only and never grant a hire. */
+static int dm_dualmerc_client_both(uint64_t player, uint32_t old_id,
+                                   uint32_t new_id) {
+    module_t *mm = main_mod();
+    uint64_t first = 0, node = 0;
+    uint32_t owner = UINT32_MAX;
+    if (!mm || !mm->base || !player ||
+        !tk_rd(player + 8, &owner, 4) ||
+        !tk_rd((uint64_t)(uintptr_t)mm->base + 0x2d33528,
+               &first, 8)) return 0;
+    if (old_id == UINT32_MAX || new_id == UINT32_MAX ||
+        old_id == new_id) return 0;
+    node = first;
+    unsigned seen=0, count=0;
+    for (int i=0;node && i<512;i++) {
+        uint32_t type=UINT32_MAX, id=UINT32_MAX, oid=UINT32_MAX;
+        uint64_t next=0;
+        if (!tk_rd(node+4,&type,4) || !tk_rd(node+8,&id,4) ||
+            !tk_rd(node+0xc,&oid,4) ||
+            !tk_rd(node+0x30,&next,8)) return 0;
+        if (type==7 && oid==owner) {
+            unsigned mask=id==old_id ? 1u : id==new_id ? 2u : 0u;
+            /* A stale third unit or a duplicate of either ID means the
+             * client is NOT presenting an exact two-mercenary roster. */
+            if (!mask || (seen & mask) || ++count>DM_DUALMERC_SLOTS)
+                return 0;
+            seen |= mask;
+        }
+        if (next==node) return 0;
+        node=next;
+    }
+    /* Never accept a list truncated at the defensive 512-node bound. */
+    return !node && seen == 3u && count == DM_DUALMERC_SLOTS;
+}
+
+/* Native replacement is complete only in the SERVER roster so far.
+ * Invalidate the previous client confirmation and request a fresh exact
+ * (retained ID, inserted ID) check during later simulation ticks. This
+ * does not imply the client has two independently selectable gear pages. */
+static void dm_dualmerc_track_client_pair(uint64_t G, uint32_t retained_id,
+                                           uint32_t inserted_id) {
+    atomic_store(&g_dm_trial_hire_old,retained_id);
+    atomic_store(&g_dm_trial_hire_new,inserted_id);
+    atomic_store(&g_dm_trial_verified_client,0);
+    atomic_store(&g_dm_trial_verified_two_G,G);
+}
+
+static void dm_dualmerc_target_clear(void) {
+    g_dm_dualmerc_selected_G = g_dm_dualmerc_selected_player = 0;
+    g_dm_dualmerc_selected_id = UINT32_MAX;
+    g_dm_dualmerc_selected_act = 0;
+}
+
+/* This trial has no durable second-merc item ownership or restore hook yet.
+ * Even the vanilla 0x5b packet targets a concrete mercenary unit ID. Until
+ * both native inventory panels AND a verified two-merc save pipeline exist,
+ * accept no equip mutation with two simultaneous hirelings.
+ */
+static int dm_dualmerc_equip_preflight(const uint64_t regs[31]) {
+    if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
+        !regs[0] || regs[1] < 1) return 0;
+    uint8_t op=0;
+    if (!tk_rd(regs[0]+4,&op,1) ||
+        (op != 0x51 && op != 0x5b)) return 0;
+    int count=dm_dualmerc_trial_pet_nodes(g_player_unit,NULL);
+    if (count < 0) {
+        LOG("DM_DUAL_MERC_TRIAL：装备前无法安全读取佣兵人数，已拒绝本次新装备操作");
+        atomic_store(&g_dm_trial_full_notice,4);
+        return 1;
+    }
+    if (!dm_dualmerc_equip_block_unpersisted((unsigned)count,op))
+        return 0;
+    if (op == 0x5b) {
+        uint8_t buf[DM_DUALMERC_EQUIP_WIRE_LEN];
+        dm_dualmerc_equip_packet packet={0};
+        if (regs[1] == DM_DUALMERC_EQUIP_NATIVE_LEN &&
+            tk_rd(regs[0],buf,sizeof buf) &&
+            dm_dualmerc_equip_decode(buf,sizeof buf,&packet)) {
+            LOG("DM_DUAL_MERC_TRIAL：拒绝第二佣兵读档未接线时的原生 0x5b 穿戴：物品 id%u → 佣兵 id%u 部位%u",
+                packet.item_id,packet.merc_unit_id,packet.bodyloc);
+        }
+    } else {
+        LOG("DM_DUAL_MERC_TRIAL：拒绝双佣兵状态下的原生 0x51 手持装备操作");
+    }
+    atomic_store(&g_dm_trial_full_notice,4);
+    return 1;
+}
+
+/* Called from the normal server C2S pump BEFORE it deducts gold or invokes
+ * native hire. The third/same-Act request is held until an exact one-shot
+ * lease authorizes the native replacement target. Only in experimental IPA.
+ * Return 1 to consume the packet without calling the original dispatcher.
+ */
+/* Original delivery callback must remain valid for a deferred replay.
+ * Guest stack or heap callbacks are short-lived: they must never be cached
+ * across UI frames. NULL or aligned pointers inside verified main code
+ * are the only kinds currently accepted, with unknown ABI still unproven. */
+static int dm_dualmerc_replay_callback_stable(uint64_t fn) {
+    if (!fn) return 1;
+    module_t *mm=main_mod();
+    if (!mm || !mm->base || !mm->text_end) return 0;
+    return dm_dualmerc_stable_callback(fn,
+        (uint64_t)(uintptr_t)mm->base, mm->text_end);
+}
+static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
+    if (!dm_dualmerc_trial_enabled() || !g_lastG || !g_player_unit ||
+        !regs[0] || !regs[1] || regs[0] > UINT64_MAX-5u) return 0;
+    /* A zero-length native packet has no opcode: never access buffer+4.
+     * For positive lengths, inspect the opcode before the full-size guard,
+     * so 0x36 truncated to 1..16 bytes is consumed rather than dispatched.
+     * The fixed four-byte transport prefix is not part of regs[1]. */
+    uint8_t opcode=0;
+    if (!tk_rd(regs[0]+4, &opcode, 1) || opcode != 0x36) return 0;
+    if (g_dm_dualmerc_pending.active) {
+        LOG("DM_DUAL_MERC_TRIAL：前一次替换选择尚未完成，拒绝第二个雇佣包");
+        return 1;
+    }
+    if (regs[1] != DM_DUALMERC_NATIVE_PACKET_BYTES) {
+        atomic_store(&g_dm_trial_full_notice, 3);
+        return 1;
+    }
+    uint8_t raw[DM_DUALMERC_PACKET_BYTES];
+    if (!tk_rd(regs[0],raw,sizeof raw)) {
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    dm_dualmerc_roster roster;
+    dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+    int count=dm_dualmerc_runtime_roster(g_lastG,g_player_unit,&roster,gear);
+    if (count < 0) {
+        LOG("DM_DUAL_MERC_TRIAL：佣兵身份/装备读取失败，拒绝雇佣包");
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    if (count == 0) {
+        /* A first original hire is not an expanded dual-hire transaction.
+         * Audit the token interpretation for future evidence, but NEVER
+         * block the ordinary initial hire because trial table layout is
+         * not yet confirmed against the owner's 3.3 game bytes. */
+        dm_merc_txn_offer observed;
+        if (!dm_dualmerc_native_offer(g_lastG,g_player_unit,raw,&observed))
+            LOG("DM_DUAL_MERC_TRIAL：首雇佣候选表只读识别失败；保留原版首雇佣原路径");
+        return 0;
+    }
+    dm_merc_txn_offer offer;
+    if (!dm_dualmerc_native_offer(g_lastG,g_player_unit,raw,&offer)) {
+        LOG("DM_DUAL_MERC_TRIAL：原生雇佣NPC或候选记录无法验证");
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    /* The original game supports only one equipped hireling. Until the
+     * secondary inventory can save/restore items, an existing equipped
+     * hireling must never be subjected to the new transaction. */
+    for (int i=0;i<count;i++) {
+        if (gear[i].status != DM_MERC_GEAR_OK || gear[i].count != 0) {
+            atomic_store(&g_dm_trial_full_notice,2);
+            LOG("DM_DUAL_MERC_TRIAL：现有幕%u佣兵带装备或装备校验不完整，保留原版角色",
+                roster.slot[i].act);
+            return 1;
+        }
+    }
+    dm_merc_txn lease;
+    dm_merc_txn_status action=dm_merc_txn_begin(
+        &lease,offer,&roster,cur_tick());
+    if (action == DM_MERC_TXN_REJECT) {
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    if (count == 1) {
+        /* Keep-first can protect ONLY a living old unit. If the existing
+         * hireling is dead, the native singleton hire would otherwise
+         * destroy that Act's slot when hiring from a different Act.
+         * Preserve the original dead merc until that ABI is verified. */
+        if (action == DM_MERC_TXN_READY &&
+            lease.plan.action == DM_DUALMERC_ADD && roster.slot[0].dead) {
+            LOG("DM_DUAL_MERC_TRIAL：原佣兵已死亡，跨幕保留尚未验证；本次雇佣已在原生扣费前取消");
+            atomic_store(&g_dm_trial_full_notice,5);
+            return 1;
+        }
+        /* A different-Act hire must have a named old unit to preserve.
+         * Reserve the intent only for THIS synchronous native C2S packet.
+         * The native hook will refuse to return the singleton old unit when
+         * the keep-first contract cannot be satisfied. */
+        if (lease.plan.action == DM_DUALMERC_ADD) {
+            uint32_t old_id=roster.slot[0].runtime_unit_id;
+            if (old_id == UINT32_MAX ||
+                !dm_dualmerc_trial_mode_live(
+                    dm_merc_probe_unit_read(g_lastG,old_id,0).mode)) {
+                atomic_store(&g_dm_trial_full_notice,3);
+                return 1;
+            }
+            if (g_dm_dualmerc_add.active)
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：嵌套跨幕雇佣事务，拒绝继续");
+            g_dm_dualmerc_add=(dm_dualmerc_add_intent){
+                .G=g_lastG,.player=g_player_unit,
+                .original_id=old_id,.candidate_id=UINT32_MAX,
+                .original_class=roster.slot[0].monster_class,
+                .candidate_class=0,
+                .original_act=roster.slot[0].act,
+                .original_dead=roster.slot[0].dead,
+                .candidate_act=offer.offered_act,.active=1
+            };
+        }
+        /* Same-Act is vanilla replacement with no extra slot. */
+        return 0;
+    }
+    if (action == DM_MERC_TXN_READY) {
+        /* Two full, new hire from the SAME Act: only the matching slot
+         * may be replaced; never silently target the other Act's hireling. */
+        unsigned choice=UINT32_MAX;
+        if (!dm_merc_txn_authorize(&lease,&offer,&roster,cur_tick(),&choice)) {
+            atomic_store(&g_dm_trial_full_notice,3); return 1;
+        }
+        /* Dead-merc removal in a two-pet roster is not a verified native
+         * transaction. Refuse it BEFORE the original NPC purchase. */
+        if (roster.slot[choice].dead) {
+            LOG("DM_DUAL_MERC_TRIAL：选中同幕佣兵已死亡，原生双佣兵替换未验证，取消");
+            atomic_store(&g_dm_trial_full_notice,5);
+            return 1;
+        }
+        g_dm_dualmerc_selected_G=g_lastG;
+        g_dm_dualmerc_selected_player=g_player_unit;
+        g_dm_dualmerc_selected_id=roster.slot[choice].runtime_unit_id;
+        g_dm_dualmerc_selected_act=offer.offered_act;
+        g_dm_dualmerc_pending.target_id=g_dm_dualmerc_selected_id;
+        g_dm_dualmerc_pending.peer_id=roster.slot[1-choice].runtime_unit_id;
+        g_dm_dualmerc_pending.peer_act=roster.slot[1-choice].act;
+        g_dm_dualmerc_pending.peer_dead=roster.slot[1-choice].dead;
+        g_dm_dualmerc_pending.peer_class=roster.slot[1-choice].monster_class;
+        g_dm_dualmerc_pending.candidate_id=UINT32_MAX;
+        g_dm_dualmerc_pending.candidate_class=0;
+        g_dm_dualmerc_pending.native_override_seen=0;
+        LOG("DM_DUAL_MERC_TRIAL：同幕雇佣，只允许替换第%u名幕%u佣兵ID%u",
+            choice+1,offer.offered_act,g_dm_dualmerc_selected_id);
+        return 0; /* Original native transaction, with verified target. */
+    }
+    if (action != DM_MERC_TXN_CHOOSE || !dm_dualmerc_ui_request ||
+        !dm_dualmerc_ui_poll || !dm_dualmerc_ui_cancel ||
+        !dm_dualmerc_replay_callback_stable(regs[3])) {
+        LOG("DM_DUAL_MERC_TRIAL：不能安全延迟本次雇佣包（前端选择器或回调地址不可用），已取消");
+        atomic_store(&g_dm_trial_full_notice,3); return 1;
+    }
+    if (roster.slot[0].dead && roster.slot[1].dead) {
+        LOG("DM_DUAL_MERC_TRIAL：两名佣兵均已死亡，无法安全选择原生替换目标，取消雇佣");
+        atomic_store(&g_dm_trial_full_notice,5);
+        return 1;
+    }
+    uint64_t nonce=++g_dm_dualmerc_nonce_seq;
+    if (!nonce) nonce=++g_dm_dualmerc_nonce_seq;
+    g_dm_dualmerc_pending=(dm_dualmerc_pending){
+        .G=g_lastG, .player=g_player_unit, .packet_flags=regs[2],
+        .callback=regs[3], .nonce=nonce, .lease=lease, .active=1,
+        .target_id=UINT32_MAX, .peer_id=UINT32_MAX,
+        .candidate_id=UINT32_MAX,.expected_act=offer.offered_act
+    };
+    memcpy(g_dm_dualmerc_pending.packet,raw,sizeof raw);
+    unsigned dead_mask = (unsigned)roster.slot[0].dead |
+                         ((unsigned)roster.slot[1].dead << 1);
+    dm_dualmerc_ui_request(nonce,roster.slot[0].act,roster.slot[1].act,
+                           dead_mask);
+    LOG("DM_DUAL_MERC_TRIAL：两佣兵已满；询问选择替换幕%u或幕%u，不调用原生雇佣",
+        roster.slot[0].act,roster.slot[1].act);
+    return 1;
+}
+
+/* Called from the original C2S receive-pump callback, never a simulation
+ * frame or UIKit completion. The dialog only provides the choice; the
+ * one-shot lease and both authoritative mercenary IDs are revalidated
+ * inside the legal native packet phase before dispatch. */
+static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
+    if (!g_dm_dualmerc_pending.active) return;
+    dm_dualmerc_pending *p=&g_dm_dualmerc_pending;
+    uint32_t tick=cur_tick();
+    if (!G || !player || G!=p->G || player!=p->player ||
+        tick-p->lease.opened_tick > DM_DUALMERC_TXN_TTL) {
+        LOG("DM_DUAL_MERC_TRIAL：NPC 选择超时或本局变化，原雇佣包已取消");
+        dm_dualmerc_pending_reset();
+        return;
+    }
+    int selected=-2;
+    if (!dm_dualmerc_ui_poll || !dm_dualmerc_ui_poll(p->nonce,&selected))
+        return;
+    if (selected < 0 || selected >= DM_DUALMERC_SLOTS ||
+        !dm_merc_txn_choose(&p->lease,(unsigned)selected)) {
+        LOG("DM_DUAL_MERC_TRIAL：玩家取消替换，原雇佣包未投递");
+        dm_dualmerc_pending_reset(); return;
+    }
+    dm_dualmerc_roster roster;
+    dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+    dm_merc_txn_offer live;
+    int count=dm_dualmerc_runtime_roster(G,player,&roster,gear);
+    unsigned target=UINT32_MAX;
+    if (count != 2 ||
+        !dm_dualmerc_native_offer(G,player,p->packet,&live) ||
+        !dm_merc_txn_authorize(&p->lease,&live,&roster,tick,&target)) {
+        LOG("DM_DUAL_MERC_TRIAL：NPC/佣兵身份已变化，替换授权作废");
+        dm_dualmerc_pending_reset(); return;
+    }
+    if (roster.slot[target].dead) {
+        LOG("DM_DUAL_MERC_TRIAL：被选中的佣兵已死亡，未验证原生死亡佣兵替换，取消投递");
+        atomic_store(&g_dm_trial_full_notice,5);
+        dm_dualmerc_pending_reset(); return;
+    }
+    if (gear[0].status!=DM_MERC_GEAR_OK || gear[0].count ||
+        gear[1].status!=DM_MERC_GEAR_OK || gear[1].count ||
+        !dm_dualmerc_trial_mode_live(
+            dm_merc_probe_unit_read(G,roster.slot[target].runtime_unit_id,0).mode)) {
+        LOG("DM_DUAL_MERC_TRIAL：替换前装备/单位状态变化，拒绝投递");
+        dm_dualmerc_pending_reset(); return;
+    }
+    uint32_t target_id=roster.slot[target].runtime_unit_id;
+    uint32_t peer_id=roster.slot[1-target].runtime_unit_id;
+    p->target_id=target_id; p->peer_id=peer_id;
+    p->peer_act=roster.slot[1-target].act;
+    p->peer_dead=roster.slot[1-target].dead;
+    p->peer_class=roster.slot[1-target].monster_class;
+    g_dm_dualmerc_selected_G=G;
+    g_dm_dualmerc_selected_player=player;
+    g_dm_dualmerc_selected_id=target_id;
+    g_dm_dualmerc_selected_act=live.offered_act;
+    p->candidate_id=UINT32_MAX;
+    p->candidate_class=0;
+    p->native_override_seen=0;
+    module_t *mm=main_mod();
+    if (mm && mm->base) {
+        typedef void (*recv_fn)(uint64_t,uint64_t,uint64_t,uint64_t);
+        LOG("DM_DUAL_MERC_TRIAL：用户选择替换第%u位幕%u佣兵id%u，确认后投递原生 0x36",
+            target+1,roster.slot[target].act,target_id);
+        ((recv_fn)(mm->base+0x632510))((uint64_t)(uintptr_t)p->packet,
+            DM_DUALMERC_NATIVE_PACKET_BYTES,p->packet_flags,p->callback);
+        if (!p->native_override_seen) {
+            /* The native transaction already ran without proving that it
+             * selected the requested hireling. Do not permit a subsequent
+             * unverified save in this disposable-only experiment. */
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询，终止实验以保护上一份存档");
+            return;
+        } else {
+            dm_dualmerc_roster after;
+            dm_merc_trace_gear ag[DM_DUALMERC_SLOTS];
+            int n=dm_dualmerc_runtime_roster(G,player,&after,ag);
+            /* Both hire workflows must apply the SAME post-transaction
+             * identity rule: original target gone, peer retained, a fresh
+             * LIVE unit of the expected Act present, any list order. */
+            int correct=n==DM_DUALMERC_SLOTS &&
+                dm_dualmerc_trial_replacement_complete(
+                    &after,ag,target_id,peer_id,p->candidate_id,
+                    p->peer_act,p->peer_dead,live.offered_act) &&
+                dm_dualmerc_trial_classes_preserved(
+                    &after,peer_id,p->peer_class,
+                    p->candidate_id,p->candidate_class);
+            LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
+                correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
+            if (!correct) {
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：替换后身份未通过校验，停止实验，不允许继续存档");
+                return;
+            }
+            dm_dualmerc_track_client_pair(G,peer_id,p->candidate_id);
+        }
+    }
+    dm_dualmerc_target_clear();
+    dm_dualmerc_pending_reset();
+}
+
+/* 0x687648: forward native getpet(G, player, 7, 1).
+ * A NULL is returned only for one existing alive different-Act merc with a
+ * fully validated empty inventory AND an un-equipped new candidate. The
+ * original 0x68764c CBZ skips old merc dismissal. Never mutate pet pointers.
+ */
+static void dm_dualmerc_native_lookup(uint64_t *regs, module_t *mm) {
+    typedef uint64_t (*fn)(uint64_t, uint64_t, uint32_t, uint32_t);
+    uint64_t G = regs[0], player = regs[1];
+    /* Original 0x6c3130 resolves the pet-list ID to a UNIT pointer,
+     * NOT a pointer to the pet linked-list node. This distinction is
+     * essential: comparing the two pointers always rejected keep-first. */
+    uint64_t old_unit = ((fn)(mm->base + 0x6c3130))(G, player,
+        (uint32_t)regs[2], (uint32_t)regs[3]);
+    regs[0] = old_unit;
+    /* A selected replacement, including a different Act, must target the
+     * actual specified old UNIT, not whichever first pet the original
+     * singleton lookup chooses. This is trial-only and refuses gear. */
+    if (dm_dualmerc_trial_enabled() && G == g_dm_dualmerc_selected_G &&
+        player == g_dm_dualmerc_selected_player &&
+        g_dm_dualmerc_selected_id != UINT32_MAX) {
+        dm_dualmerc_roster roster;
+        dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+        int count = dm_dualmerc_runtime_roster(G, player, &roster, gear);
+        uint32_t candidate_cls = 0, candidate_type = UINT32_MAX;
+        uint32_t candidate_id = UINT32_MAX;
+        unsigned selected_slot = DM_DUALMERC_SLOTS;
+        dm_merc_trace_gear candidate_gear={0};
+        /* A pre-registration candidate may expose no inventory. Inspect
+         * it anyway before the native deletion path: refusing a populated
+         * candidate prevents item loss that post-hire checks cannot undo. */
+        if (regs[19]) dm_merc_probe_inventory(regs[19],&candidate_gear);
+        /* The native pet list can be reordered. Verify both exact IDs and
+         * BOTH gear snapshots immediately before unlink, not only the
+         * selected target. An equipped peer must never be ignored. */
+        if (count == DM_DUALMERC_SLOTS && regs[19] &&
+            g_dm_dualmerc_pending.target_id == g_dm_dualmerc_selected_id &&
+            tk_rd(regs[19], &candidate_type, 4) && candidate_type == 1 &&
+            tk_rd(regs[19] + 4, &candidate_cls, 4) &&
+            tk_rd(regs[19] + 8, &candidate_id, 4) &&
+            dm_dualmerc_trial_candidate_empty(&candidate_gear) &&
+            dm_dualmerc_trial_selected_target(
+                &roster,gear,g_dm_dualmerc_selected_id,
+                g_dm_dualmerc_pending.peer_id,g_dm_dualmerc_selected_act,
+                candidate_id,candidate_cls,&selected_slot)) {
+            uint64_t target = dm_dualmerc_server_monster(
+                G,g_dm_dualmerc_selected_id);
+            if (target) {
+                if (g_dm_dualmerc_pending.native_override_seen &&
+                    (g_dm_dualmerc_pending.candidate_id != candidate_id ||
+                     g_dm_dualmerc_pending.candidate_class != candidate_cls))
+                    dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：同一事务候选佣兵ID/类别改变，终止实验");
+                g_dm_dualmerc_pending.candidate_id = candidate_id;
+                g_dm_dualmerc_pending.candidate_class = candidate_cls;
+                regs[0] = target;
+                g_dm_dualmerc_pending.native_override_seen = 1;
+                LOG("DM_DUAL_MERC_TRIAL：已验证两名单位ID与空装备，替换第%u位幕%u佣兵ID%u；另一名保留",
+                    selected_slot+1,roster.slot[selected_slot].act,
+                    g_dm_dualmerc_selected_id);
+                return;
+            }
+        }
+        /* The native caller will otherwise continue with the singleton
+         * getpet result, which may be the WRONG one of two hirelings.
+         * There is no validated native transaction abort ABI yet. A
+         * disposable offline trial must fail-stop here, BEFORE unlinking
+         * an unrelated mercenary. Never claim this is an in-game rollback. */
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生替换目标或另一佣兵ID校验失败，停止实验以避免误替换");
+        return;
+    }
+    /* A native keep-first override without a preflight-authorized ADD
+     * packet would bypass NPC/Act/price checks. Never mutate that path.
+     * For an authorized ADD, failing deep validation MUST stop execution
+     * rather than silently returning the old singleton merc for deletion. */
+    if (!g_dm_dualmerc_add.active) return;
+    if (!dm_dualmerc_trial_enabled() || !old_unit || !G || !player ||
+        G != g_dm_dualmerc_add.G ||
+        player != g_dm_dualmerc_add.player ||
+        G != regs[21] || player != regs[20] || !regs[19] ||
+        (uint32_t)regs[2] != 7 || (uint32_t)regs[3] != 1)
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增的原生查询参数无效，阻止旧佣兵被默认替换");
+    uint64_t first_pet_node = 0;
+    int count = dm_dualmerc_trial_pet_nodes(player, &first_pet_node);
+    if (count != 1 || !first_pet_node)
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵数量改变，阻止原生默认替换");
+    uint32_t old_id = UINT32_MAX, listed_id = UINT32_MAX;
+    uint32_t old_class = 0, old_mode = UINT32_MAX, new_type = UINT32_MAX;
+    uint32_t new_id = UINT32_MAX, new_cls = 0;
+    if (!tk_rd(old_unit + 8, &old_id, 4) ||
+        !tk_rd(old_unit + 4, &old_class, 4) ||
+        !tk_rd(old_unit + 0xc, &old_mode, 4) ||
+        !tk_rd(first_pet_node + 4, &listed_id, 4) ||
+        !dm_dualmerc_trial_pet_id_matches(old_id, listed_id) ||
+        !tk_rd(regs[19], &new_type, 4) || new_type != 1 ||
+        !tk_rd(regs[19] + 8, &new_id, 4) ||
+        new_id == UINT32_MAX || new_id == old_id ||
+        !tk_rd(regs[19] + 4, &new_cls, 4))
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增时原生单位信息不完整，禁止删除旧佣兵");
+    dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
+    /* The independent game-unit table must resolve to the same unit,
+     * class and mode before suppressing the old-mercenary lookup. */
+    if (old.mode != old_mode || old.cls != old_class)
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增时原佣兵身份/状态改变");
+    dm_merc_trace_gear fresh = {0};
+    dm_merc_probe_inventory(regs[19], &fresh);
+    dm_dualmerc_trial_conditions c = {
+        .server_hirelings = (unsigned)count,
+        .old_act = dm_dualmerc_act_for_class(old.cls),
+        .new_act = dm_dualmerc_act_for_class(new_cls),
+        .old_gear_status = old.gear.status,
+        .old_gear_count = old.gear.count,
+        .old_gear_fingerprint = old.gear.fingerprint,
+        .new_gear_status = fresh.status,
+        .new_gear_count = fresh.count,
+        .new_gear_fingerprint = fresh.fingerprint,
+        .old_alive = dm_dualmerc_trial_mode_live(old.mode),
+        .native_result_matches_roster =
+            dm_dualmerc_trial_pet_id_matches(old_id, listed_id),
+        .guest_classes_valid = old.cls && new_cls
+    };
+    if (!dm_dualmerc_trial_keep_one(&c) ||
+        old_id != g_dm_dualmerc_add.original_id ||
+        old_class != g_dm_dualmerc_add.original_class ||
+        c.old_act != g_dm_dualmerc_add.original_act ||
+        c.new_act != g_dm_dualmerc_add.candidate_act ||
+        g_dm_dualmerc_add.original_dead !=
+            (unsigned)!dm_dualmerc_trial_mode_live(old.mode) ||
+        g_dm_dualmerc_add.keep_seen)
+        dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增的原生身份/空装备校验失败，禁止回落原版替换");
+    g_dm_dualmerc_add.keep_seen=1;
+    g_dm_dualmerc_add.candidate_id=new_id;
+    g_dm_dualmerc_add.candidate_class=new_cls;
+    atomic_store(&g_dm_trial_verified_two_G, 0);
+    atomic_store(&g_dm_trial_verified_client, 0);
+    atomic_store(&g_dm_trial_hire_old, old_id);
+    atomic_store(&g_dm_trial_hire_new, new_id);
+    atomic_store(&g_dm_trial_hire_G, G);
+    atomic_store(&g_dm_trial_hire_player, player);
+    regs[0] = 0;
+    LOG("DM_DUAL_MERC_TRIAL：已保留第一名幕%u佣兵 id%u，将登记幕%u第二名（只限当前游戏进程）",
+        c.old_act, old_id, c.new_act);
+    dm_dual_merc_probe_tick(G, player, 1);
+}
+
+/* Exact verified 3.3 native hire call-site gates. The original calls are
+ * forwarded unchanged except optional 0x94 lookup result override.
+ *
+ * regs[19]: new hireling candidate in 0x6875a0
+ * regs[20]: player, regs[21]: game; regs[25]: old pet at the old-unit site
+ * x0...x5: original native function arguments.
+ *
+ * Original call sites:
+ * 0x6877f0 -> 0x6c0c30  (G, player, old_pet_id, 0)
+ * 0x68786c -> 0x7cb6d0  (G, old_pet)
+ * 0x687940 -> 0x6c1b00  (G, player, candidate, 7, 1, placement)
+ * Their business semantics still require test observations.
+ */
+void dm_dualmerc_native_call(uint64_t *regs, int num) {
+    module_t *mm = main_mod();
+    if (!mm || !mm->base) die("DM_DUAL_MERC_NATIVE：main 模块未装载");
+    uint64_t G = regs[21], player = regs[20];
+    /* getenv is checked only at the actual hire call sites, not each tick. */
+    const char *env = getenv("DM_DUAL_MERC_PROBE");
+    int on = env && !strcmp(env, "1");
+    if (num == SVC_HOST_DUALMERC_QUERY) {
+        dm_dualmerc_native_lookup(regs, mm);
+        return;
+    }
+    const char *phase = num == 0x91 ? "unlink" : num == 0x92 ? "old-unit" : "link";
+    if (num != 0x91 && num != 0x92 && num != 0x93)
+        die("DM_DUAL_MERC_NATIVE：非法门号 0x%x", num);
+    if (on) {
+        uint32_t tick = 0, uid = 0xffffffffu, old_id = 0xffffffffu;
+        uint32_t new_id = 0xffffffffu, old_class = 0, new_class = 0;
+        tk_rd(G + 0x170, &tick, 4);
+        if (player) tk_rd(player + 8, &uid, 4);
+        if (num == 0x91) old_id = (uint32_t)regs[2];
+        else if (num == 0x92 && regs[1]) tk_rd(regs[1] + 8, &old_id, 4);
+        else if (regs[25]) tk_rd(regs[25] + 8, &old_id, 4);
+        if (regs[19]) { tk_rd(regs[19] + 8, &new_id, 4); tk_rd(regs[19] + 4, &new_class, 4); }
+        if (num == 0x92 && regs[1]) tk_rd(regs[1] + 4, &old_class, 4);
+        else if (old_id != 0xffffffffu) {
+            dm_merc_probe_unit old = dm_merc_probe_unit_read(G, old_id, 0);
+            old_class = old.cls;
+        }
+        LOG("DM_DUAL_MERC_NATIVE：拍%u player%u %s 前 old%u:cls%u:a%u new%u:cls%u:a%u（原函数仍将执行）",
+            tick, uid, phase, old_id, old_class,
+            dm_dualmerc_act_for_class(old_class), new_id, new_class,
+            dm_dualmerc_act_for_class(new_class));
+        dm_dual_merc_probe_tick(G, player, 1);
+    }
+    switch (num) {
+    case 0x91: {
+        typedef uint64_t (*fn)(uint64_t, uint64_t, uint64_t, uint64_t);
+        regs[0] = ((fn)(mm->base + 0x6c0c30))(regs[0], regs[1], regs[2], regs[3]);
+        break;
+    }
+    case 0x92: {
+        typedef uint64_t (*fn)(uint64_t, uint64_t);
+        regs[0] = ((fn)(mm->base + 0x7cb6d0))(regs[0], regs[1]);
+        break;
+    }
+    case 0x93: {
+        typedef uint64_t (*fn)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+        regs[0] = ((fn)(mm->base + 0x6c1b00))(regs[0], regs[1], regs[2], regs[3], regs[4], regs[5]);
+        break;
+    }
+    }
+    if (num == SVC_HOST_DUALMERC_LINK && G &&
+        G == atomic_load(&g_dm_trial_hire_G) &&
+        player == atomic_load(&g_dm_trial_hire_player)) {
+        /* Match the exact old/new unit IDs, not just a count. */
+        uint32_t id0 = UINT32_MAX, id1 = UINT32_MAX;
+        int both = dm_dualmerc_trial_pet_pair(player,&id0,&id1) &&
+            dm_dualmerc_trial_both_present(
+                DM_DUALMERC_SLOTS,id0,id1,
+                atomic_load(&g_dm_trial_hire_old),
+                atomic_load(&g_dm_trial_hire_new));
+        /* A count+ID match alone can still contain the wrong Act or
+         * a dead candidate. Match the authorized preflight identity and
+         * exact native UNIT classes immediately after the link returns.
+         * No save/restore can proceed after a failed native mutation. */
+        if (g_dm_dualmerc_add.active) {
+            dm_dualmerc_roster after;
+            dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+            int n=dm_dualmerc_runtime_roster(G,player,&after,gear);
+            if (!g_dm_dualmerc_add.keep_seen ||
+                g_dm_dualmerc_add.G != G ||
+                g_dm_dualmerc_add.player != player ||
+                g_dm_dualmerc_add.original_id !=
+                    atomic_load(&g_dm_trial_hire_old) ||
+                g_dm_dualmerc_add.candidate_id !=
+                    atomic_load(&g_dm_trial_hire_new) ||
+                !both || n != DM_DUALMERC_SLOTS ||
+                !dm_dualmerc_trial_add_complete(
+                    &after,gear,g_dm_dualmerc_add.original_id,
+                    g_dm_dualmerc_add.original_act,
+                    g_dm_dualmerc_add.original_dead,
+                    g_dm_dualmerc_add.candidate_id,
+                    g_dm_dualmerc_add.candidate_act) ||
+                !dm_dualmerc_trial_classes_preserved(
+                    &after,g_dm_dualmerc_add.original_id,
+                    g_dm_dualmerc_add.original_class,
+                    g_dm_dualmerc_add.candidate_id,
+                    g_dm_dualmerc_add.candidate_class))
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误，终止实验避免错误存档");
+            g_dm_dualmerc_add.link_verified=1;
+        } else if (!both) {
+            /* This trace is only a diagnostic for non-ADD packets. No
+             * authorized second-hire mutation should reach here. */
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：未授权的第二佣兵绑定结果不一致");
+        }
+        if (both) atomic_store(&g_dm_trial_verified_two_G, G);
+        LOG("DM_DUAL_MERC_TRIAL：新佣兵绑定返回；旧ID%u 新ID%u，服务器宠物列表%u/%u（完整双人ID核对：%s）",
+            atomic_load(&g_dm_trial_hire_old),
+            atomic_load(&g_dm_trial_hire_new),
+            id0, id1, both ? "通过" : "未通过，不能视为双佣兵");
+        atomic_store(&g_dm_trial_hire_G, 0);
+        atomic_store(&g_dm_trial_hire_player, 0);
+    }
+    if (on) {
+        LOG("DM_DUAL_MERC_NATIVE：%s 后，重读服务端/客户端宠物表（不读取可能已经释放的旧单位指针）", phase);
+        dm_dual_merc_probe_tick(G, player, 1);
+    }
+}
+
 static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本级经验‰ / 腰带四列件数 / 回城次数 + 当前人数档 → g_hud（前端 dm_hud_get） | Every tick: controlled player's level / current-level experience ‰ / item counts of the four belt columns / town portal count + current /players setting → g_hud (front end dm_hud_get)
     dm_hud_info h = {0};
     uint64_t player = 0, inv = 0, u = 0, next = 0;
@@ -813,6 +1975,80 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             uint32_t mode = 0, id = 0; uint64_t pp = 0; uint16_t c[4] = {0};
             if (tk_rd(u + 0xC, &mode, 4) && mode && tk_rd(u + 0x38, &pp, 8) && pp && tk_rd(pp, c, 8) && (c[1] || c[3]) && (lid == 0xffffffffu || (tk_rd(u + 8, &id, 4) && id == lid))) { player = u; break; }
             if (!tk_rd(u + 0x158, &u, 8)) break;
+        }
+    }
+    dm_dual_merc_probe_tick(G, player, 0);
+    /* Server identity may change on death, area transition, replacement or
+     * a reused native game pointer. Do not reuse a historical client
+     * confirmed flag unless the authoritative two exact unit IDs STILL
+     * exist now. A failed read revokes the prior confirmation. */
+    if (player && atomic_load(&g_dm_trial_verified_two_G) == G &&
+        !atomic_load(&g_dm_trial_hire_G)) {
+        uint32_t id0=UINT32_MAX,id1=UINT32_MAX;
+        if (!dm_dualmerc_trial_pet_pair(player,&id0,&id1) ||
+            !dm_dualmerc_trial_both_present(
+                DM_DUALMERC_SLOTS,id0,id1,
+                atomic_load(&g_dm_trial_hire_old),
+                atomic_load(&g_dm_trial_hire_new))) {
+            atomic_store(&g_dm_trial_verified_two_G,0);
+            atomic_store(&g_dm_trial_verified_client,0);
+            LOG("DM_DUAL_MERC_TRIAL：服务端双佣兵单位身份已变化，撤销此前客户端验证");
+        }
+    }
+    /* A running simulation frame MUST NOT execute an NPC C2S transaction:
+     * the native receive pump is the only place allowed to mutate gold/pets.
+     * Ticks only expire a stale choice; completed UI choices are delivered
+     * by the next real C2S pump invocation below. */
+    if (g_dm_dualmerc_pending.active &&
+        (!G || !player || G != g_dm_dualmerc_pending.G ||
+         player != g_dm_dualmerc_pending.player ||
+         cur_tick() - g_dm_dualmerc_pending.lease.opened_tick >
+             DM_DUALMERC_TXN_TTL)) {
+        LOG("DM_DUAL_MERC_TRIAL：待选择雇佣已经离局或超时，已取消而未投递");
+        dm_dualmerc_pending_reset();
+    }
+    if (player && atomic_load(&g_dm_trial_verified_two_G) == G &&
+        !atomic_load(&g_dm_trial_verified_client) &&
+        dm_dualmerc_trial_pet_nodes(player, NULL) == 2 &&
+        dm_dualmerc_client_both(player, atomic_load(&g_dm_trial_hire_old),
+                               atomic_load(&g_dm_trial_hire_new))) {
+        atomic_store(&g_dm_trial_verified_client, 1);
+        LOG("DM_DUAL_MERC_TRIAL：客户端 type7 属主链同时出现新旧佣兵 ID，两端 ID 匹配；装备/跨区/读档仍待验证");
+    }
+    /* A factual, once-per-run notice only after BOTH pet nodes really exist.
+     * Do not claim persistence or the independent gear UI already works. */
+    if (player && dm_dualmerc_trial_enabled()) {
+        static uint64_t last_notice_game;
+        static int shown_two;
+        if (last_notice_game != G) {
+            last_notice_game = G;
+            shown_two = 0;
+        }
+        if (!shown_two && atomic_load(&g_dm_trial_verified_two_G) == G &&
+            atomic_load(&g_dm_trial_verified_client) &&
+            dm_dualmerc_trial_pet_nodes(player, NULL) == 2) {
+            module_t *mm = main_mod();
+            if (mm) {
+                shown_two = 1;
+                dm_game_notice((uint8_t *)mm->base,
+                    "双佣兵仅当前游戏临时有效；退出重进会丢失第二名，装备尚未开放");
+                LOG("DM_DUAL_MERC_TRIAL：服务端宠物表同时有 2 名，已显示实测提示");
+            }
+        }
+    }
+    if (player) {
+        int reason = atomic_exchange(&g_dm_trial_full_notice, 0);
+        if (reason) {
+            module_t *mm = main_mod();
+            if (mm) dm_game_notice((uint8_t *)mm->base, reason == 1
+                ? "已有两名佣兵：本次雇佣未获授权"
+                : reason == 2
+                ? "旧佣兵装备未清空，暂不允许雇佣"
+                : reason == 4
+                ? "两名佣兵独立装备读档尚未完成，已阻止本次穿戴"
+                : reason == 5
+                ? "死亡佣兵的双佣兵雇佣/替换尚未验证，本次已取消"
+                : "佣兵状态无法安全读取，本次雇佣已取消");
         }
     }
     uint32_t sig = 0;
@@ -1170,7 +2406,7 @@ static void ticks_hash(const uint64_t *regs) {
 // injection precedes this tick's state hash (the ground-truth tick hash likewise includes the effects of these packets).
 static FILE *g_c2sfp;
 static struct c2s_ent { uint32_t tick, unit, len; int has_unit, sys; uint8_t *pkt; } *g_rp; static size_t g_nrp, g_irp;
-static uint64_t g_lastG; static uint32_t g_sysclient; static int g_sysclient_set; static unsigned g_sysdrop;   // 最近一次拍入口的 G；系统类消息的客户端号（取宿主自己的加入消息） | G of the most recent tick entry; client number for system-class messages (taken from the host's own join message)
+static uint32_t g_sysclient; static int g_sysclient_set; static unsigned g_sysdrop;   // 最近一次拍入口的 G；系统类消息的客户端号（取宿主自己的加入消息） | G of the most recent tick entry; client number for system-class messages (taken from the host's own join message)
 static int64_t g_rplast = -1; static unsigned g_rpdrop;
 // 越肩镜头（dm_cam.c dm_cam_attack）：放技能的命令包带着目标——对地点（0x05 / 0x08 / 0x0c / 0x0f：x、y 各 2 字节，子格；落点附近的活怪见下）或对单位
 // （0x06 / 0x07 / 0x09 / 0x0a / 0x0d / 0x0e / 0x10 / 0x11：类型、单位号各 4 字节；只认玩家 0 与怪 1，它们的路径 +0x38 → +0 / +4 是 16.16 定点子格坐标）。
@@ -1243,6 +2479,27 @@ static void c2s_obs(const uint64_t *regs) {
     tk_rd(regs[0] + 0x170, &tick, 4);
     if (regs[1] && tk_rd(regs[1] + 8, &uid, 4)) hu = 1;
     uint8_t b[512]; uint32_t n = len < 512 ? len : 512; if (!tk_rd(regs[2], b, n)) n = 0;
+    // Read-only native C2S telemetry for three candidate NPC commands
+    // located in the verified Switch 3.3 handler table. Only 0x36 is used
+    // as the guarded hire path; the meanings of 0x38 and 0x62 are UNKNOWN.
+    // These two are logged/observed only, NEVER mutated or swallowed.
+    // This provides a factual trail for identifying independent revival
+    // behavior without guessing its native ABI or changing player saves.
+    { static int merc_probe = -1;
+      if (merc_probe < 0) { const char *e = getenv("DM_DUAL_MERC_PROBE"); merc_probe = e && !strcmp(e, "1"); }
+      if (merc_probe && n &&
+          (b[0] == 0x36 || b[0] == 0x38 || b[0] == 0x62)) {
+          char hex[33]; unsigned cap = n < 16 ? n : 16;
+          for (unsigned i = 0; i < cap; ++i)
+              snprintf(hex + 2 * i, sizeof hex - 2 * i, "%02x", b[i]);
+          hex[cap * 2] = 0;
+          LOG("DM_DUAL_MERC_PROBE：拍 %u 玩家 %s%u 收到NPC候选命令 0x%02x len=%u 前%u字节=%s（仅0x36有雇佣合同；其余语义未知，只读）",
+              tick, hu ? "" : "未知/", uid, b[0], len, cap, hex);
+          atomic_store(&g_dm_merc_probe_event_G, regs[0]);
+          atomic_store(&g_dm_merc_probe_event_tick, tick);
+          dm_dual_merc_probe_tick(regs[0], regs[1], 1);  /* before native C2S dispatch */
+      }
+    }
     if (n >= 1 && b[0] == 0x20) cube_diag_req(regs[0], regs[1], b, n);   // 合成读数 | Transmute readout
     dm_bossrush_c2s(regs[0], regs[1], b, n);
     cam_c2s(regs[0], regs[1], b, n);
@@ -1410,6 +2667,11 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
     // Removed the former "also drop when !g_lastG (tick entry not yet seen)": that was judged by arrival timing -- client commands during loading that arrived before the server's first tick were dropped,
     // later ones were let through; if a dropped one was a loading handshake request, the client would wait for the reply forever (r13 cvd4 once hung in join-time loading with the server running only ticks 0–2, suspected to be this)
     if (g_rp && (!g_nrp || rp_window())) { if (!g_rpdrop++) LOG("DM_C2S_REPLAY：拍 %u 起丢弃客户端自发命令（首条）", cur_tick()); return; }
+    /* When the UIKit choice becomes ready, resume the pending original hire
+     * on the *real* C2S receive-pump path, before the next unrelated command.
+     * Never inject this native transaction from the physics/render tick. */
+    if (g_dm_dualmerc_pending.active)
+        dm_dualmerc_pending_tick(g_lastG, g_player_unit);
     // 命令号在投递缓冲的第 4 字节（前 4 字节是头，同 cube_pickup_rewrite）：原先这里读的是第 0 字节，规则从没匹配上过。
     // 产品规则：除摇杆外任何触点不许触发移动。键鼠版「点地走 / 跑到某点」是命令包 0x01 / 0x03；手柄摇杆移动是 0x42，
     // 松开摇杆时补一条 0x01（停在当前位置，实测）。所以：玩家摇杆最近 0.7 秒内没动过时到达的 0x01 / 0x03 一律不投递
@@ -1420,6 +2682,11 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
     // (the only possible source is a UI mouse click landing on the click receiver). Walking to a target (0x02 / 0x04 etc., which carry a unit) is not blocked -- walking over after tapping an NPC / item is the original game's behavior.
     { uint64_t dm_stick_last_ns(void); uint8_t op = 0xff; if (regs[0] && regs[1] >= 1 && tk_rd(regs[0] + 4, &op, 1) && (op == 0x01 || op == 0x03) && now_ns() - dm_stick_last_ns() > 700000000ull && !dm_move_allowed()) {
         static int dropped; if (dropped++ < 10) LOG("产品规则：丢弃非摇杆来源的点地移动包 0x%02x（第 %d 条）", op, dropped); return; } }
+    /* Validate a real hire candidate and the full per-Act roster before
+     * native gold debit. Two full -> choose; same Act -> targeted replace.
+     * This path is compiled/active only in the disposable offline trial. */
+    if (dm_dualmerc_hire_preflight(regs)) return;
+    if (dm_dualmerc_equip_preflight(regs)) return;
     static void (*recv)(uint64_t, uint64_t, uint64_t, uint64_t);
     if (!recv) { module_t *m = NULL; for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
                  recv = (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))(m->base + 0x632510); }
@@ -1438,6 +2705,69 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
       if (m && in_game() && regs[1] == 17 && tk_rd(regs[0], in, sizeof in) && in[4] == 0x16) { memcpy(&pk_id, in + 5, 4); uint64_t u = dm_diag_srv_item(pk_id);
           if (u) { pk_code = ((uint32_t (*)(uint64_t))(m->base + 0x570260))(u); pk_auto = dm_potpick_auto(pk_id); } else pk_id = 0; } }
     recv(regs[0], regs[1], regs[2], regs[3]);
+    /* A single-second-hire transaction ends at this exact receive-pump
+     * dispatch. An unverified native Hook cannot be silently ignored if
+     * the original merc has already disappeared or a second has appeared.
+     * A harmless rejected purchase (e.g. insufficient gold) may leave
+     * the exact original one-merc roster untouched. */
+    if (g_dm_dualmerc_add.active) {
+        dm_dualmerc_add_intent intent=g_dm_dualmerc_add;
+        dm_dualmerc_roster after;
+        dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+        int count=dm_dualmerc_runtime_roster(intent.G,intent.player,
+                                            &after,gear);
+        if (intent.keep_seen) {
+            if (!intent.link_verified || count != DM_DUALMERC_SLOTS ||
+                !dm_dualmerc_trial_add_complete(
+                    &after,gear,intent.original_id,intent.original_act,
+                    intent.original_dead,intent.candidate_id,
+                    intent.candidate_act) ||
+                !dm_dualmerc_trial_classes_preserved(
+                    &after,intent.original_id,intent.original_class,
+                    intent.candidate_id,intent.candidate_class))
+                dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：跨幕新增未完成精确双佣兵绑定，停止实验避免覆盖旧佣兵");
+        } else if (count != 1 || !after.slot[0].occupied ||
+                   after.slot[0].runtime_unit_id != intent.original_id ||
+                   after.slot[0].act != intent.original_act ||
+                   after.slot[0].monster_class != intent.original_class ||
+                   after.slot[0].dead != intent.original_dead) {
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生未执行保留Hook但佣兵已变化，禁止保存异常事务");
+        }
+        memset(&g_dm_dualmerc_add,0,sizeof g_dm_dualmerc_add);
+    }
+    /* Direct same-Act replacement is synchronous. Never let its selected
+     * target leak into the next game command or another NPC transaction. */
+    if (g_dm_dualmerc_selected_G == g_lastG &&
+        g_dm_dualmerc_selected_player == g_player_unit &&
+        !g_dm_dualmerc_pending.active) {
+        dm_dualmerc_roster after;
+        dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+        int count=dm_dualmerc_runtime_roster(g_lastG,g_player_unit,&after,gear);
+        int correct=count==DM_DUALMERC_SLOTS &&
+                    g_dm_dualmerc_pending.native_override_seen &&
+                    dm_dualmerc_trial_replacement_complete(
+                        &after,gear,g_dm_dualmerc_pending.target_id,
+                        g_dm_dualmerc_pending.peer_id,
+                        g_dm_dualmerc_pending.candidate_id,
+                        g_dm_dualmerc_pending.peer_act,
+                        g_dm_dualmerc_pending.peer_dead,
+                        g_dm_dualmerc_selected_act) &&
+                    dm_dualmerc_trial_classes_preserved(
+                        &after,g_dm_dualmerc_pending.peer_id,
+                        g_dm_dualmerc_pending.peer_class,
+                        g_dm_dualmerc_pending.candidate_id,
+                        g_dm_dualmerc_pending.candidate_class);
+        LOG("DM_DUAL_MERC_TRIAL：同幕原生替换，旧佣兵消失、其他幕佣兵保留和新佣兵加入：%s",
+            correct ? "通过（服务器状态）" : "未通过，不能视作双佣兵功能完成");
+        if (!correct) {
+            dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配，终止实验");
+            return;
+        }
+        dm_dualmerc_track_client_pair(g_lastG,
+            g_dm_dualmerc_pending.peer_id,
+            g_dm_dualmerc_pending.candidate_id);
+        dm_dualmerc_target_clear();
+    }
     if (pk_id) { static uint32_t win, used, skipped; uint32_t t = cur_tick(); if (t - win >= 25) { win = t; used = 0; }
         if (used >= 4) skipped++;
         else { used++; uint64_t u = dm_diag_srv_item(pk_id), d = 0, pp = 0; uint32_t mode = 0, x = 0, y = 0; uint8_t page = 0; char where[64];

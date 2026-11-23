@@ -17,6 +17,19 @@ typedef uint32_t Result;   // nn::Result：w0，0 = 成功 | nn::Result: w0, 0 =
 #define RES_OK 0u
 #define RES_FAIL 0x2A2u      // 通用失败（联网等被剪功能统一回这个） | Generic failure (cut features such as networking uniformly return this)
 
+/* Optional verified dual-merc pre-commit hook. NULL by default: the native
+ * second-merc persistence/restore ABI is not wired yet. Set only after the
+ * engine has independently proved both item owners and complete .d2s data.
+ * Runs inside the HLE FS commit lock; may use direct POSIX file I/O only.
+ * Return 0 for success or a positive errno for failure, which rejects the
+ * entire native save transaction instead of committing a partial sidecar. */
+extern int (*g_dm_dualmerc_pre_commit_hook)(const char *workdir);
+/* Mark the current HLE native file transaction unsaveable after any
+ * experimental dual-mercenary native mutation whose identity cannot be
+ * verified. This prevents a later commit from publishing partial state;
+ * it does not undo native gold, items or unit deletion. */
+void dm_fs_save_poison(int error_code);
+
 // 客体地址 → 宿主对象 旁表
 // Guest address → host object side table
 void *objmap_get(const void *guest);
@@ -99,4 +112,4 @@ uint64_t dm_audio_render_calls(void);   // 声卡回调累计次数（静音接�
 //   0x8e   Client-side check for the extra mercenary equipment slots (rift level ≥10 + the item is a belt / boots / gloves / ring / amulet: w1 is replaced with the item's own type number, writes x1; x8 always 0) dm_rift.c      0x3beb58 (branch gate: x8≠0 jumps to 0x3beb5c, otherwise executes the original instruction and returns to 0x3beb5c)
 //   0x8f   Original picture moved ahead of the 3D camera (forwards to the original 0x1628978, then adds the shift to the camera position and offset) dm_cam.c      0x89ccc8 (bl 0x1628978 call site; in the per-frame camera update 0x89c370)
 //   0x90   Legend append capacity guard (at most eight inline text widgets) dm_padmode.c    0xaa9f88 (bl 0xaaa1f8 call site; evicts optional host hints first at capacity)
-enum { SVC_HOST_TACT_ZLIB = 0x80, SVC_HOST_C2S_DELIVER = 0x81, SVC_HOST_C2S_SYS = 0x82, SVC_HOST_GRANNY_A = 0x83, SVC_HOST_GRANNY_B = 0x84, SVC_HOST_PRIVATE_SKILL_RENDER = 0x85, SVC_HOST_PRIVATE_SKILL_AIM = 0x86, SVC_HOST_GROUND_ASSET = 0x87, SVC_HOST_DROP_SOUND = 0x88, SVC_HOST_RIFT_EXIT = 0x89, SVC_HOST_JOIN_SPAWN = 0x8a, SVC_HOST_JOIN_CORPSE = 0x8b, SVC_HOST_SAVE_ACT = 0x8c, SVC_HOST_MERC_SLOT = 0x8d, SVC_HOST_MERC_SLOT_CL = 0x8e, SVC_HOST_CAM_AHEAD = 0x8f, SVC_HOST_LEGEND_APPEND = 0x90 };   // 0x87：地上物品取模型路径（dm_dropfilter.c 掉落光）   // 0x83/0x84：Granny 逐块解码调用点（hle_granny.c） | 0x87: fetch the model path for ground items (dm_dropfilter.c drop light)   // 0x83/0x84: Granny per-block decode call sites (hle_granny.c)
+enum { SVC_HOST_TACT_ZLIB = 0x80, SVC_HOST_C2S_DELIVER = 0x81, SVC_HOST_C2S_SYS = 0x82, SVC_HOST_GRANNY_A = 0x83, SVC_HOST_GRANNY_B = 0x84, SVC_HOST_PRIVATE_SKILL_RENDER = 0x85, SVC_HOST_PRIVATE_SKILL_AIM = 0x86, SVC_HOST_GROUND_ASSET = 0x87, SVC_HOST_DROP_SOUND = 0x88, SVC_HOST_RIFT_EXIT = 0x89, SVC_HOST_JOIN_SPAWN = 0x8a, SVC_HOST_JOIN_CORPSE = 0x8b, SVC_HOST_SAVE_ACT = 0x8c, SVC_HOST_MERC_SLOT = 0x8d, SVC_HOST_MERC_SLOT_CL = 0x8e, SVC_HOST_CAM_AHEAD = 0x8f, SVC_HOST_LEGEND_APPEND = 0x90, SVC_HOST_DUALMERC_UNLINK = 0x91, SVC_HOST_DUALMERC_OLD_UNIT = 0x92, SVC_HOST_DUALMERC_LINK = 0x93, SVC_HOST_DUALMERC_QUERY = 0x94 };   // 0x87：地上物品取模型路径（dm_dropfilter.c 掉落光）   // 0x83/0x84：Granny 逐块解码调用点（hle_granny.c） | 0x87: fetch the model path for ground items (dm_dropfilter.c drop light)   // 0x83/0x84: Granny per-block decode call sites (hle_granny.c)

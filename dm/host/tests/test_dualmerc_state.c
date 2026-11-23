@@ -159,10 +159,57 @@ static void roundtrip_and_limits(void) {
     assert(not_written == 0);
 }
 
+static void atomic_equipment_ownership(void) {
+    /* Previous tests leave one equipped Act II merc and one empty Act V.
+     * Transfer its actual saved item record to the other merc as ONE
+     * authorized two-container snapshot, without any intermediate duplicate. */
+    assert(dm_dualmerc_state_valid(&s));
+    static dm_dualmerc_saved_slot next[DM_DUALMERC_SLOTS];
+    memcpy(next,s.slot,sizeof next);
+    assert(s.slot[0].gear_count==0 && s.slot[1].gear_count==1);
+    next[0].gear_count=1;
+    next[0].gear[0]=next[1].gear[0];
+    next[1].gear_count=0;
+    memset(next[1].gear,0,sizeof next[1].gear);
+    unchanged=s;
+    assert(!dm_dualmerc_state_gears_apply_verified(&s,next,0));
+    assert(!memcmp(&s,&unchanged,sizeof s));
+    assert(dm_dualmerc_state_gears_apply_verified(&s,next,1));
+    assert(s.slot[0].gear_count==1 && s.slot[1].gear_count==0);
+    assert(s.slot[0].gear[0].persistent_item_id==0x20002);
+    assert(s.generation==unchanged.generation+1);
+    assert(s.native_seed==0 && s.native_d2s_checksum==0);
+
+    /* Reject a copied equipment record present in both mercs without
+     * touching the authoritative state or its generation. */
+    unchanged=s;
+    memcpy(next,s.slot,sizeof next);
+    next[1].gear_count=1;
+    next[1].gear[0]=next[0].gear[0];
+    assert(!dm_dualmerc_state_gears_apply_verified(&s,next,1));
+    assert(!memcmp(&s,&unchanged,sizeof s));
+
+    memcpy(next,s.slot,sizeof next);
+    next[1].act=1; /* Gear updates cannot replace hireling identities. */
+    assert(!dm_dualmerc_state_gears_apply_verified(&s,next,1));
+    assert(!memcmp(&s,&unchanged,sizeof s));
+    next[1].act=s.slot[1].act;
+    next[0].gear[0].persistent_item_id=0; /* No empty item identities. */
+    assert(!dm_dualmerc_state_gears_apply_verified(&s,next,1));
+    assert(!memcmp(&s,&unchanged,sizeof s));
+
+    assert(!dm_dualmerc_state_gears_apply_verified(NULL,next,1));
+    assert(!dm_dualmerc_state_gears_apply_verified(&s,NULL,1));
+    /* A copy of the caller's own array is safe even with in-place alias. */
+    assert(dm_dualmerc_state_gears_apply_verified(&s,s.slot,1));
+    assert(s.generation==unchanged.generation+1);
+}
+
 int main(void) {
     empty_and_corruption();
     recruit_and_replace();
     roundtrip_and_limits();
+    atomic_equipment_ownership();
     puts("dual mercenary roster persistence, checksum and independent gear: passed");
     return 0;
 }

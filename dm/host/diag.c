@@ -1981,7 +1981,7 @@ static void hud_tick(uint64_t G) {        // 每拍：受控玩家等级 / 本�
             if (mm) {
                 shown_two = 1;
                 dm_game_notice((uint8_t *)mm->base,
-                    "服务器和客户端均已找到两名佣兵；独立装备与读档恢复仍待验证");
+                    "双佣兵仅当前游戏临时有效；退出重进会丢失第二名，装备尚未开放");
                 LOG("DM_DUAL_MERC_TRIAL：服务端宠物表同时有 2 名，已显示实测提示");
             }
         }

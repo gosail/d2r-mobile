@@ -18,6 +18,9 @@ static void selected_native_replacement(void) {
     candidate.count=1;
     assert(!dm_dualmerc_trial_candidate_empty(&candidate));
     candidate.count=0;
+    candidate.fingerprint=42; /* Count says zero but item fingerprint disagrees. */
+    assert(!dm_dualmerc_trial_candidate_empty(&candidate));
+    candidate.fingerprint=0;
     candidate.status=DM_MERC_GEAR_INVALID;
     assert(!dm_dualmerc_trial_candidate_empty(&candidate));
     candidate.status=DM_MERC_GEAR_TRUNCATED;
@@ -83,6 +86,9 @@ static void completed_native_replacement(void) {
     gear[0].count=1;
     assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     gear[0].count=0;
+    gear[0].fingerprint=123;
+    assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
+    gear[0].fingerprint=0;
     gear[1].status=DM_MERC_GEAR_TRUNCATED;
     assert(!dm_dualmerc_trial_replacement_complete(&r,gear,202,101,303,1,1,5));
     gear[1].status=DM_MERC_GEAR_OK;
@@ -183,6 +189,12 @@ int main(void) {
     c.old_gear_count = 1;
     assert(!dm_dualmerc_trial_keep_one(&c));
     c.old_gear_count = 0;
+    c.old_gear_fingerprint = 17;
+    assert(!dm_dualmerc_trial_keep_one(&c));
+    c.old_gear_fingerprint = 0;
+    c.new_gear_fingerprint = 19;
+    assert(!dm_dualmerc_trial_keep_one(&c));
+    c.new_gear_fingerprint = 0;
     c.old_gear_status = DM_MERC_GEAR_INVALID;
     assert(!dm_dualmerc_trial_keep_one(&c));
     c.old_gear_status = DM_MERC_GEAR_OK;

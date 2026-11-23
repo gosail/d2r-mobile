@@ -1832,6 +1832,35 @@ void dm_dualmerc_native_call(uint64_t *regs, int num) {
         int both = dm_dualmerc_trial_both_present(
             count, id0, id1, atomic_load(&g_dm_trial_hire_old),
             atomic_load(&g_dm_trial_hire_new));
+        /* A count+ID match alone can still contain the wrong Act or
+         * a dead candidate. Match the authorized preflight identity and
+         * exact native UNIT classes immediately after the link returns.
+         * No save/restore can proceed after a failed native mutation. */
+        if (g_dm_dualmerc_add.active) {
+            dm_dualmerc_roster after;
+            dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+            int n=dm_dualmerc_runtime_roster(G,player,&after,gear);
+            if (!g_dm_dualmerc_add.keep_seen ||
+                g_dm_dualmerc_add.G != G ||
+                g_dm_dualmerc_add.player != player ||
+                g_dm_dualmerc_add.original_id !=
+                    atomic_load(&g_dm_trial_hire_old) ||
+                g_dm_dualmerc_add.candidate_id !=
+                    atomic_load(&g_dm_trial_hire_new) ||
+                !both || n != DM_DUALMERC_SLOTS ||
+                !dm_dualmerc_trial_add_complete(
+                    &after,g_dm_dualmerc_add.original_id,
+                    g_dm_dualmerc_add.original_act,
+                    g_dm_dualmerc_add.original_dead,
+                    g_dm_dualmerc_add.candidate_id,
+                    g_dm_dualmerc_add.candidate_act))
+                die("DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误，终止实验避免错误存档");
+            g_dm_dualmerc_add.link_verified=1;
+        } else if (!both) {
+            /* This trace is only a diagnostic for non-ADD packets. No
+             * authorized second-hire mutation should reach here. */
+            die("DM_DUAL_MERC_TRIAL：未授权的第二佣兵绑定结果不一致");
+        }
         if (both) atomic_store(&g_dm_trial_verified_two_G, G);
         LOG("DM_DUAL_MERC_TRIAL：新佣兵绑定返回；旧ID%u 新ID%u，服务器宠物列表%u/%u（完整双人ID核对：%s）",
             atomic_load(&g_dm_trial_hire_old),

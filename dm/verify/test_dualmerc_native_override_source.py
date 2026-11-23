@@ -138,6 +138,39 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("atomic_store(&g_dm_trial_full_notice,5);", hire)
         self.assertIn("atomic_store(&g_dm_trial_full_notice,5);", pending)
 
+    def test_future_sidecar_commit_shares_atomic_fs_transaction(self):
+        fs = (ROOT / "host" / "hle_fs.c").read_text(encoding="utf-8")
+        header = (ROOT / "host" / "hle.h").read_text(encoding="utf-8")
+        self.assertIn(
+            "int (*g_dm_dualmerc_pre_commit_hook)(const char *workdir);", fs)
+        self.assertIn(
+            "extern int (*g_dm_dualmerc_pre_commit_hook)(const char *workdir);", header)
+        self.assertIn(
+            "void (*g_dm_pre_commit_hook[5])(const char *workdir);", fs)
+        commit = fs.split('HLE_FORCE("_ZN2nn2fs6CommitEPKc"', 1)[1].split(
+            'HLE_FORCE("_ZN2nn2fs7UnmountEPKc"', 1)[0]
+        self.assertLess(
+            commit.index("pthread_mutex_lock(&g_lock);"),
+            commit.index("if (g_dm_dualmerc_pre_commit_hook)"))
+        self.assertLess(
+            commit.index("if (g_dm_dualmerc_pre_commit_hook)"),
+            commit.index("int perr = atomic_exchange(&g_save_poison, 0);"))
+        self.assertIn("save_poison(err);", commit)
+        self.assertIn("if (perr) {", commit)
+        self.assertIn("return RES_FAIL;", commit)
+
+    def test_post_hire_inventory_must_still_be_empty(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        policy = (ROOT / "host" / "dm_dualmerc_trial.h").read_text(
+            encoding="utf-8")
+        self.assertIn("dm_dualmerc_trial_post_gear_empty(", policy)
+        self.assertEqual(source.count("dm_dualmerc_trial_add_complete("), 2)
+        self.assertEqual(source.count("dm_dualmerc_trial_replacement_complete("), 2)
+        self.assertIn("&after,gear,intent.original_id", source)
+        self.assertIn("&after,gear,g_dm_dualmerc_add.original_id", source)
+        self.assertIn("&after,ag,target_id,peer_id", source)
+        self.assertIn("&after,gear,g_dm_dualmerc_pending.target_id", source)
+
     def test_native_offer_checks_authoritative_table_prefix(self):
         source = SOURCE.read_text(encoding="utf-8")
         verify = source.split(

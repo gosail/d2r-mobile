@@ -202,7 +202,7 @@ static void atomic_equipment_ownership(void) {
     assert(!dm_dualmerc_state_gears_apply_verified(&s,NULL,1));
     /* A copy of the caller's own array is safe even with in-place alias. */
     assert(dm_dualmerc_state_gears_apply_verified(&s,s.slot,1));
-    assert(s.generation==unchanged.generation+1);
+    assert(!memcmp(&s,&unchanged,sizeof s)); /* No-op never rebinds. */
 }
 
 int main(void) {

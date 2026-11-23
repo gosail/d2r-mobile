@@ -17,6 +17,14 @@ typedef uint32_t Result;   // nn::Result：w0，0 = 成功 | nn::Result: w0, 0 =
 #define RES_OK 0u
 #define RES_FAIL 0x2A2u      // 通用失败（联网等被剪功能统一回这个） | Generic failure (cut features such as networking uniformly return this)
 
+/* Optional verified dual-merc pre-commit hook. NULL by default: the native
+ * second-merc persistence/restore ABI is not wired yet. Set only after the
+ * engine has independently proved both item owners and complete .d2s data.
+ * Runs inside the HLE FS commit lock; may use direct POSIX file I/O only.
+ * Return 0 for success or a positive errno for failure, which rejects the
+ * entire native save transaction instead of committing a partial sidecar. */
+extern int (*g_dm_dualmerc_pre_commit_hook)(const char *workdir);
+
 // 客体地址 → 宿主对象 旁表
 // Guest address → host object side table
 void *objmap_get(const void *guest);

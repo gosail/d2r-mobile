@@ -82,10 +82,13 @@ static inline int dm_dualmerc_trial_block_full(unsigned count) {
  * neither gold/item rollback nor persistence beyond this game session. */
 static inline int dm_dualmerc_trial_replacement_complete(
     const dm_dualmerc_roster *after,
-    uint32_t removed_id, uint32_t retained_id, unsigned new_act)
+    uint32_t removed_id, uint32_t retained_id,
+    unsigned retained_act, unsigned retained_dead, unsigned new_act)
 {
     if (!after || !dm_dualmerc_roster_valid(after) ||
         !dm_dualmerc_valid_act(new_act) ||
+        !dm_dualmerc_valid_act(retained_act) ||
+        retained_act == new_act || retained_dead > 1 ||
         removed_id == UINT32_MAX || retained_id == UINT32_MAX ||
         removed_id == retained_id) return 0;
     unsigned retained=0, inserted=0;
@@ -94,9 +97,11 @@ static inline int dm_dualmerc_trial_replacement_complete(
         if (!slot->occupied || slot->runtime_unit_id == UINT32_MAX ||
             slot->runtime_unit_id == removed_id) return 0;
         if (slot->runtime_unit_id == retained_id) {
-            /* An unrelated dead peer is allowed to remain registered,
-             * but it cannot silently become the new hire. */
-            if (slot->act == new_act) return 0;
+            /* The surviving native unit must also preserve its exact
+             * original Act and dead/alive state across the transaction.
+             * A dead peer occupies a slot, but may not mutate here. */
+            if (slot->act != retained_act ||
+                slot->dead != retained_dead) return 0;
             ++retained;
         } else {
             /* The new hire must be a fresh, living native unit. */

@@ -1130,7 +1130,7 @@ typedef struct {
     uint8_t packet[DM_DUALMERC_PACKET_BYTES];
     dm_merc_txn lease;
     uint32_t target_id, peer_id;
-    unsigned expected_act;
+    unsigned expected_act, peer_act, peer_dead;
     int active, native_override_seen;
 } dm_dualmerc_pending;
 static dm_dualmerc_pending g_dm_dualmerc_pending;
@@ -1456,6 +1456,8 @@ static int dm_dualmerc_hire_preflight(const uint64_t regs[31]) {
         g_dm_dualmerc_selected_act=offer.offered_act;
         g_dm_dualmerc_pending.target_id=g_dm_dualmerc_selected_id;
         g_dm_dualmerc_pending.peer_id=roster.slot[1-choice].runtime_unit_id;
+        g_dm_dualmerc_pending.peer_act=roster.slot[1-choice].act;
+        g_dm_dualmerc_pending.peer_dead=roster.slot[1-choice].dead;
         g_dm_dualmerc_pending.native_override_seen=0;
         LOG("DM_DUAL_MERC_TRIAL：同幕雇佣，只允许替换第%u名幕%u佣兵ID%u",
             choice+1,offer.offered_act,g_dm_dualmerc_selected_id);
@@ -1538,6 +1540,8 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
     uint32_t target_id=roster.slot[target].runtime_unit_id;
     uint32_t peer_id=roster.slot[1-target].runtime_unit_id;
     p->target_id=target_id; p->peer_id=peer_id;
+    p->peer_act=roster.slot[1-target].act;
+    p->peer_dead=roster.slot[1-target].dead;
     g_dm_dualmerc_selected_G=G;
     g_dm_dualmerc_selected_player=player;
     g_dm_dualmerc_selected_id=target_id;
@@ -1565,7 +1569,8 @@ static void dm_dualmerc_pending_tick(uint64_t G, uint64_t player) {
              * LIVE unit of the expected Act present, any list order. */
             int correct=n==DM_DUALMERC_SLOTS &&
                 dm_dualmerc_trial_replacement_complete(
-                    &after,target_id,peer_id,live.offered_act);
+                    &after,target_id,peer_id,p->peer_act,
+                    p->peer_dead,live.offered_act);
             LOG("DM_DUAL_MERC_TRIAL：选择替换完成，双人新幕/保留旧ID核验：%s",
                 correct ? "通过（仍需客户端和存档测试）" : "未通过，勿使用正式角色");
             if (!correct) {
@@ -2523,6 +2528,8 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
                     dm_dualmerc_trial_replacement_complete(
                         &after,g_dm_dualmerc_pending.target_id,
                         g_dm_dualmerc_pending.peer_id,
+                        g_dm_dualmerc_pending.peer_act,
+                        g_dm_dualmerc_pending.peer_dead,
                         g_dm_dualmerc_selected_act);
         LOG("DM_DUAL_MERC_TRIAL：同幕原生替换，旧佣兵消失、其他幕佣兵保留和新佣兵加入：%s",
             correct ? "通过（服务器状态）" : "未通过，不能视作双佣兵功能完成");

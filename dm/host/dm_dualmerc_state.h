@@ -148,6 +148,7 @@ static inline dm_dualmerc_roster dm_dualmerc_state_roster(const dm_dualmerc_save
         r.slot[i].act = m->act;
         r.slot[i].difficulty = m->difficulty;
         r.slot[i].dead = m->dead;
+        r.slot[i].monster_class = m->monster_class;
     }
     return r;
 }

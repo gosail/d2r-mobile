@@ -125,14 +125,17 @@ static inline int dm_dualmerc_trial_selected_target(
     const dm_dualmerc_roster *roster,
     const dm_merc_trace_gear gear[DM_DUALMERC_SLOTS],
     uint32_t selected_id, uint32_t peer_id, unsigned offered_act,
-    uint32_t candidate_class, unsigned *selected_slot)
+    uint32_t candidate_id, uint32_t candidate_class,
+    unsigned *selected_slot)
 {
     if (!roster || !gear || !selected_slot ||
         !dm_dualmerc_roster_valid(roster) ||
         !dm_dualmerc_valid_act(offered_act) ||
         dm_dualmerc_act_for_class(candidate_class) != offered_act ||
         selected_id == UINT32_MAX || peer_id == UINT32_MAX ||
-        selected_id == peer_id) return 0;
+        candidate_id == UINT32_MAX ||
+        selected_id == peer_id || candidate_id == selected_id ||
+        candidate_id == peer_id) return 0;
     int selected = -1, peer = -1;
     for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i) {
         const dm_dualmerc_slot *slot=&roster->slot[i];

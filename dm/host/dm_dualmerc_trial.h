@@ -83,7 +83,8 @@ static inline int dm_dualmerc_trial_post_gear_empty(
 {
     if (!gear) return 0;
     for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i)
-        if (gear[i].status != DM_MERC_GEAR_OK || gear[i].count)
+        if (gear[i].status != DM_MERC_GEAR_OK || gear[i].count ||
+            gear[i].fingerprint)
             return 0;
     return 1;
 }
@@ -98,7 +99,7 @@ static inline int dm_dualmerc_trial_candidate_empty(
     return candidate &&
         (candidate->status == DM_MERC_GEAR_ABSENT ||
          candidate->status == DM_MERC_GEAR_OK) &&
-        candidate->count == 0;
+        candidate->count == 0 && candidate->fingerprint == 0;
 }
 
 /* Verify a completed replacement by exact runtime IDs, independently of

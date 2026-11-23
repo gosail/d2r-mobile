@@ -184,3 +184,28 @@ GitHub Actions 的最近多次构建在任何步骤执行前失败，未生成�
 - 新增 `dm_dualmerc_trial_pet_pair`：从服务端宠物链上只读两枚精确单位 ID，并拒绝重复/非法 ID；只用于持续身份验证及原生 LINK 结果观察，不承担候选授权或装备归属操作。
 - 每帧客户端配对状态续验使用此轻量函数，不再在 25Hz 轮询中重复执行 `dm_dualmerc_runtime_roster` 的原生双背包扫描；雇佣前置、原生替换与 LINK 后对真实单位幕别/装备的深度复核保留不变。
 - 对当前 GitHub 分支读取源码并逐项核对 14 条结构性安全连接条件，14/14 符合；**未执行编译、CI、测试套件或 IPA 构建**，因此不代表真实运行通过。
+
+
+## 2026-11-23：P0/P1 原生装备事后核验、原子所有权和安全保存接口
+
+本轮继续修复前次 P0/P1 审查遗留缺陷，仍按用户要求**不恢复完整 CI、不编译 IPA**。修改仅存在于 PR #5 Draft 分支；未执行 C/Python 测试。
+
+### 已完成的可独立验证源码修复
+
+1. **Native ADD/REPLACE 后再次检查两套装备：**`dm_dualmerc_trial_post_gear_empty` 要求**两份**服务端佣兵库存记录都完整可读，且无装备物品。跨幕新增的 LINK、同步 C2S 返回、满两名弹窗选择替换、同幕直接替换四个出口都在核对实际 runtime UNIT ID 和幕别时检查两套装备；无法读取、库存不为空或状态异常则在可丢弃实验版 fail-stop。不会把异常物品移动误判为成功。
+2. **两名佣兵的装备归属原子更新纯逻辑：**`dm_dualmerc_state_gears_apply_verified` 接受两份完整、已由真实原生装备事务确认的后置快照；先比较幕别、难度、hireling row、等级、经验、存活等身份/进度不变，然后在副本上同时替换两份装备清单，拒绝重复稳定物品 ID、不合法部位及脏数据；成功才原子地替换内存 SWM2 状态并增加 generation、清空旧 .d2s 绑定，等下一次完整原生存盘后再重新绑定。不变的装备快照不会无故增加 generation。失败保留原状态。该接口**未接入原生装备按钮，不可用来假装已经能给两佣兵穿装备**。
+3. **统一文件事务保存扩展入口：**`dm/host/hle_fs.c` 新增可选 `g_dm_dualmerc_pre_commit_hook`，保留已被其他模块占用的五个 `g_dm_pre_commit_hook[5]` 槽位。回调（未来接通真实引擎保存快照后）在 HLE 存盘完整路径锁内使用 POSIX workdir I/O，可返回 errno；失败时通过 `save_poison` 阻断整个主存档/扩展档原子提交。默认 NULL；**尚未真正注册，也没有写出任何新 `.swmerc` 文件**。禁止在回调里重新调用受锁的 nn::fs API。
+4. **持久状态恢复前防复制：**新增 `dm_dualmerc_restore_plan_for_live`：只有 .d2s 原生佣兵已在当前游戏真正加载为且仅为一名、运行时 ID 有效、Act/死活与 SWM2 原生槽一致时，才允许返回“可以准备恢复另一个槽”的只读计划。若有双人、未知/重复 ID、Act 不符、死亡标志变化则拒绝；代码本身不创建任何佣兵或物品。
+5. **运行时腐败名册拒绝：**`dm_dualmerc_live_ids_valid` 拒绝两名不同幕佣兵复用相同 runtime UNIT ID、未知 ID 或不合法 dead 标记。纯保存槽不要求运行时 ID（重进游戏会变化）。`dm_dualmerc_runtime_roster`、native ADD/REPLACE 结果和恢复前置检查均使用此校验。
+6. **SWM2 文件写入错误类型纠正：**原 `dm_dualmerc_disk_save` 将未完成 .d2s 绑定的编码错误误报 `ENOMEM`。现明确区分真实内存分配失败、非法/未绑定状态 `EINVAL`、容量 `EOVERFLOW`，验证阶段禁止创建半成品扩展文件。
+7. 对应 `test_dualmerc_trial.c`、`test_dualmerc_state.c`、`test_dualmerc_disk.c`、`test_dualmerc_restore.c`、`test_dualmerc_policy.c` 和 `test_dualmerc_native_override_source.py` 已增加或更新测试断言。人工静态核对了 17 个代码接线条件，17/17 符合预期；**这些不是编译/单测通过的声明**。
+
+### 仍被原生引擎信息阻塞的真正 P0/P1
+
+- **P0：从真实 native 0x51/0x5b 装备操作提取每个佣兵的独立物品位流、稳定 item ID 和实际容器**：必须确认原生 ABI 与所有权回写，才能连接双套装备的 `gears_apply_verified`。目前有两名及以上佣兵时，仍禁止相关装备包。
+- **P0：第二佣兵实际退出重进恢复**：尚未找到经过验证的第二单位创建/原生雇佣属性、独立技能/经验/种子恢复接口；不能调用只读的 `restore_plan_for_live` 冒充创建。新的 FS 回调**默认未注册**，因此目前没有真实 sidecar 持久化。
+- **P0：原生金币扣除/已删佣兵的可逆回滚**：目前 fail-stop 不能恢复金币、角色或装备，也不能保证某些引擎动作之前完全无副作用。需要原生事务语义和可逆操作实证。
+- **P1：复活/跨区同步**：当前只读身份/死活检查、死亡佣兵占名额；没有独立复活的原生 C2S/控制 ABI，不能仅凭宠物列表猜测恢复命令。
+- **P1：Switch 3.3 Hireling 结构**：表头和 prefix 的部分字段仍基于旧版证据，真实 name/token/难度/技能 origin 尚待实际 Guest/日志校验，不修改未经证实的结构偏移。
+
+任何尝试都应继续使用可丢弃无装备离线角色；不要将此 Draft PR 当成能长期保存两名带装备佣兵的正式 MOD。

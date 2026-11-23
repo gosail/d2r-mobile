@@ -35,7 +35,7 @@ int main(void) {
     dm_dualmerc_roster live={0};
     live.slot[0]=(dm_dualmerc_slot){.occupied=1,.act=1,
         .difficulty=DM_DUALMERC_DIFFICULTY_UNKNOWN,
-        .runtime_unit_id=77,.dead=0};
+        .runtime_unit_id=77,.monster_class=271,.dead=0};
     assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
            ==DM_DUALMERC_RESTORE_SECOND && chosen==1);
     live.slot[1]=(dm_dualmerc_slot){.occupied=1,.act=2,
@@ -47,6 +47,10 @@ int main(void) {
     assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
            ==DM_DUALMERC_RESTORE_REJECT);
     live.slot[0].act=1;
+    live.slot[0].monster_class=338; /* Wrong native class, even if same Act. */
+    assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
+           ==DM_DUALMERC_RESTORE_REJECT);
+    live.slot[0].monster_class=271;
     live.slot[0].dead=1;
     assert(dm_dualmerc_restore_plan_for_live(s,&a,&live,&chosen)
            ==DM_DUALMERC_RESTORE_REJECT);

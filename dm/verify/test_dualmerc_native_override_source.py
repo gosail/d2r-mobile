@@ -102,7 +102,7 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
     def test_replace_requires_exact_new_unit_and_refreshes_client(self):
         source = SOURCE.read_text(encoding="utf-8")
         self.assertEqual(source.count("dm_dualmerc_trial_replacement_complete("), 2)
-        self.assertIn("g_dm_dualmerc_pending.candidate_id=candidate_id;", source)
+        self.assertIn("g_dm_dualmerc_pending.candidate_id = candidate_id;", source)
         self.assertIn("p->candidate_id,\n                    p->peer_act", source)
         self.assertIn("g_dm_dualmerc_pending.candidate_id,", source)
         self.assertEqual(source.count("dm_dualmerc_track_client_pair("), 3)

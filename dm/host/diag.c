@@ -2604,6 +2604,32 @@ void c2s_deliver(uint64_t *regs) {   // svc #0x81：收包泵 → 0x632510(包, 
       if (m && in_game() && regs[1] == 17 && tk_rd(regs[0], in, sizeof in) && in[4] == 0x16) { memcpy(&pk_id, in + 5, 4); uint64_t u = dm_diag_srv_item(pk_id);
           if (u) { pk_code = ((uint32_t (*)(uint64_t))(m->base + 0x570260))(u); pk_auto = dm_potpick_auto(pk_id); } else pk_id = 0; } }
     recv(regs[0], regs[1], regs[2], regs[3]);
+    /* A single-second-hire transaction ends at this exact receive-pump
+     * dispatch. An unverified native Hook cannot be silently ignored if
+     * the original merc has already disappeared or a second has appeared.
+     * A harmless rejected purchase (e.g. insufficient gold) may leave
+     * the exact original one-merc roster untouched. */
+    if (g_dm_dualmerc_add.active) {
+        dm_dualmerc_add_intent intent=g_dm_dualmerc_add;
+        dm_dualmerc_roster after;
+        dm_merc_trace_gear gear[DM_DUALMERC_SLOTS];
+        int count=dm_dualmerc_runtime_roster(intent.G,intent.player,
+                                            &after,gear);
+        if (intent.keep_seen) {
+            if (!intent.link_verified || count != DM_DUALMERC_SLOTS ||
+                !dm_dualmerc_trial_add_complete(
+                    &after,intent.original_id,intent.original_act,
+                    intent.original_dead,intent.candidate_id,
+                    intent.candidate_act))
+                die("DM_DUAL_MERC_TRIAL：跨幕新增未完成精确双佣兵绑定，停止实验避免覆盖旧佣兵");
+        } else if (count != 1 || !after.slot[0].occupied ||
+                   after.slot[0].runtime_unit_id != intent.original_id ||
+                   after.slot[0].act != intent.original_act ||
+                   after.slot[0].dead != intent.original_dead) {
+            die("DM_DUAL_MERC_TRIAL：原生未执行保留Hook但佣兵已变化，禁止保存异常事务");
+        }
+        memset(&g_dm_dualmerc_add,0,sizeof g_dm_dualmerc_add);
+    }
     /* Direct same-Act replacement is synchronous. Never let its selected
      * target leak into the next game command or another NPC transaction. */
     if (g_dm_dualmerc_selected_G == g_lastG &&

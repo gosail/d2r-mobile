@@ -74,6 +74,20 @@ static inline int dm_dualmerc_trial_block_full(unsigned count) {
     return count >= DM_DUALMERC_SLOTS;
 }
 
+/* A completed disposable native hire must NOT silently move one equipped
+ * item between the old and new hireling. Require complete readable, EMPTY
+ * inventories after the native mutation as well as before it. These are
+ * runtime-only checks; they do not prove durable item ownership. */
+static inline int dm_dualmerc_trial_post_gear_empty(
+    const dm_merc_trace_gear gear[DM_DUALMERC_SLOTS])
+{
+    if (!gear) return 0;
+    for (unsigned i=0; i<DM_DUALMERC_SLOTS; ++i)
+        if (gear[i].status != DM_MERC_GEAR_OK || gear[i].count)
+            return 0;
+    return 1;
+}
+
 /* Verify a completed replacement by exact runtime IDs, independently of
  * native pet linked-list order. Count alone is insufficient: the original
  * selected ID must be gone, the other merc must still be present, and a
@@ -83,10 +97,12 @@ static inline int dm_dualmerc_trial_block_full(unsigned count) {
  * neither gold/item rollback nor persistence beyond this game session. */
 static inline int dm_dualmerc_trial_replacement_complete(
     const dm_dualmerc_roster *after,
+    const dm_merc_trace_gear gear[DM_DUALMERC_SLOTS],
     uint32_t removed_id, uint32_t retained_id, uint32_t expected_new_id,
     unsigned retained_act, unsigned retained_dead, unsigned new_act)
 {
     if (!after || !dm_dualmerc_roster_valid(after) ||
+        !dm_dualmerc_trial_post_gear_empty(gear) ||
         !dm_dualmerc_valid_act(new_act) ||
         !dm_dualmerc_valid_act(retained_act) ||
         retained_act == new_act || retained_dead > 1 ||
@@ -123,10 +139,12 @@ static inline int dm_dualmerc_trial_replacement_complete(
  * check, not a durable save or ownership transfer. */
 static inline int dm_dualmerc_trial_add_complete(
     const dm_dualmerc_roster *after,
+    const dm_merc_trace_gear gear[DM_DUALMERC_SLOTS],
     uint32_t original_id, unsigned original_act, unsigned original_dead,
     uint32_t candidate_id, unsigned candidate_act)
 {
     if (!after || !dm_dualmerc_roster_valid(after) ||
+        !dm_dualmerc_trial_post_gear_empty(gear) ||
         original_id == UINT32_MAX || candidate_id == UINT32_MAX ||
         original_id == candidate_id ||
         !dm_dualmerc_valid_act(original_act) ||

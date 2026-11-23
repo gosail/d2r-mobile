@@ -211,6 +211,16 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("&after,ag,target_id,peer_id", source)
         self.assertIn("&after,gear,g_dm_dualmerc_pending.target_id", source)
 
+    def test_native_add_and_replacement_require_same_monster_classes(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn("slot->monster_class = cls;", source)
+        self.assertIn("g_dm_dualmerc_pending.candidate_class = candidate_cls;", source)
+        self.assertIn("g_dm_dualmerc_add.candidate_class=new_cls;", source)
+        self.assertIn("old_class != g_dm_dualmerc_add.original_class", source)
+        self.assertEqual(
+            source.count("dm_dualmerc_trial_classes_preserved("), 4)
+        self.assertIn("after.slot[0].monster_class != intent.original_class", source)
+
     def test_native_offer_checks_authoritative_table_prefix(self):
         source = SOURCE.read_text(encoding="utf-8")
         verify = source.split(

@@ -42,7 +42,7 @@ static inline dm_merc_txn_status dm_merc_txn_begin(
     memset(t, 0, sizeof *t);
     if (!offer.game_session || offer.owner_id == UINT32_MAX ||
         offer.npc_id == UINT32_MAX || offer.hire_row == UINT32_MAX ||
-        !r || !dm_dualmerc_roster_valid(r)) return DM_MERC_TXN_REJECT;
+        !r || !dm_dualmerc_live_ids_valid(r)) return DM_MERC_TXN_REJECT;
     dm_dualmerc_decision p = dm_dualmerc_plan(r,offer.offered_act,
                                               offer.difficulty);
     if (p.action == DM_DUALMERC_REJECT) return DM_MERC_TXN_REJECT;
@@ -90,7 +90,7 @@ static inline int dm_merc_txn_authorize(
         t->offer.hire_row != live->hire_row ||
         t->offer.offered_act != live->offered_act ||
         t->offer.difficulty != live->difficulty ||
-        !dm_dualmerc_roster_valid(current)) {
+        !dm_dualmerc_live_ids_valid(current)) {
         dm_merc_txn_cancel(t); return 0;
     }
     /* Native pet-list insertion can reorder the two nodes while an iPad

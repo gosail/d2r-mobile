@@ -128,7 +128,7 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("g_dm_dualmerc_add.keep_seen", link)
         self.assertIn("g_dm_dualmerc_add.candidate_id", link)
         self.assertIn("dm_dualmerc_trial_add_complete(", link)
-        self.assertIn("die(\"DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误", link)
+        self.assertIn("dm_dualmerc_trial_abort(\"DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误", link)
 
     def test_replace_requires_exact_new_unit_and_refreshes_client(self):
         source = SOURCE.read_text(encoding="utf-8")
@@ -249,27 +249,38 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("return 0;", first)
         self.assertNotIn("return 1;", first)
 
+    def test_all_native_fail_stops_poison_save_before_abort(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        fn = source.split(
+            "static void dm_dualmerc_trial_abort(", 1)[1].split(
+            "/* This code is present ONLY", 1)[0]
+        self.assertLess(fn.index("dm_fs_save_poison(EIO);"),
+                        fn.index('die("%s",reason);'))
+        self.assertNotIn('die("DM_DUAL_MERC_TRIAL', source)
+        self.assertGreaterEqual(
+            source.count('dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL'), 15)
+
     def test_failed_post_hire_confirmation_aborts_trial(self):
         source = SOURCE.read_text(encoding="utf-8")
         pending = source.split(
             "static void dm_dualmerc_pending_tick(", 1)[1].split(
             "static void dm_dualmerc_native_lookup(", 1)[0]
         self.assertIn(
-            'die("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询', pending
+            'dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：原生替换未经过选定单位查询', pending
         )
         self.assertIn(
-            'die("DM_DUAL_MERC_TRIAL：替换后身份未通过校验', pending
+            'dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：替换后身份未通过校验', pending
         )
         self.assertIn(
-            'die("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配',
+            'dm_dualmerc_trial_abort("DM_DUAL_MERC_TRIAL：同幕替换后另一佣兵或新佣兵不匹配',
             source
         )
 
     def test_failure_must_not_fall_back_to_unselected_native_unit(self):
         code = self.selected
-        self.assertIn("die(\"DM_DUAL_MERC_TRIAL", code)
+        self.assertIn("dm_dualmerc_trial_abort(\"DM_DUAL_MERC_TRIAL", code)
         self.assertLess(
-            code.index("die(\"DM_DUAL_MERC_TRIAL"),
+            code.index("dm_dualmerc_trial_abort(\"DM_DUAL_MERC_TRIAL"),
             code.rindex("return;")
         )
         self.assertNotIn("regs[0] = old_unit", code)

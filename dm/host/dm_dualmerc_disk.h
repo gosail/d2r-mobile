@@ -62,9 +62,16 @@ static inline int dm_dualmerc_disk_save(const char *workdir, const char *name,
     int dir = dm_dualmerc_disk_dir(workdir, name);
     if (dir < 0) return -1;
     uint8_t *buf = malloc(DM_DUALMERC_STATE_BYTES_MAX);
+    if (!buf) { int saved=errno; close(dir); errno=saved; return -1; }
     size_t n = 0;
-    if (!buf || dm_dualmerc_state_encode(state, buf, DM_DUALMERC_STATE_BYTES_MAX, &n)) {
-        free(buf); close(dir); errno = ENOMEM; return -1;
+    dm_dualmerc_codec_result codec=dm_dualmerc_state_encode(
+        state,buf,DM_DUALMERC_STATE_BYTES_MAX,&n);
+    if (codec != DM_DUALMERC_CODEC_OK) {
+        free(buf); close(dir);
+        /* A missing native .d2s binding is an integrity/precondition error
+         * rather than allocation failure. Never create a partial sidecar. */
+        errno=codec == DM_DUALMERC_CODEC_CAPACITY ? EOVERFLOW : EINVAL;
+        return -1;
     }
     char file[128], tmp[140];
     int a = snprintf(file, sizeof file, "%s.swmerc", name);

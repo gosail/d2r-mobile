@@ -109,6 +109,19 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("撤销此前客户端验证", source)
         self.assertIn("atomic_store(&g_dm_trial_verified_client,0);", source)
 
+    def test_client_tick_pair_validation_is_read_only_and_cheap(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        tracker = source.split("static int dm_dualmerc_trial_pet_pair(", 1)[1].split(
+            "/* The NPC picker is an optional iOS-only frontend", 1)[0]
+        self.assertIn("dm_dualmerc_trial_pet_nodes(player,&first)", tracker)
+        self.assertIn("a==UINT32_MAX || b==UINT32_MAX || a==b", tracker)
+        tick = source.split(
+            "/* Server identity may change on death, area transition", 1)[1].split(
+            "/* A running simulation frame MUST NOT execute", 1)[0]
+        self.assertIn("dm_dualmerc_trial_pet_pair(player,&id0,&id1)", tick)
+        self.assertNotIn("dm_dualmerc_runtime_roster(", tick)
+        self.assertIn("atomic_store(&g_dm_trial_verified_client,0);", tick)
+
     def test_dead_mercanary_fails_before_native_replacement(self):
         source = SOURCE.read_text(encoding="utf-8")
         hire = source.split(

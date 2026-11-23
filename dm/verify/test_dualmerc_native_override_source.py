@@ -71,6 +71,44 @@ class TestNativeSelectedMercFailStop(unittest.TestCase):
         self.assertIn("g_dm_dualmerc_pending.peer_act,", source)
         self.assertIn("g_dm_dualmerc_pending.peer_dead,", source)
 
+    def test_second_hire_cannot_silently_replace_original(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        preflight = source.split("static int dm_dualmerc_hire_preflight(", 1)[1].split(
+            "static void dm_dualmerc_pending_tick(", 1)[0]
+        lookup = self.lookup
+        dispatch = source.split(
+            "    recv(regs[0], regs[1], regs[2], regs[3]);", 1)[1].split(
+            "/* Direct same-Act replacement is synchronous.", 1)[0]
+        self.assertIn("g_dm_dualmerc_add=(dm_dualmerc_add_intent)", preflight)
+        self.assertIn("if (!g_dm_dualmerc_add.active) return;", lookup)
+        self.assertIn("g_dm_dualmerc_add.keep_seen=1;", lookup)
+        self.assertIn("g_dm_dualmerc_add.candidate_id=new_id;", lookup)
+        self.assertIn("禁止回落原版替换", lookup)
+        self.assertIn("if (g_dm_dualmerc_add.active)", dispatch)
+        self.assertIn("!intent.link_verified", dispatch)
+        self.assertIn("dm_dualmerc_trial_add_complete(", dispatch)
+        self.assertIn("memset(&g_dm_dualmerc_add,0", dispatch)
+
+    def test_native_second_hire_link_rejects_wrong_identity(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        link = source.split(
+            "if (num == SVC_HOST_DUALMERC_LINK && G &&", 1)[1].split(
+            "static void hud_tick(", 1)[0]
+        self.assertIn("g_dm_dualmerc_add.keep_seen", link)
+        self.assertIn("g_dm_dualmerc_add.candidate_id", link)
+        self.assertIn("dm_dualmerc_trial_add_complete(", link)
+        self.assertIn("die(\"DM_DUAL_MERC_TRIAL：第二名原生绑定后身份错误", link)
+
+    def test_replace_requires_exact_new_unit_and_refreshes_client(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertEqual(source.count("dm_dualmerc_trial_replacement_complete("), 2)
+        self.assertIn("g_dm_dualmerc_pending.candidate_id=candidate_id;", source)
+        self.assertIn("p->candidate_id,\n                    p->peer_act", source)
+        self.assertIn("g_dm_dualmerc_pending.candidate_id,", source)
+        self.assertEqual(source.count("dm_dualmerc_track_client_pair("), 3)
+        self.assertIn("撤销此前客户端验证", source)
+        self.assertIn("atomic_store(&g_dm_trial_verified_client,0);", source)
+
     def test_dead_mercanary_fails_before_native_replacement(self):
         source = SOURCE.read_text(encoding="utf-8")
         hire = source.split(

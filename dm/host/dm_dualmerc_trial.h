@@ -182,6 +182,34 @@ static inline int dm_dualmerc_trial_add_complete(
     return have_old == 1 && have_new == 1;
 }
 
+/* The exact original and candidate UNIT classes must also survive
+ * the native hire. "Same Act" is not enough: Act V has two different
+ * barbarian monster classes (560/561). IDs are session-local; neither
+ * field may be used as a persistent hireling identity on disk. */
+static inline int dm_dualmerc_trial_classes_preserved(
+    const dm_dualmerc_roster *after,
+    uint32_t retained_id, uint32_t retained_class,
+    uint32_t candidate_id, uint32_t candidate_class)
+{
+    if (!after || !dm_dualmerc_live_ids_valid(after) ||
+        retained_id == UINT32_MAX || candidate_id == UINT32_MAX ||
+        retained_id == candidate_id ||
+        !dm_dualmerc_valid_act(dm_dualmerc_act_for_class(retained_class)) ||
+        !dm_dualmerc_valid_act(dm_dualmerc_act_for_class(candidate_class)))
+        return 0;
+    unsigned seen=0;
+    for (unsigned i=0;i<DM_DUALMERC_SLOTS;i++) {
+        const dm_dualmerc_slot *slot=&after->slot[i];
+        if (!slot->occupied) return 0;
+        if (slot->runtime_unit_id == retained_id &&
+            slot->monster_class == retained_class) seen |= 1u;
+        else if (slot->runtime_unit_id == candidate_id &&
+                 slot->monster_class == candidate_class) seen |= 2u;
+        else return 0;
+    }
+    return seen == 3u;
+}
+
 /* A native singleton getpet call is about to unlink ONE of the two units.
  * Before overriding that result, establish exact target AND surviving peer
  * identities, both inventories' empty/verified status, target liveness and

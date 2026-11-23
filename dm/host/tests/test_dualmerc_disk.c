@@ -38,6 +38,13 @@ int main(void) {
     /* After a successful native hire, SWM2 must initially be provisional.
      * No sidecar may appear until the SAME exact native save is checked. */
     assert(dm_dualmerc_state_valid(s));
+    errno=0;
+    assert(dm_dualmerc_disk_save(root,"Hero",s)==-1);
+    assert(errno==EINVAL); /* Cannot mistake unbound save for OOM. */
+    char missing_sidecar[512];
+    assert(snprintf(missing_sidecar,sizeof missing_sidecar,
+                    "%s/Hero.swmerc",hero)<(int)sizeof missing_sidecar);
+    assert(access(missing_sidecar,F_OK)==-1 && errno==ENOENT);
     assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",s,0)==-1);
     assert(!s->native_d2s_checksum && !s->native_seed);
     assert(dm_dualmerc_disk_bind_save_after_native(root,"Hero",s,1)==-1);

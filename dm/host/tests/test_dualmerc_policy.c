@@ -4,7 +4,7 @@
 #include <string.h>
 static dm_dualmerc_slot merc(unsigned act, unsigned difficulty, unsigned dead) {
     dm_dualmerc_slot s = {1, (uint8_t)act, (uint8_t)difficulty,
-                          (uint8_t)dead, 100 + act};
+                          (uint8_t)dead, 100 + act, 0};
     return s;
 }
 int main(void) {

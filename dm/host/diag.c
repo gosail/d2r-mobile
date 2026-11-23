@@ -1182,7 +1182,11 @@ static int dm_dualmerc_runtime_roster(uint64_t G, uint64_t player,
         dm_dualmerc_slot *slot = &out->slot[i];
         slot->occupied = 1;
         slot->act = (uint8_t)act;
-        slot->difficulty = 0; /* Hire origin Act is authoritative, difficulty immaterial. */
+        /* The live pet node does not expose a verified hire-origin
+         * difficulty. Never pretend it was Normal; the Act-only slot rule
+         * does not require guessing this value.  A future native Hireling
+         * identity decoder may replace UNKNOWN with an observed 0..2. */
+        slot->difficulty = DM_DUALMERC_DIFFICULTY_UNKNOWN;
         slot->dead = !dm_dualmerc_trial_mode_live(mode);
         slot->runtime_unit_id = id;
         dm_merc_probe_inventory(unit, &gear[i]);

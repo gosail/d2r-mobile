@@ -205,11 +205,57 @@ static void atomic_equipment_ownership(void) {
     assert(!memcmp(&s,&unchanged,sizeof s)); /* No-op never rebinds. */
 }
 
+static void independent_lifecycle(void) {
+    assert(dm_dualmerc_state_valid(&s));
+    unsigned slot=1;
+    uint32_t level=s.slot[slot].level, xp=s.slot[slot].experience;
+    unchanged=s;
+    assert(!dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,1,level,xp,0));
+    assert(!memcmp(&s,&unchanged,sizeof s));
+    assert(dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,1,level,xp,1));
+    assert(s.slot[slot].dead==1 && s.slot[slot].occupied);
+    assert(!memcmp(&s.slot[0],&unchanged.slot[0],sizeof s.slot[0]));
+    assert(s.generation==unchanged.generation+1);
+    assert(s.native_seed==0 && s.native_d2s_checksum==0);
+    /* A dead hireling still occupies its Act slot, in every difficulty. */
+    assert(dm_dualmerc_state_valid(&s));
+    assert(dm_dualmerc_plan(&(dm_dualmerc_roster){
+        .slot={
+            {.occupied=1,.act=s.slot[0].act},
+            {.occupied=1,.act=s.slot[1].act,.dead=s.slot[1].dead}
+        }
+    },s.slot[1].act,2).action==DM_DUALMERC_REPLACE_SAME_ACT);
+    unchanged=s;
+    assert(!dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,0,level-1,xp,1));
+    assert(!dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,0,level,xp-1,1));
+    assert(!dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,2,level,xp,1));
+    assert(!dm_dualmerc_state_lifecycle_apply_verified(
+        &s,DM_DUALMERC_SLOTS,0,level,xp,1));
+    assert(!memcmp(&s,&unchanged,sizeof s));
+    assert(dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,0,level+1,xp+100,1));
+    assert(s.slot[slot].dead==0 && s.slot[slot].level==level+1 &&
+           s.slot[slot].experience==xp+100);
+    assert(!memcmp(&s.slot[0],&unchanged.slot[0],sizeof s.slot[0]));
+    assert(!memcmp(s.slot[slot].gear,unchanged.slot[slot].gear,
+                   sizeof s.slot[slot].gear));
+    unchanged=s;
+    assert(dm_dualmerc_state_lifecycle_apply_verified(
+        &s,slot,0,level+1,xp+100,1));
+    assert(!memcmp(&s,&unchanged,sizeof s)); /* no-op preserves binding */
+}
+
 int main(void) {
     empty_and_corruption();
     recruit_and_replace();
     roundtrip_and_limits();
     atomic_equipment_ownership();
+    independent_lifecycle();
     puts("dual mercenary roster persistence, checksum and independent gear: passed");
     return 0;
 }
